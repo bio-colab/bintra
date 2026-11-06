@@ -1,0 +1,29 @@
+{
+  "name": "probe_activation_trace",
+  "description": "Probe dynamic token activations and internal residual states during inference on a diagnostic prompt. Detects loop attractors, attention spikes, and anomalous firing rates to locate the malfunctioning circuit prior to patching.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Absolute filesystem path to the model."
+      },
+      "prompt": {
+        "type": "string",
+        "description": "Diagnostic prompt that triggers the anomalous model behavior."
+      },
+      "target_layers": {
+        "type": "array",
+        "items": { "type": "integer" },
+        "description": "List of layer indices to hook and observe."
+      },
+      "max_tokens": {
+        "type": "integer",
+        "default": 32,
+        "description": "Maximum tokens to execute for trace capture."
+      }
+    },
+    "required": ["path", "prompt"],
+    "additionalProperties": false
+  }
+}

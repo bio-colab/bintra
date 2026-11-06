@@ -1,0 +1,27 @@
+{
+  "name": "rea-neural",
+  "version": "7.0.0-neural.1",
+  "description": "Continuous Semantic Reverse Engineering & Binary Analysis Framework. Extends REA to continuous semantic program representations, deobfuscation, cross-architecture matching, surgical binary patching, and weight-space programming.",
+  "main": "src/cli.py",
+  "bin": {
+    "rea-neural": "src/cli.py"
+  },
+  "scripts": {
+    "test": "python -m unittest discover -s tests"
+  },
+  "keywords": [
+    "reverse-engineering",
+    "deobfuscation",
+    "binary-analysis",
+    "cross-architecture",
+    "binary-patching",
+    "weight-space-programming",
+    "hybrid-binaries",
+    "rea"
+  ],
+  "author": "Antigravity Research & REA Contributors",
+  "license": "Apache-2.0",
+  "engines": {
+    "python": ">=3.10.0"
+  }
+}

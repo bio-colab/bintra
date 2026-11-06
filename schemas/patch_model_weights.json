@@ -1,0 +1,32 @@
+{
+  "name": "patch_model_weights",
+  "description": "Apply a gradient-free surgical binary patch to a safetensors model file on disk. Modifies target weights using rank-1 nullification, sparse clamping, or subspace projection without full backpropagation. Outputs a new verified artifact with updated cryptographic hashes and diff metrics.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "source_path": {
+        "type": "string",
+        "description": "Absolute filesystem path to the input model file."
+      },
+      "output_path": {
+        "type": "string",
+        "description": "Absolute filesystem path where the patched model file will be written."
+      },
+      "tensor_name": {
+        "type": "string",
+        "description": "Target tensor name to patch."
+      },
+      "patch_operation": {
+        "type": "string",
+        "enum": ["rank_1_nullify", "sparse_clamp", "subspace_zero", "vector_add"],
+        "description": "The surgical operation to execute."
+      },
+      "parameters": {
+        "type": "object",
+        "description": "Parameters for the operation (e.g. damping factor alpha, vector index, or coordinate thresholds)."
+      }
+    },
+    "required": ["source_path", "output_path", "tensor_name", "patch_operation"],
+    "additionalProperties": false
+  }
+}

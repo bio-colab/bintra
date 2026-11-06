@@ -1,0 +1,28 @@
+{
+  "name": "decompile_weight_circuit",
+  "description": "Mechanistically decompile an attention head, MLP projection block, or residual connection from continuous weight matrices into high-level symbolic pseudocode and circuit classifications (e.g., Induction Head, Suppression Head, Memory Slot).",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Absolute filesystem path to the model artifact."
+      },
+      "layer_index": {
+        "type": "integer",
+        "description": "Zero-indexed transformer layer number to decompile."
+      },
+      "circuit_type": {
+        "type": "string",
+        "enum": ["attention_head", "mlp_projection", "layer_norm_drift"],
+        "description": "The circuit component to decompile."
+      },
+      "head_index": {
+        "type": "integer",
+        "description": "Specific attention head index (when circuit_type is attention_head)."
+      }
+    },
+    "required": ["path", "layer_index", "circuit_type"],
+    "additionalProperties": false
+  }
+}

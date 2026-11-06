@@ -1,0 +1,29 @@
+{
+  "name": "verify_neural_behavior",
+  "description": "Perform regression verification between baseline and patched model artifacts. Measures behavioral drift, validates resolution of targeted pathology, computes Lipschitz energy bounds, and produces an REA-compatible Evidence record.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "baseline_path": {
+        "type": "string",
+        "description": "Path to original unpatched model."
+      },
+      "patched_path": {
+        "type": "string",
+        "description": "Path to patched model."
+      },
+      "tolerance": {
+        "type": "number",
+        "default": 0.005,
+        "description": "Maximum allowable relative Frobenius weight perturbation (default 0.5%)."
+      },
+      "benchmark_cases": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Optional list of test cases to verify failure elimination."
+      }
+    },
+    "required": ["baseline_path", "patched_path"],
+    "additionalProperties": false
+  }
+}

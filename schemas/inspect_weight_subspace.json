@@ -1,0 +1,30 @@
+{
+  "name": "inspect_weight_subspace",
+  "description": "Extract and inspect low-rank SVD singular modes, dominant directional vectors, or coordinate extreme blocks of a specific tensor within a safetensors or GGUF file using memory mapping. Never loads full model into memory. Returns compact singular values, directional vectors, and an authenticated Evidence record.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Absolute filesystem path to the local .safetensors or .gguf model file."
+      },
+      "tensor_name": {
+        "type": "string",
+        "description": "Exact tensor name to inspect, e.g. 'model.layers.14.self_attn.o_proj.weight'."
+      },
+      "mode": {
+        "type": "string",
+        "enum": ["svd_modes", "sparse_extremes", "coordinate_slice"],
+        "default": "svd_modes",
+        "description": "Subspace extraction mode."
+      },
+      "top_k": {
+        "type": "integer",
+        "default": 16,
+        "description": "Number of dominant singular modes or extreme values to extract (max 64)."
+      }
+    },
+    "required": ["path", "tensor_name"],
+    "additionalProperties": false
+  }
+}

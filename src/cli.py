@@ -45,11 +45,8 @@ def main():
 
     cmd = sys.argv[1]
     if cmd in BINARY_COMMANDS:
-        # Re-route to binary engine
-        sys.argv.pop(0) # remove cli.py, sys.argv[0] becomes command
         binary_neural_engine.main()
     elif cmd in WEIGHT_COMMANDS:
-        sys.argv.pop(0)
         rea_neural_engine.main()
     else:
         print(f"Unknown command '{cmd}'. Run 'cli.py help' for usage.")

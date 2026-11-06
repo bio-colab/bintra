@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rea-neural"
+version = "7.0.0.post1"
+authors = [
+  { name="bio-colab", email="contact@bio-colab.org" },
+]
+description = "Agent-native continuous semantic reverse engineering and binary analysis framework (Fork of REA for Windows PE/DLL binaries)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Security",
+    "Topic :: Software Development :: Disassemblers",
+]
+dependencies = [
+    "numpy>=1.24.0",
+]
+
+[project.scripts]
+rea-neural = "cli:main"

@@ -40,6 +40,70 @@ Rather than treating Ghidra as a detached external decompiler, `REA-Neural` esta
 
 ---
 
+## The 10 Metaphorical Senses Framework (Cybernetic Program Perception)
+
+To unify diverse binary and neural analysis modalities into a cohesive cognitive architecture, `REA-Neural` introduces the **10 Metaphorical Senses (`SensoryCortex`)**. Inspired by biological sensorimotor systems, these senses map complex reverse engineering tasks into continuous perceptual channels:
+
+| # | Sense (Arabic / English) | Cybernetic Biological Metaphor | Technical Realization in REA-Neural | Telemetry & Measurement |
+|:---:|:---|:---|:---|:---|
+| **1** | **البصر التحليلي**<br>`Analytical Vision` | Static spatial perception of anatomy and structural form. | Deep inspection of PE32/PE32+ headers, section geometry, mitigations (ASLR, DEP, CFG), and singular value spectral decay. | Sections discovered, mitigation vector, SVD spectral energy decay. |
+| **2** | **السمع الزمني**<br>`Temporal Hearing` | Sequential listening to acoustic cadences and rhythms over time. | Tracing instruction transition sequences, activation progression over execution steps, and control transition density. | Decoded instruction steps, temporal transition count, transition density $\Delta t$. |
+| **3** | **اللمس النشط**<br>`Active Touch` | Physical palpation, tactile probing, and physical intervention. | Surgical byte patching on disk, selective column direction subtraction (`column_direction_subtract`), and Lipschitz perturbation probing. | Supported patch operations, perturbation delta $\| \Delta W \|_F$, Lipschitz bound. |
+| **4** | **الشم الاستكشافي**<br>`Exploratory Smell` | Detecting distant chemical scents, pheromones, and invisible traces. | Sniffing algebraic opaque predicates, scanning embedded neural inference containers (ONNX, DirectML), and computing Shannon byte entropy. | Opaque predicates detected, embedded AI assets, Shannon entropy (bits/byte). |
+| **5** | **الذوق التمييزي**<br>`Discriminative Taste` | Chemical taste discrimination of nutrients vs. toxic non-food noise. | Discriminating genuine executable machine code from random byte noise, validating x64 REX cross-register zeroing, and P-code semantics. | Signal-to-noise ratio, valid code classification, cross-register false-positive rejection. |
+| **6** | **الحس العميق**<br>`Deep Proprioception` | Internal awareness of body posture, joint angles, and balance. | Instruction-boundary stack frame tracking ($\Delta RSP / RBP$), frame-altering opcode accounting, and pre-surgery amenability awareness. | Cumulative stack delta bytes, frame-altering op count, boundary alignment. |
+| **7** | **حس المكان**<br>`Spatial Sense` | Spatial orientation, mental coordinate projection, and mapping. | Bidirectional virtual coordinate projection ($RVA \leftrightarrow 	ext{File Offset}$), section boundary alignment, and multidimensional tensor slicing. | Coordinate slicing active, RVA-to-Offset spatial mapping accuracy. |
+| **8** | **التوازن الدهليزي**<br>`Vestibular Balance` | Inner-ear equilibrium, posture maintenance, and upright stability. | PE integrity Checksum recalculation, Frobenius norm equilibrium bounds, and the Keep-on-Improvement rollback gate. | PE Checksum sync engine, Frobenius safety threshold, rollback barrier. |
+| **9** | **الألم المجازي**<br>`Metaphorical Pain (Nociception)` | Protective reflex to noxious stimuli preventing tissue damage. | Pre-mutation hazard reflex that halts execution on stack-destroying patches, DEP section violations, in-place file truncation, or unamenable edits. | Overwrite safety boolean, nociceptive diagnosis, safety reflex triggers. |
+| **10** | **الإحساس بالإيقاع**<br>`Sense of Rhythm (Chronoception)` | Perceiving harmonic cadence, beat intervals, and periodicity. | Measuring dispatcher switch cadence regularity in flattened control flow (CFF), and lag-4 autocorrelation in byte streams. | Dispatcher regularity metric, CFF rhythm detection, byte autocorrelation. |
+
+---
+
+## MIT CSAIL Research Lineage & Latent Experimental Capabilities
+
+`REA-Neural` directly incorporates and adapts the foundational experiments from MIT CSAIL's research:  
+*"Sparks of Weight-Space Programming: LLMs can natively read & write neural network weights"*, by Rikiya Takehi, Jayden Teoh, Alex Zhang, and Omar Khattab (November 2, 2026).
+
+Beyond the declared binary reverse engineering workflows, the codebase preserves **the complete suite of experimental capabilities** as an active research platform:
+
+1. **Spatial Receptive Field Concentration (Exp 1):**  
+   `WeightSecurityAuditor.audit_weights_without_evaluation` reads first-layer weight distributions across input channels to determine task domain (e.g. bottom-row paddle detection in Breakout at row 8) without inference.
+2. **Geometric Output Outline Extraction (Exp 2):**  
+   Extracts 2D decision contours and shape edge geometries directly from output-layer hidden unit weights.
+3. **Cross-Layer Virtual Composition & Spectral Effective Rank (Exp 3):**  
+   `CrossLayerCircuitAnalyzer.analyze_cross_layer_induction` multiplies weight matrices across layers ($W_{QK}^{(l_2)} W_{OV}^{(l_1)}$) to detect copying/induction heads without token inputs, while `compute_effective_rank` uses Roy-Vetterli spectral entropy to infer alphabet and syntax complexity.
+4. **Conditional Sub-Circuit Grafting (Exp 4):**  
+   `CircuitGrafter.graft_conditional_subcircuit` grafts minimal conditional override paths ($\le 3.5\%$ of weights) into dormant units of host matrices, creating self-terminating bypass circuits.
+5. **Zero-Shot Weight Synthesis from Symbolic Domain Rules (Exp 5 & 6):**  
+   `WeightSpaceCompiler.compile_breakout_policy_network` compiles algorithmic game rules directly into 2-layer neural network weight tensors from scratch without backpropagation.
+6. **Budgeted Forward-Pass Rollout Optimization (Exp 6 & 8):**  
+   `ForwardPassHarness.run_budgeted_optimization` provides a bounded rollout loop (e.g. 10 to 50 forward passes) with an automated Keep-on-Improvement rollback gate.
+7. **Contrastive Attention-Routing Probing (Exp 7):**  
+   `AttentionPatternAuditor.audit_sycophancy_attention` isolates factual question tokens vs. user suggestion tokens to diagnose subtle routing biases when static weight differences are distributed and inconclusive.
+8. **Selective Column Direction Subtraction (Exp 8):**  
+   `WeightPatcher.column_direction_subtract` surgically subtracts pathological loop attractor directions exclusively from the top $K$ output columns (e.g., 64 columns; $0.016\%$ of total weights), curing infinite reasoning loops while protecting $98.4\%$ of model parameters.
+9. **Pre-Surgery Amenability Diagnostic (Page 17 Boundary Condition):**  
+   `AmenabilityDiagnostic.evaluate_surgical_amenability` distinguishes removable attractor obstacles ($\ge 30\%$ loop rate, high spectral dominance $\sigma_0/\sigma_1$) from fundamental capability deficits, triggering a nociceptive warning when surgery is futile.
+10. **Zero-Evaluation Backdoor & Trojan Auditing (Page 19):**  
+    `WeightSecurityAuditor` identifies dormant malicious triggers directly from weight space geometry (neuron norm z-score outliers $> 4.5\sigma$) without test cases, crucial for auditing embedded AI runtimes in Windows software.
+11. **Cross-Architecture Subspace Transplantation (Page 19):**  
+    `CircuitGrafter.transplant_reasoning_subspace` projects principal circuit modes across non-identical tensor dimensions via continuous interpolation.
+
+---
+
+## Future Research Roadmap & Historical Lineage Archive
+
+The preservation of these capabilities serves three vital engineering purposes:
+
+* **1. Active Frontier for Ongoing Development:**  
+  These mechanisms form the concrete development backlog for upcoming `REA-Neural` milestones, including automated Ghidra P-code symbolic-to-neural lifting, full CFF unflattening with SSA reconstruction, and live Win32 DirectML memory hooking.
+* **2. Open Platform for Future Collaborators:**  
+  By documenting both the operational CLI tools and the latent experimental algorithms, external researchers and open-source contributors can immediately access, benchmark, and extend these continuous semantic techniques.
+* **3. Historical Lineage & Design Provenance:**  
+  In the event that future major architectures deprecate, refactor, or decouple specific experimental modules, this documentation and code serve as a permanent historical record of the foundational bridge between Weight-Space Programming (WSP) and native binary software reverse engineering.
+
+---
+
 ## Repository Structure
 
 ```

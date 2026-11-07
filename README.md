@@ -101,7 +101,11 @@ python tests/test_suite.py
 
 ---
 
-## Citation & Acknowledgments
-- Based on **REA (Reverse Engineer Anything)** by morluto.
-- Inspired by *"Sparks of Weight-Space Programming: LLMs can natively read & write neural network weights"* (MIT CSAIL, 2026).
+## Citation, References & Verification
+- **Upstream Foundation:** Based on **REA (Reverse Engineer Anything)** by morluto.
+- **Academic Research Reference:** Inspired by *"Sparks of Weight-Space Programming: LLMs can natively read & write neural network weights"*, by Rikiya Takehi, Jayden Teoh, Alex Zhang, and Omar Khattab (MIT CSAIL, November 2026).
+  - [alphaXiv Preprint Discussion](https://www.alphaxiv.org/abs/2611.weight-space-programming)
+  - [Official MIT CSAIL Replication Logs & Prompts Repository](https://github.com/RikiyaT/lm_understand-logs)
+  - [Alan Turing Institute Weights Editing Replications](https://github.com/alan-turing-institute/weights_editing)
+- **Scope & Methodological Verification:** While WSP research explores direct LLM reasoning over neural network parameters in small models, `REA-Neural` extends this conceptual foundation into continuous state-transition analysis, deterministic deobfuscation, and surgical PE patching for compiled native software.
 - Maintained by [bio-colab](https://github.com/bio-colab).

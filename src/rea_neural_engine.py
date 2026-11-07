@@ -56,24 +56,16 @@ class SafetensorsHandler:
         shape = meta["shape"]
         start_offset, end_offset = meta["data_offsets"]
 
-        # Support BF16 as uint16 for raw viewing
+        # Support BF16 with true IEEE float32 conversion
         if dtype_str == "BF16":
-            np_dtype = np.uint16
+            u16 = np.frombuffer(raw_bytes, dtype=np.uint16).reshape(shape)
+            u32 = u16.astype(np.uint32) << 16
+            arr = u32.view(np.float32)
         else:
             np_dtype = cls.DTYPE_MAP.get(dtype_str, np.float32)
-
-        file_size = os.path.getsize(file_path)
-        abs_start = base_offset + start_offset
-        abs_end = base_offset + end_offset
-
-        if abs_end > file_size:
-            raise ValueError("Corrupt safetensors offsets exceed file boundaries.")
-
-        with open(file_path, "rb") as f:
-            f.seek(abs_start)
-            raw_bytes = f.read(end_offset - start_offset)
             arr = np.frombuffer(raw_bytes, dtype=np_dtype).reshape(shape)
-            return arr.copy(), meta
+
+        return arr.copy(), meta
 
     @classmethod
     def write_patched_safetensors(
@@ -96,7 +88,14 @@ class SafetensorsHandler:
 
             if name in patched_tensors:
                 arr = patched_tensors[name]
-                raw_bytes = arr.tobytes()
+                if meta["dtype"] == "BF16":
+                    f32 = arr.astype(np.float32)
+                    u32 = f32.view(np.uint32)
+                    u32_round = u32 + 0x7FFF + ((u32 >> 16) & 1)
+                    u16 = (u32_round >> 16).astype(np.uint16)
+                    raw_bytes = u16.tobytes()
+                else:
+                    raw_bytes = arr.tobytes()
                 length = len(raw_bytes)
                 new_meta = {
                     "dtype": meta["dtype"],
@@ -316,6 +315,7 @@ def main():
     dec_p.add_argument("--tensor", required=True, help="Tensor name to decompile")
     dec_p.add_argument("--layer", type=int, default=0, help="Layer index")
     dec_p.add_argument("--head", type=int, default=0, help="Head index")
+    dec_p.add_argument("--num-heads", type=int, default=16, help="Total number of attention heads (default 16)")
 
     # Patch command
     patch_p = subparsers.add_parser("patch", help="Apply surgical binary patch")
@@ -344,8 +344,18 @@ def main():
 
     elif args.command == "decompile":
         tensor_arr, _ = SafetensorsHandler.read_tensor(args.model, args.tensor)
-        analysis = SubspaceAnalyzer.analyze_svd(tensor_arr, top_k=4)
+        # Properly slice the attention head projection
+        if tensor_arr.ndim == 2:
+            num_heads = args.num_heads if args.num_heads > 0 else 16
+            head_dim = tensor_arr.shape[1] // num_heads
+            head_idx = min(max(args.head, 0), num_heads - 1)
+            head_slice = tensor_arr[:, head_idx * head_dim : (head_idx + 1) * head_dim]
+        else:
+            head_slice = tensor_arr
+
+        analysis = SubspaceAnalyzer.analyze_svd(head_slice, top_k=4)
         dec = CircuitDecompiler.decompile_attention_head(analysis, args.layer, args.head)
+        dec["head_slice_shape"] = list(head_slice.shape)
         print(json.dumps(dec, indent=2))
 
     elif args.command == "patch":

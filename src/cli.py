@@ -40,6 +40,7 @@ WEIGHT_COMMANDS = {
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless"}
+WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose"}
 
 
 def print_help():
@@ -76,6 +77,12 @@ Ghidra P-Code & Symbolic Integration Commands:
   ghidra-analyze    Batch-analyze exported Ghidra P-Code JSON and generate database mutation plan
   ghidra-headless   Launch Ghidra analyzeHeadless with REA-Neural bridge script to auto-deobfuscate
 
+Windows System Intelligence & Failure Diagnostic Commands:
+  win-audit         Profile host Windows OS build, WOW64 mode, and AppCompatFlags layers
+  resolve-deps      Audit DLL search order, API-Sets, and verify required exported symbols
+  wer-inspect       Scan Windows Error Reporting (WER) archives and Application Event Log
+  diagnose          Correlate host OS environment, crash records, and PE structure into Evidence Dossier
+
 Agent-Native MCP (Model Context Protocol):
   mcp               Launch native JSON-RPC 2.0 stdio MCP server for AI models (Claude, Antigravity, Cursor)
 """)
@@ -97,6 +104,116 @@ def main():
         else:
             print("Ambiguous command 'patch'. Please specify 'patch-binary' for PE files or 'patch-weights' for model tensors.")
             sys.exit(1)
+
+    if cmd in WIN_INTEL_COMMANDS:
+        from windows_intelligence import (
+            WindowsOSProfiler, WindowsDependencyResolver, WindowsDeviceInspector,
+            WindowsSecurityInspector, WindowsCrashAnalyzer, DiagnosticEvidenceCorrelator
+        )
+        if cmd == "win-audit":
+            parser = argparse.ArgumentParser(description="Profile host Windows OS, devices, and security context")
+            parser.add_argument("command")
+            parser.add_argument("--binary", "--file", dest="binary", default=None, help="Optional executable to inspect for compatibility shims")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args()
+
+            report = {
+                "os": WindowsOSProfiler.profile(args.binary),
+                "devices": WindowsDeviceInspector.audit(),
+                "security": WindowsSecurityInspector.audit(args.binary)
+            }
+            if args.format == "md":
+                lines = [
+                    "# Windows System Intelligence Profile",
+                    f"- **OS:** {report['os']['kernel'].get('friendly_name')} (Build {report['os']['kernel'].get('build_number')})",
+                    f"- **Native Architecture:** {report['os']['architecture'].get('native_architecture')}",
+                    f"- **Elevation:** Admin={report['security'].get('is_elevated_admin')}",
+                    f"- **Token Integrity:** {report['security'].get('token_integrity', {}).get('integrity_level')}",
+                    f"- **Active Graphics Adapters:** {len(report['devices'].get('graphics_adapters', []))}"
+                ]
+                print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "resolve-deps":
+            parser = argparse.ArgumentParser(description="Audit Windows dynamic link library dependencies")
+            parser.add_argument("command")
+            parser.add_argument("--binary", "--file", dest="binary", required=True, help="Target PE binary")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args()
+
+            report = WindowsDependencyResolver.audit_dependencies(args.binary)
+            if args.format == "md":
+                lines = [
+                    f"# Dependency Audit for `{os.path.basename(args.binary)}`",
+                    f"- **Verdict:** `{report.get('verdict')}`",
+                    f"- **Loader Mode:** `{report.get('loader_mode')}` ({report.get('binary_architecture')})",
+                    f"- **Resolved DLLs:** {report.get('resolved_dlls_count')}/{report.get('total_imported_dlls')}",
+                    f"- **Missing DLLs:** {report.get('missing_dlls_count')}",
+                    f"- **Architecture Mismatches:** {report.get('architecture_mismatches_count')}",
+                    f"- **Missing Exports:** {report.get('missing_exports_count')}"
+                ]
+                if report.get("missing_dlls"):
+                    lines.append("\n### Missing DLLs:")
+                    for m in report["missing_dlls"]:
+                        lines.append(f"- `{m['imported_name']}` (Required functions: {m['functions_count']})")
+                print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "wer-inspect":
+            parser = argparse.ArgumentParser(description="Scan Windows Error Reporting and Event Log for application crash dossiers")
+            parser.add_argument("command")
+            parser.add_argument("--binary", "--file", dest="binary", default=None, help="Optional executable name filter")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args()
+
+            report = WindowsCrashAnalyzer.collect_crash_evidence(args.binary)
+            if args.format == "md":
+                lines = [
+                    "# Windows Crash Telemetry Report",
+                    f"- **Target Filter:** `{args.binary or 'ALL'}`",
+                    f"- **WER Reports Found:** {report.get('wer_reports_found')}",
+                    f"- **Event Log Errors Found:** {report.get('event_log_errors_found')}"
+                ]
+                for r in report.get("wer_reports", [])[:5]:
+                    lines.append(f"- [WER] {r.get('app_name')} | Exception: {r.get('exception_code')} ({r.get('exception_name')}) at {r.get('fault_offset')}")
+                for e in report.get("event_log_errors", [])[:5]:
+                    lines.append(f"- [Event 1000] {e.get('app_name')} | Module: {e.get('fault_module')} at {e.get('fault_offset')}")
+                print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "diagnose":
+            parser = argparse.ArgumentParser(description="Correlate Windows OS environment, crash records, and PE structure into Failure Evidence Dossier")
+            parser.add_argument("command")
+            parser.add_argument("--binary", "--file", dest="binary", required=True, help="Target executable")
+            parser.add_argument("--crash-json", default=None, help="Optional path to custom crash record JSON")
+            parser.add_argument("--ghidra-json", default=None, help="Optional path to exported Ghidra High P-Code JSON")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format (json or md)")
+            args = parser.parse_args()
+
+            crash_rec = None
+            if args.crash_json and os.path.exists(args.crash_json):
+                with open(args.crash_json, "r", encoding="utf-8") as f:
+                    crash_rec = json.load(f)
+
+            ghidra_data = None
+            if args.ghidra_json and os.path.exists(args.ghidra_json):
+                with open(args.ghidra_json, "r", encoding="utf-8") as f:
+                    ghidra_data = json.load(f)
+
+            dossier = DiagnosticEvidenceCorrelator.correlate(
+                args.binary, crash_record=crash_rec, ghidra_export=ghidra_data
+            )
+            if args.format == "md":
+                print(DiagnosticEvidenceCorrelator.format_markdown(dossier))
+            else:
+                print(json.dumps(dossier, indent=2, ensure_ascii=False))
+            return
 
     if cmd in SENSORY_COMMANDS:
         parser = argparse.ArgumentParser(description="REA-Neural 10-Sense Diagnostic Audit")

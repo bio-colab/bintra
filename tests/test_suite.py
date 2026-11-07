@@ -768,13 +768,16 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
         tools_res = server.handle_tools_list({})
         self.assertIn("tools", tools_res)
-        self.assertEqual(len(tools_res["tools"]), 13)
+        self.assertEqual(len(tools_res["tools"]), 17)
         tool_names = [t["name"] for t in tools_res["tools"]]
         self.assertIn("rea_dump_bytes", tool_names)
-        tool_names = [t["name"] for t in tools_res["tools"]]
         self.assertIn("rea_inspect_binary", tool_names)
         self.assertIn("rea_sensory_audit", tool_names)
         self.assertIn("rea_ghidra_headless", tool_names)
+        self.assertIn("rea_windows_env_audit", tool_names)
+        self.assertIn("rea_resolve_dependencies", tool_names)
+        self.assertIn("rea_inspect_crash_reports", tool_names)
+        self.assertIn("rea_correlate_failure_evidence", tool_names)
 
     def test_mcp_server_dispatch_tool_call(self):
         """Verifies dispatching tools directly through MCP server protocol."""
@@ -1085,6 +1088,179 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         finally:
             if os.path.exists(src_tmp): os.remove(src_tmp)
             if os.path.exists(out_tmp): os.remove(out_tmp)
+
+
+
+    def test_windows_os_profiler(self):
+        """Verifies Windows OS Profiler retrieves kernel build, arch, and registry details."""
+        from windows_intelligence import WindowsOSProfiler
+        profile = WindowsOSProfiler.profile()
+        self.assertEqual(profile.get("status"), "success")
+        self.assertIn("kernel", profile)
+        self.assertIn("architecture", profile)
+        self.assertIn("registry_info", profile)
+        self.assertTrue(profile["kernel"].get("is_windows"))
+        self.assertIn("major_version", profile["kernel"])
+
+    def test_windows_dependency_resolver_synthetic(self):
+        """Verifies Windows Dependency Resolver simulates Safe DLL Search, API Sets, and missing DLLs."""
+        from windows_intelligence import WindowsDependencyResolver
+        synthetic_imports = {
+            "KERNEL32.dll": ["ExitProcess", "CreateFileW"],
+            "NON_EXISTENT_FAKE_MODULE_9999.dll": ["SomeFunc"]
+        }
+        res = WindowsDependencyResolver.audit_dependencies("dummy_target.exe", custom_imports=synthetic_imports)
+        self.assertEqual(res.get("status"), "success")
+        self.assertEqual(res["total_imported_dlls"], 2)
+        self.assertEqual(res["resolved_dlls_count"], 1)
+        self.assertEqual(res["resolved_dlls"][0]["imported_name"], "KERNEL32.dll")
+        self.assertEqual(res["missing_dlls_count"], 1)
+        self.assertEqual(res["missing_dlls"][0]["imported_name"], "NON_EXISTENT_FAKE_MODULE_9999.dll")
+
+    def test_windows_device_inspector(self):
+        """Verifies Windows Device Inspector scans display adapters and DirectX runtimes."""
+        from windows_intelligence import WindowsDeviceInspector
+        devices = WindowsDeviceInspector.audit()
+        self.assertEqual(devices.get("status"), "success")
+        self.assertIn("graphics_adapters", devices)
+        self.assertIn("directx_runtimes", devices)
+        subsystems = devices["directx_runtimes"].get("subsystems", {})
+        self.assertIn("legacy_directdraw", subsystems)
+        self.assertIn("legacy_direct3d9", subsystems)
+
+    def test_windows_security_inspector(self):
+        """Verifies Windows Security Inspector evaluates token integrity and directory write access."""
+        import tempfile
+        import shutil
+        from windows_intelligence import WindowsSecurityInspector
+        temp_dir = tempfile.mkdtemp()
+        try:
+            sec = WindowsSecurityInspector.audit(temp_dir)
+            self.assertEqual(sec.get("status"), "success")
+            self.assertIn("is_elevated_admin", sec)
+            self.assertIn("token_integrity", sec)
+            self.assertIn("directory_write_permissions", sec)
+            self.assertTrue(sec["directory_write_permissions"]["is_writable"])
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_windows_crash_analyzer_synthetic_wer_and_minidump(self):
+        """Verifies Windows Crash Analyzer parses WER reports and minidump headers."""
+        import tempfile
+        from windows_intelligence import WindowsCrashAnalyzer
+
+        mock_wer = (
+            "Version=1\n"
+            "EventType=APPCRASH\n"
+            "EventTime=133000000000000000\n"
+            "ReportIdentifier=test-guid-1234\n"
+            "Sig[0].Name=Application Name\n"
+            "Sig[0].Value=target.exe\n"
+            "Sig[1].Name=Application Version\n"
+            "Sig[1].Value=1.0.0.0\n"
+            "Sig[2].Name=Fault Module Name\n"
+            "Sig[2].Value=target.exe\n"
+            "Sig[3].Name=Fault Module Name (Real)\n"
+            "Sig[3].Value=target.exe\n"
+            "Sig[4].Name=Fault Module Version\n"
+            "Sig[4].Value=1.0.0.0\n"
+            "Sig[6].Name=Exception Code\n"
+            "Sig[6].Value=c0000005\n"
+            "Sig[7].Name=Fault Module Offset\n"
+            "Sig[7].Value=00001050\n"
+        )
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.wer', mode='w', encoding='utf-8') as f:
+            f.write(mock_wer)
+            wer_file = f.name
+        try:
+            parsed = WindowsCrashAnalyzer._parse_wer_file(wer_file)
+            self.assertIsNotNone(parsed)
+            self.assertEqual(parsed["source"], "WER_REPORT")
+            self.assertEqual(parsed["app_name"], "target.exe")
+            self.assertEqual(parsed["fault_module"], "target.exe")
+            self.assertEqual(parsed["fault_offset"], "0x00001050")
+            self.assertEqual(parsed["exception_code"], "0xc0000005")
+        finally:
+            if os.path.exists(wer_file):
+                os.remove(wer_file)
+
+        # Minidump header signature check
+        mdmp_header = b"MDMP" + (42).to_bytes(4, 'little') + (0).to_bytes(4, 'little') + (0x20).to_bytes(4, 'little') + (0).to_bytes(4, 'little') + (123456).to_bytes(4, 'little') + (0).to_bytes(8, 'little')
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.dmp', mode='wb') as f:
+            f.write(mdmp_header)
+            dmp_file = f.name
+        try:
+            mdmp_info = WindowsCrashAnalyzer.parse_minidump(dmp_file)
+            self.assertEqual(mdmp_info["status"], "success")
+            self.assertEqual(mdmp_info["format"], "MINIDUMP")
+        finally:
+            if os.path.exists(dmp_file):
+                os.remove(dmp_file)
+
+    def test_windows_evidence_correlator_end_to_end(self):
+        """Verifies cross-correlation of crash telemetry, PE sections, and Ghidra disassembly."""
+        import tempfile
+        from windows_intelligence import DiagnosticEvidenceCorrelator
+
+        # Create minimal valid PE file with a .text section
+        dos_hdr = bytearray(0x80)
+        dos_hdr[0:2] = b"MZ"
+        dos_hdr[0x3C:0x40] = (0x40).to_bytes(4, "little")
+        pe_hdr = b"PE\x00\x00" + b"\x4c\x01" + (1).to_bytes(2, "little") + b"\x00"*12 + (0xe0).to_bytes(2, "little") + (0x102).to_bytes(2, "little")
+        opt_hdr = b"\x0b\x01" + b"\x00"*222
+        sec_hdr = b".text\x00\x00\x00" + (0x1000).to_bytes(4, "little") + (0x1000).to_bytes(4, "little") + (0x200).to_bytes(4, "little") + (0x200).to_bytes(4, "little") + b"\x00"*12 + (0x60000020).to_bytes(4, "little")
+        padding = b"\x90" * 0x300
+        full_pe = bytes(dos_hdr[:0x40] + pe_hdr + opt_hdr + sec_hdr + padding)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.exe') as f:
+            f.write(full_pe)
+            pe_path = f.name
+
+        try:
+            crash_record = {
+                "source": "WER_REPORT",
+                "fault_offset": "0x250",
+                "exception_code": "0xc0000005",
+                "exception_name": "STATUS_ACCESS_VIOLATION",
+                "fault_module": os.path.basename(pe_path)
+            }
+            ghidra_export = {
+                "functions": [
+                    {
+                        "name": "FUN_00401050",
+                        "entry_point": "0x401050",
+                        "pcode_ops": [{"address": "0x401050", "mnemonic": "MOV"}]
+                    }
+                ]
+            }
+
+            dossier = DiagnosticEvidenceCorrelator.correlate(
+                binary_path=pe_path,
+                crash_record=crash_record,
+                ghidra_export=ghidra_export
+            )
+            self.assertEqual(dossier["status"], "success")
+            self.assertIn("CRASH_TELEMETRY_RECORDED", dossier["verdict"])
+            self.assertIsNotNone(dossier.get("binary_mapping"))
+            self.assertEqual(dossier["binary_mapping"]["fault_section"], ".text")
+            self.assertTrue(dossier["binary_mapping"]["is_executable_section"])
+
+            md = DiagnosticEvidenceCorrelator.format_markdown(dossier)
+            self.assertIn("# REA-Neural Failure Evidence Dossier", md)
+            self.assertIn("0xc0000005", md)
+        finally:
+            if os.path.exists(pe_path):
+                os.remove(pe_path)
+
+    def test_mcp_server_windows_intelligence_dispatch(self):
+        """Verifies that native MCP server can dispatch windows intelligence audit tools."""
+        from mcp_server import ReaMcpServer
+        server = ReaMcpServer()
+        audit_res = server.dispatch_tool("rea_windows_env_audit", {})
+        self.assertIn("os", audit_res)
+        self.assertIn("devices", audit_res)
+        self.assertIn("security", audit_res)
+        self.assertEqual(audit_res["os"]["status"], "success")
 
 
 if __name__ == "__main__":

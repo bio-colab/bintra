@@ -411,7 +411,7 @@ class BinaryFormatInspector:
 
         exported = []
         if names_off and ords_off and funcs_off:
-            for idx in range(min(num_names, 256)):
+            for idx in range(min(num_names, 4096)):
                 if names_off + (idx + 1) * 4 > file_size or ords_off + (idx + 1) * 2 > file_size:
                     break
                 f.seek(names_off + idx * 4)

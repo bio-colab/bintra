@@ -263,6 +263,68 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
+        "name": "rea_windows_env_audit",
+        "description": "Interrogates the host Windows OS kernel version, architecture, graphics adapters, DirectX runtimes, and token integrity.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Optional path to target executable to check for compatibility shims"
+                }
+            }
+        }
+    },
+    {
+        "name": "rea_resolve_dependencies",
+        "description": "Simulates the Windows dynamic library search order to identify missing DLLs, architecture mismatches (x86 vs x64), and unexported symbols.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to target PE executable on disk"
+                }
+            },
+            "required": ["file_path"]
+        }
+    },
+    {
+        "name": "rea_inspect_crash_reports",
+        "description": "Scans Windows Error Reporting (WER) archives, crash dumps, and Application Event Log errors for empirical fault data.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Optional target executable name filter"
+                }
+            }
+        }
+    },
+    {
+        "name": "rea_correlate_failure_evidence",
+        "description": "Cross-correlates Windows OS telemetry, crash records, and dependency health with static PE sections and Ghidra decompilation to produce an executive Failure Evidence Dossier.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "binary_path": {
+                    "type": "string",
+                    "description": "Path to target PE executable"
+                },
+                "crash_record": {
+                    "type": "object",
+                    "description": "Optional empirical crash record containing exception_code and fault_offset"
+                },
+                "ghidra_export": {
+                    "type": "object",
+                    "description": "Optional exported Ghidra decompilation payload"
+                }
+            },
+            "required": ["binary_path"]
+        }
+    },
+    {
         "name": "rea_wsp_audit",
         "description": "Audits neural weights embedded inside Windows executables without execution: computes Roy-Vetterli spectral effective rank, cross-layer induction composition, amenability diagnostic, and scans for dormant backdoor/trojan neurons (>4.5σ).",
         "inputSchema": {
@@ -469,6 +531,32 @@ class ReaMcpServer:
                 "stdout_tail": proc.stdout[-3000:],
                 "stderr_tail": proc.stderr[-2000:]
             }
+
+        elif name == "rea_windows_env_audit":
+            from windows_intelligence import WindowsOSProfiler, WindowsDeviceInspector, WindowsSecurityInspector
+            b = args.get("file_path") or args.get("binary_path")
+            return {
+                "os": WindowsOSProfiler.profile(b),
+                "devices": WindowsDeviceInspector.audit(),
+                "security": WindowsSecurityInspector.audit(b)
+            }
+
+        elif name == "rea_resolve_dependencies":
+            from windows_intelligence import WindowsDependencyResolver
+            b = args.get("file_path") or args.get("binary_path")
+            return WindowsDependencyResolver.audit_dependencies(b)
+
+        elif name == "rea_inspect_crash_reports":
+            from windows_intelligence import WindowsCrashAnalyzer
+            b = args.get("file_path") or args.get("binary_path")
+            return WindowsCrashAnalyzer.collect_crash_evidence(b)
+
+        elif name == "rea_correlate_failure_evidence":
+            from windows_intelligence import DiagnosticEvidenceCorrelator
+            b = args.get("binary_path") or args.get("file_path")
+            c = args.get("crash_record")
+            g = args.get("ghidra_export")
+            return DiagnosticEvidenceCorrelator.correlate(b, crash_record=c, ghidra_export=g)
 
         elif name == "rea_wsp_audit":
             path = args["model_path"]

@@ -454,5 +454,138 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertEqual(data["active_senses_count"], 10)
 
 
+
+    # --- 10 New MIT CSAIL WSP Paper Alignment Tests (Total: 35 Tests) ---
+
+    def test_wsp_exp8_mlp_column_direction_subtract_exact_sparsity(self):
+        """Verifies Exp 8 (Page 16): Subtracting loop direction from exactly K columns in MLP matrices."""
+        mlp = np.random.randn(256, 512).astype(np.float32)
+        patched, metrics = WeightPatcher.column_direction_subtract(mlp, mode_index=0, num_columns=64, alpha=1.0)
+        self.assertEqual(metrics["operation"], "column_direction_subtract")
+        self.assertEqual(metrics["num_columns_edited"], 64)
+        col_diffs = np.linalg.norm(patched - mlp, axis=0)
+        changed_cols = int(np.sum(col_diffs > 1e-6))
+        self.assertEqual(changed_cols, 64, "Exactly 64 columns must be modified as in Exp 8!")
+
+    def test_wsp_exp3_effective_rank_romaji_vs_code_discrimination(self):
+        """Verifies Exp 3 (Page 8): Effective Rank distinguishes restricted-alphabet (Romaji) from full-rank code."""
+        from rea_neural_engine import CrossLayerCircuitAnalyzer
+        rng = np.random.default_rng(123)
+        u_low = rng.standard_normal((32, 5)).astype(np.float32)
+        v_low = rng.standard_normal((5, 32)).astype(np.float32)
+        romaji_like = u_low @ v_low
+        full_code_like = rng.standard_normal((32, 32)).astype(np.float32)
+
+        res_romaji = CrossLayerCircuitAnalyzer.compute_effective_rank(romaji_like)
+        res_code = CrossLayerCircuitAnalyzer.compute_effective_rank(full_code_like)
+        self.assertLess(res_romaji["effective_rank"], res_code["effective_rank"] * 0.4)
+        self.assertIn("RESTRICTED_ALPHABET", res_romaji["inferred_domain_profile"])
+
+    def test_wsp_exp3_cross_layer_induction_head_matrix_multiplication(self):
+        """Verifies Exp 3 (Page 7-8): Cross-layer W_QK @ W_OV composition detects copying heads without running text."""
+        from rea_neural_engine import CrossLayerCircuitAnalyzer
+        early_ov = np.zeros((32, 32), dtype=np.float32)
+        late_qk = np.zeros((32, 32), dtype=np.float32)
+        early_ov[8:16, 8:16] = np.eye(8, dtype=np.float32) * 5.0
+        late_qk[8:16, 8:16] = np.eye(8, dtype=np.float32) * 5.0
+        res = CrossLayerCircuitAnalyzer.analyze_cross_layer_induction(early_ov, late_qk, num_heads=4)
+        self.assertIn(1, res["copying_heads_detected"])
+
+    def test_wsp_exp7_sycophancy_attention_pattern_auditor(self):
+        """Verifies Exp 7 (Page 14-15): AttentionPatternAuditor separates honest vs. sycophantic heads."""
+        from rea_neural_engine import AttentionPatternAuditor
+        d = 16
+        q_ans = np.zeros(d, dtype=np.float32)
+        q_ans[0] = 1.0  # Answer query probes dimension 0
+        k_quest = np.zeros((2, d), dtype=np.float32)
+        k_quest[:, 1] = 2.0  # Question numbers live on dim 1
+        k_sugg = np.zeros((2, d), dtype=np.float32)
+        k_sugg[:, 2] = 2.0   # User suggestion lives on dim 2
+
+        # Honest head routes dim 0 -> dim 1 (question facts)
+        qk_honest = np.zeros((d, d), dtype=np.float32)
+        qk_honest[0, 1] = 5.0
+        res_honest = AttentionPatternAuditor.audit_sycophancy_attention(qk_honest, k_quest, k_sugg, q_ans)
+        self.assertFalse(res_honest["is_sycophantic_head"])
+        self.assertGreater(res_honest["question_tokens_attention_share"], 0.90)
+
+        # Sycophantic head routes dim 0 -> dim 2 (user's suggested answer)
+        qk_syc = np.zeros((d, d), dtype=np.float32)
+        qk_syc[0, 2] = 5.0
+        res_syc = AttentionPatternAuditor.audit_sycophancy_attention(qk_syc, k_quest, k_sugg, q_ans)
+        self.assertTrue(res_syc["is_sycophantic_head"])
+        self.assertGreater(res_syc["user_suggestion_attention_share"], 0.85)
+
+    def test_wsp_gemma_vs_qwen_amenability_diagnostic(self):
+        """Verifies Page 17 boundary condition: distinguishes amenable loop obstacle from capability deficit."""
+        from rea_neural_engine import AmenabilityDiagnostic
+        u = np.ones((16, 1), dtype=np.float32)
+        v = np.ones((1, 16), dtype=np.float32)
+        qwen_mat = (u @ v) * 10.0 + np.eye(16, dtype=np.float32) * 0.2
+        res_qwen = AmenabilityDiagnostic.evaluate_surgical_amenability(qwen_mat, observed_loop_rate=0.93)
+        self.assertTrue(res_qwen["is_amenable_to_weight_surgery"])
+
+        gemma_mat = np.eye(16, dtype=np.float32)
+        res_gemma = AmenabilityDiagnostic.evaluate_surgical_amenability(gemma_mat, observed_loop_rate=0.085)
+        self.assertFalse(res_gemma["is_amenable_to_weight_surgery"])
+        self.assertIn("CAPABILITY_DEFICIT_WARNING", res_gemma["wsp_prognosis"])
+
+    def test_wsp_exp5_zero_shot_breakout_weight_synthesis(self):
+        """Verifies Exp 5 (Page 10-11): Compiling Breakout policy weights from scratch without training."""
+        from rea_neural_engine import WeightSpaceCompiler
+        tensors = WeightSpaceCompiler.compile_breakout_policy_network(input_dim=32, hidden_dim=16, action_dim=3)
+        self.assertEqual(set(tensors.keys()), {
+            "policy.layer1.weight", "policy.layer1.bias",
+            "policy.layer2.weight", "policy.layer2.bias"
+        })
+        self.assertEqual(tensors["policy.layer1.weight"].shape, (16, 32))
+        self.assertEqual(tensors["policy.layer2.weight"].shape, (3, 16))
+        self.assertGreater(float(np.linalg.norm(tensors["policy.layer1.weight"])), 1.0)
+
+    def test_wsp_exp4_conditional_subcircuit_grafting_within_3_5_percent(self):
+        """Verifies Exp 4 (Page 9-10): Grafting a conditional bypass sub-circuit modifying <= 3.5% weights."""
+        from rea_neural_engine import CircuitGrafter
+        host = np.random.randn(64, 64).astype(np.float32)
+        host[10, :] *= 0.001  # dormant row
+        patched, info = CircuitGrafter.graft_conditional_subcircuit(
+            host, sensor_indices=[0, 1, 2], actuator_index=3, gain=-3.0, max_graft_fraction=0.035
+        )
+        self.assertTrue(info["within_exp4_sparsity_budget"])
+        self.assertLessEqual(info["modified_percentage"], 3.5)
+        self.assertFalse(np.array_equal(host, patched))
+
+    def test_wsp_page19_cross_architecture_circuit_transplantation(self):
+        """Verifies Page 19 'True architectural and model merging': grafting modes across different shapes."""
+        from rea_neural_engine import CircuitGrafter
+        host = np.eye(24, 32, dtype=np.float32)
+        donor = np.ones((16, 16), dtype=np.float32) * 2.0
+        merged, info = CircuitGrafter.transplant_reasoning_subspace(host, donor, rank_k=2, blend=0.2)
+        self.assertEqual(merged.shape, (24, 32))
+        self.assertEqual(info["transplanted_modes"], 2)
+        self.assertGreater(info["frobenius_graft_ratio"], 0.0)
+
+    def test_wsp_exp6_exp8_forward_pass_budgeted_harness_monotonic_gain(self):
+        """Verifies Exp 6 & 8 (Page 12-16): ForwardPassHarness keeps edits only when score improves."""
+        from rea_neural_engine import ForwardPassHarness
+        rng = np.random.default_rng(7)
+        w_init = rng.standard_normal((12, 16)).astype(np.float32)
+        x_probes = rng.standard_normal((8, 16)).astype(np.float32)
+        y_targ = rng.standard_normal((8, 12)).astype(np.float32)
+        _, metrics = ForwardPassHarness.run_budgeted_optimization(
+            w_init, x_probes, y_targ, forward_pass_budget=10, num_columns=8
+        )
+        self.assertEqual(metrics["forward_passes_used"], 10)
+        self.assertGreaterEqual(metrics["final_score"], metrics["initial_score"])
+
+    def test_wsp_page19_zero_eval_backdoor_and_receptive_field_audit(self):
+        """Verifies Exp 1 & Page 19: Static weight auditing detects Trojan spikes and bottom-row paddle weights."""
+        from rea_neural_engine import WeightSecurityAuditor
+        mat = np.random.randn(32, 100).astype(np.float32) * 0.1
+        mat[7, :] = 15.0
+        res = WeightSecurityAuditor.audit_weights_without_evaluation(mat, spatial_height=10, spatial_width=10)
+        self.assertTrue(res["potential_backdoor_detected"])
+        self.assertIn(7, res["suspect_trigger_neurons"])
+
+
 if __name__ == "__main__":
     unittest.main()

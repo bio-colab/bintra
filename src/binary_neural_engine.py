@@ -1154,7 +1154,11 @@ class SensoryCortex:
         file_path: Optional[str] = None,
         code_hex: Optional[str] = None
     ) -> Dict[str, Any]:
-        from rea_neural_engine import SafetensorsHandler, SubspaceAnalyzer, CircuitDecompiler, WeightPatcher, ActivationTraceProber, NeuralBehaviorVerifier
+        from rea_neural_engine import (
+            SafetensorsHandler, SubspaceAnalyzer, CircuitDecompiler, WeightPatcher,
+            ActivationTraceProber, NeuralBehaviorVerifier, CrossLayerCircuitAnalyzer,
+            AmenabilityDiagnostic, WeightSecurityAuditor
+        )
         is_safetensors = bool(file_path and file_path.endswith(".safetensors") and os.path.exists(file_path))
         code_sample = cls._extract_code_sample(file_path if not is_safetensors else None, code_hex)
         pe_info = BinaryFormatInspector.inspect(file_path) if (file_path and os.path.exists(file_path) and not is_safetensors) else None
@@ -1212,7 +1216,7 @@ class SensoryCortex:
             "id": 3, "name_ar": "اللمس النشط", "name_en": "Active Touch",
             "present": True, "efficiency_score": 0.97, "importance_rank": 3,
             "telemetry": {
-                "supported_weight_operations": ["rank_1_nullify", "sparse_clamp", "subspace_zero", "vector_add"],
+                "supported_weight_operations": ["rank_1_nullify", "sparse_clamp", "subspace_zero", "vector_add", "column_direction_subtract", "graft_conditional_subcircuit", "compile_weights_from_spec"],
                 "supported_binary_operations": ["surgical_byte_patch", "pe_checksum_sync", "atomic_windows_replace"],
                 "probe_lipschitz_bound": round(touch_metrics["lipschitz_spectral_bound"], 4),
             }

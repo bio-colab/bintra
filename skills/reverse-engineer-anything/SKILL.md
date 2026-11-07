@@ -119,9 +119,13 @@ explicit path or endpoint and do not need it.
   `python src/cli.py scan-hybrid --file <exe_or_dll_path>`
   (or via `rea scan-hybrid --file <path>`). Detects embedded ONNX, TFLite, GGUF, Safetensors,
   and TorchScript runtime containers, and traces native system API bridge boundaries.
-- Continuous weight-space decomposition and attention circuit reverse engineering:
+- Continuous weight-space decomposition, embedded neural auditing, and attention circuit reverse engineering:
   Run weight-space engine:
   `python src/cli.py subspace --model <path> --tensor <name>`
+  or run full WSP security and circuit audit on embedded models:
+  `python src/cli.py wsp-audit --model <path>`
+  or perform selective column direction subtraction on linear weights:
+  `python src/cli.py patch-weights --source <in> --output <out> --tensor <name> --operation column_direction_subtract --num-columns 64`
   See the [weight space programming specification](references/weight-space-programming.md).
 - Holistic multi-modal binary inspection & 10 Metaphorical Senses evaluation:
   Run sensory cortex audit:

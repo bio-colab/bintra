@@ -34,7 +34,8 @@ def _ensure_utf8_stdio() -> None:
 BINARY_COMMANDS = {"inspect", "deobfuscate", "match", "match-functions", "patch-binary", "scan-hybrid"}
 WEIGHT_COMMANDS = {
     "subspace", "decompile", "decompile-circuit", "patch-weights",
-    "diff", "diff-weights", "probe-trace", "verify-behavior"
+    "diff", "diff-weights", "probe-trace", "verify-behavior",
+    "wsp-audit", "synthesize-weights"
 }
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 
@@ -60,7 +61,9 @@ Weight-Space / Neural Commands:
   patch-weights     Surgically patch a safetensors weight tensor without gradients
   diff-weights      Compare baseline and patched models with Frobenius diff
   probe-trace       Probe temporal activation traces across token steps (Temporal Hearing)
-  verify-behavior   Verify neural equilibrium and Lipschitz bounds (Vestibular Balance)
+  verify-behavior      Verify neural equilibrium and Lipschitz bounds (Vestibular Balance)
+  wsp-audit            Run MIT CSAIL WSP audit (Effective Rank, Cross-Layer Induction, Amenability, Backdoors)
+  synthesize-weights   Compile neural network weights from scratch without training (Exp 5 & 6)
 
 Metaphorical Sensory Cortex Commands:
   sense             Run all 10 Metaphorical Senses on a binary (--file), model (--file), or code (--hex)

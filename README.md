@@ -26,8 +26,11 @@ Traditional function matching algorithms rely on exact opcode hashes or structur
 ### 3. Goal-Driven Surgical Binary Patching
 Manual byte patching is notoriously error-prone, frequently resulting in stack imbalance (`RSP`/`RBP` misalignment) or PE checksum violations. `REA-Neural` computes minimal perturbation vectors ($\Delta \text{State} \le \epsilon$), automatically recalculates PE integrity checksums, and guarantees stack frame stability.
 
-### 4. Hybrid Native-Neural Application Dissection
-Modern Windows applications (games, anti-cheat, endpoint security clients, media suites) embed neural inference logic (ONNX, TFLite, GGUF, DirectML) directly into PE sections (`.rsrc`, `.rodata`). `REA-Neural` scans native binaries to expose these embedded logic cores and decompile the boundary between native Win32 API calls and embedded decision matrices.
+### 4. Hybrid Native-Neural Application Dissection & Weight Security Auditing
+Modern Windows applications (games, anti-cheat, endpoint security clients, media suites) embed neural inference logic (ONNX, TFLite, GGUF, DirectML, WinML, Safetensors) directly into PE sections (`.rsrc`, `.rodata`). `REA-Neural` scans native binaries to expose these embedded logic cores and decompile the boundary between native Win32 API calls and embedded decision matrices.
+- **Zero-Execution Security Auditing:** Scans raw embedded weights for dormant Trojan/backdoor trigger neurons and anomalous rank-1 spikes before host execution.
+- **Selective Column Surgery:** Intervenes in linear projection matrices (`column_direction_subtract`) at extreme sparsity (editing top-$K$ columns, e.g. 0.016% of weights) to eliminate pathological looping or bypass deadlocks without retraining.
+- **Cross-Layer Induction & Effective Rank:** Evaluates cross-layer composition ($W_{QK}^{(l_2)} W_{OV}^{(l_1)}$) and spectral effective rank to infer alphabet and structural data complexity without running model text.
 
 ---
 
@@ -95,6 +98,17 @@ python src/cli.py patch `
 
 # Scan a native Windows binary for embedded neural logic (ONNX, DirectML, GGUF)
 python src/cli.py scan-hybrid --file application.exe
+
+# Audit embedded Safetensors neural model (Effective Rank, Induction Heads, Backdoors, Amenability)
+python src/cli.py wsp-audit --model model.safetensors
+
+# Perform surgical low-rank column direction subtraction on embedded linear layers
+python src/cli.py patch-weights `
+  --source model.safetensors `
+  --output patched.safetensors `
+  --tensor mlp.down_proj `
+  --operation column_direction_subtract `
+  --num-columns 64
 
 # Holistic multi-modal binary inspection & 10 Metaphorical Senses evaluation
 python src/cli.py sense --file application.exe --hex "55 48 89 e5 5d c3"

@@ -50,7 +50,7 @@ except ImportError as err:
 
 
 SERVER_NAME = "rea-neural"
-SERVER_VERSION = "7.3.0"
+SERVER_VERSION = "7.4.0"
 PROTOCOL_VERSION = "2024-11-05"
 
 

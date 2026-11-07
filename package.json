@@ -1,6 +1,6 @@
 {
   "name": "rea-neural",
-  "version": "7.3.0",
+  "version": "7.4.0",
   "description": "Continuous Semantic Reverse Engineering & Binary Analysis Framework. Extends REA to continuous semantic program representations, deobfuscation, cross-architecture matching, surgical binary patching, and weight-space programming.",
   "main": "src/cli.py",
   "bin": {

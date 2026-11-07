@@ -759,7 +759,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         server = ReaMcpServer()
         init_res = server.handle_initialize({})
         self.assertEqual(init_res["serverInfo"]["name"], "rea-neural")
-        self.assertEqual(init_res["serverInfo"]["version"], "7.3.0")
+        self.assertEqual(init_res["serverInfo"]["version"], "7.4.0")
 
         tools_res = server.handle_tools_list({})
         self.assertIn("tools", tools_res)
@@ -892,6 +892,129 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
         self.assertIn("decoupled_from_active_scope", res.stdout)
         self.assertIn("SCOPE.md", res.stdout)
+
+
+    def test_ssa_analyzer_negative_different_register_definitions(self):
+        """Negative Test: Verifies that registers with same name but different def_seq are NOT evaluated as identical."""
+        from ghidra_pcode_vectorizer import PcodeSSAAnalyzer
+        # EAX version 10 vs EAX version 25
+        pcode_stream = [
+            {
+                "seq": 30,
+                "address": "0x140001000",
+                "opcode": "INT_XOR",
+                "inputs": [
+                    {"kind": "register", "name": "EAX", "size": 4, "def_seq": 10},
+                    {"kind": "register", "name": "EAX", "size": 4, "def_seq": 25}
+                ],
+                "output": {"kind": "unique", "unique_id": 999, "size": 4}
+            },
+            {
+                "seq": 31,
+                "address": "0x140001005",
+                "opcode": "CBRANCH",
+                "inputs": [
+                    {"kind": "ram", "offset": "0x140001050"},
+                    {"kind": "unique", "unique_id": 999, "def_seq": 30, "size": 4}
+                ],
+                "block_id": 0
+            }
+        ]
+        blocks = [
+            {"id": 0, "start": "0x140001000", "true_out": 1, "false_out": 2},
+            {"id": 1, "start": "0x140001050"},
+            {"id": 2, "start": "0x140001060"}
+        ]
+        res = PcodeSSAAnalyzer.analyze_ssa_invariants(pcode_stream, blocks)
+        # MUST NOT evaluate as opaque predicate because EAX_10 != EAX_25!
+        self.assertFalse(res["is_obfuscated"])
+        self.assertEqual(res["evidence_dossiers_count"], 0)
+        self.assertEqual(len(res["prunable_operations"]), 0)
+
+    def test_ssa_analyzer_requires_resolved_dead_block_in_cfg(self):
+        """Verifies that an Evidence Dossier is NEVER emitted if the branch target block is unresolved in CFG."""
+        from ghidra_pcode_vectorizer import PcodeSSAAnalyzer
+        pcode_stream = [
+            {
+                "seq": 40,
+                "address": "0x140001000",
+                "opcode": "INT_XOR",
+                "inputs": [
+                    {"kind": "register", "name": "ECX", "size": 4, "def_seq": 5},
+                    {"kind": "register", "name": "ECX", "size": 4, "def_seq": 5}
+                ],
+                "output": {"kind": "unique", "unique_id": 777, "size": 4}
+            },
+            {
+                "seq": 41,
+                "address": "0x140001005",
+                "opcode": "CBRANCH",
+                "inputs": [
+                    {"kind": "ram", "offset": "0x140009999"},
+                    {"kind": "unique", "unique_id": 777, "def_seq": 40, "size": 4}
+                ],
+                "block_id": 0
+            }
+        ]
+        # Basic blocks where block 0 has true_out = 999 (which does NOT exist in block_map)
+        blocks = [
+            {"id": 0, "start": "0x140001000", "true_out": 999, "false_out": 1},
+            {"id": 1, "start": "0x140001020"}
+        ]
+        res = PcodeSSAAnalyzer.analyze_ssa_invariants(pcode_stream, blocks)
+        # Unresolved dead block MUST result in 0 evidence dossiers
+        self.assertEqual(res["evidence_dossiers_count"], 0)
+
+    def test_cfg_dfs_cycle_detection_non_sequential_ids(self):
+        """Verifies graph-theoretic DFS cycle detection on non-sequential / reversed block IDs."""
+        from ghidra_pcode_vectorizer import ControlFlowGraphAnalyzer
+        # Arbitrary block IDs: Block 50 -> Block 20 -> Block 99 -> Block 50
+        blocks = [
+            {"id": 50, "start": "0x140001000", "in_degree": 1, "out_degree": 1, "successors": [20], "predecessors": [99]},
+            {"id": 20, "start": "0x140001020", "in_degree": 1, "out_degree": 1, "successors": [99], "predecessors": [50]},
+            {"id": 99, "start": "0x140001040", "in_degree": 1, "out_degree": 1, "successors": [50], "predecessors": [20]}
+        ]
+        cfg = ControlFlowGraphAnalyzer.analyze_cfg(blocks)
+        self.assertEqual(cfg["block_count"], 3)
+        self.assertEqual(cfg["edge_count"], 3)
+        self.assertEqual(cfg["cyclomatic_complexity"], 2) # 3 - 3 + 2 = 2
+        self.assertEqual(cfg["back_edges_count"], 1)
+        self.assertIn((99, 50), cfg["back_edges"])
+        self.assertEqual(cfg["topology"], "CYCLIC_LOOP")
+
+    def test_binary_patcher_negative_length_rejected(self):
+        """Verifies that negative or zero lengths in read_bytes and deobfuscate_file raise ValueError."""
+        import tempfile
+        from binary_neural_engine import SurgicalBinaryPatcher, ContinuousDeobfuscator
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(b"\x90\x90\xc3")
+            tmp = f.name
+        try:
+            with self.assertRaises(ValueError):
+                SurgicalBinaryPatcher.read_bytes(tmp, 0, length=-5)
+            with self.assertRaises(ValueError):
+                SurgicalBinaryPatcher.read_bytes(tmp, 0, length=0)
+            with self.assertRaises(ValueError):
+                ContinuousDeobfuscator.deobfuscate_file(tmp, offset=0, length=-1)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+
+    def test_unified_version_consistency_v7_4_0(self):
+        """Verifies that all project manifests, CLI, and MCP servers consistently declare v7.4.0."""
+        import json
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # pyproject.toml
+        pyproj = os.path.join(repo_root, "pyproject.toml")
+        with open(pyproj, "r", encoding="utf-8") as f:
+            self.assertIn('version = "7.4.0"', f.read())
+        # package.json
+        pkg_json = os.path.join(repo_root, "package.json")
+        with open(pkg_json, "r", encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["version"], "7.4.0")
+        # mcp_server.py
+        from mcp_server import SERVER_VERSION
+        self.assertEqual(SERVER_VERSION, "7.4.0")
 
 
 if __name__ == "__main__":

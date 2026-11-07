@@ -674,6 +674,8 @@ class ContinuousDeobfuscator:
         """Deobfuscates machine code directly from a binary file at a specified offset or entry point."""
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
+        if length <= 0:
+            raise ValueError(f"Length must be positive, got {length}")
 
         pe_info = BinaryFormatInspector.inspect(file_path)
         actual_offset = offset
@@ -687,6 +689,10 @@ class ContinuousDeobfuscator:
                         break
             if actual_offset is None:
                 actual_offset = 0
+
+        file_sz = os.path.getsize(file_path)
+        if actual_offset < 0 or actual_offset >= file_sz:
+            raise ValueError(f"Offset 0x{actual_offset:X} out of range [0, 0x{file_sz:X})")
 
         with open(file_path, "rb") as f:
             f.seek(actual_offset)
@@ -1040,6 +1046,8 @@ class SurgicalBinaryPatcher:
         """Reads raw bytes and hexadecimal preview from a binary file at a given byte offset."""
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
+        if length <= 0:
+            raise ValueError(f"Length must be positive, got {length}")
         file_sz = os.path.getsize(file_path)
         if offset < 0 or offset >= file_sz:
             raise ValueError(f"Offset 0x{offset:X} out of range [0, 0x{file_sz:X})")

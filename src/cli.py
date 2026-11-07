@@ -44,7 +44,7 @@ GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-an
 
 def print_help():
     print("""
-REA-Neural Unified CLI v7.3.0 (Windows-Native & 10-Sense Edition)
+REA-Neural Unified CLI v7.4.0 (Windows-Native & 10-Sense Edition)
 Autonomous Continuous Semantic Reverse Engineering & Binary Analysis
 
 Usage:

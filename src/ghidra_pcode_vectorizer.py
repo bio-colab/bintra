@@ -283,7 +283,8 @@ class ControlFlowGraphAnalyzer:
     """
     Analyzes Ghidra decompiled Basic Block Control Flow Graphs (CFG).
     Computes Cyclomatic Complexity, detects Control Flow Flattening (CFF)
-    dispatcher backbones, and computes basic block topological metrics.
+    dispatcher backbones using rigorous DFS cycle/back-edge classification,
+    and computes basic block topological metrics.
     """
 
     @classmethod
@@ -296,35 +297,83 @@ class ControlFlowGraphAnalyzer:
                 "has_cff_backbone": False,
                 "dispatcher_blocks": [],
                 "back_edges_count": 0,
+                "back_edges": [],
                 "topology": "EMPTY"
             }
 
         n = len(basic_blocks)
         edges = 0
-        back_edges = 0
+        all_block_ids = []
+        adj: Dict[int, List[int]] = {}
+
+        for b in basic_blocks:
+            b_id = b.get("id", 0)
+            all_block_ids.append(b_id)
+            succs = b.get("successors", [])
+            edges += len(succs)
+            adj[b_id] = list(succs)
+
+        # -------------------------------------------------------------
+        # Rigorous Graph-Theoretic DFS Cycle & Back-Edge Detection
+        # Color codes: 0 = WHITE (unvisited), 1 = GRAY (active recursion), 2 = BLACK (done)
+        # An edge u -> v is a back-edge iff v is GRAY (ancestor in active path).
+        # This is independent of block ID ordering and works on arbitrary graphs.
+        # -------------------------------------------------------------
+        entry_id = None
+        for b in basic_blocks:
+            in_deg = b.get("in_degree", len(b.get("predecessors", [])))
+            if in_deg == 0:
+                entry_id = b.get("id", 0)
+                break
+        if entry_id is None and basic_blocks:
+            entry_id = basic_blocks[0].get("id", 0)
+
+        color: Dict[int, int] = {b_id: 0 for b_id in all_block_ids}
+        back_edges: List[Tuple[int, int]] = []
+
+        def dfs(u: int):
+            color[u] = 1
+            for v in adj.get(u, []):
+                if v in color:
+                    if color[v] == 1:
+                        back_edges.append((u, v))
+                    elif color[v] == 0:
+                        dfs(v)
+            color[u] = 2
+
+        if entry_id is not None and entry_id in color:
+            dfs(entry_id)
+        for b_id in all_block_ids:
+            if color[b_id] == 0:
+                dfs(b_id)
+
+        # -------------------------------------------------------------
+        # Dispatcher Identification with Evidence-Based Dynamic Confidence
+        # -------------------------------------------------------------
+        back_edge_targets = [tgt for src, tgt in back_edges]
         dispatcher_blocks = []
 
         for b in basic_blocks:
             b_id = b.get("id", 0)
-            succs = b.get("successors", [])
             in_deg = b.get("in_degree", len(b.get("predecessors", [])))
-            out_deg = b.get("out_degree", len(succs))
-            edges += len(succs)
+            out_deg = b.get("out_degree", len(b.get("successors", [])))
+            incoming_loops = back_edge_targets.count(b_id)
 
-            for s_id in succs:
-                if s_id <= b_id:
-                    back_edges += 1
-
-            if in_deg >= 3 and out_deg >= 2:
+            if incoming_loops >= 2 and out_deg >= 2:
+                # Dynamic confidence based on loop convergence and fan-out
+                conf = min(0.95, 0.65 + 0.10 * (min(incoming_loops, 4) - 1) + 0.05 * min(out_deg, 4))
                 dispatcher_blocks.append({
                     "block_id": b_id,
                     "start": b.get("start"),
                     "in_degree": in_deg,
-                    "out_degree": out_deg
+                    "out_degree": out_deg,
+                    "incoming_back_edges": incoming_loops,
+                    "confidence": round(conf, 2)
                 })
 
         cyclomatic = max(1, edges - n + 2)
-        has_cff = len(dispatcher_blocks) > 0 and back_edges >= len(dispatcher_blocks)
+        has_cff = len(dispatcher_blocks) > 0
+        topology = "FLATTENED_DISPATCHER" if has_cff else ("CYCLIC_LOOP" if len(back_edges) > 0 else "ACYCLIC_TREE")
 
         return {
             "block_count": n,
@@ -332,8 +381,9 @@ class ControlFlowGraphAnalyzer:
             "cyclomatic_complexity": cyclomatic,
             "has_cff_backbone": has_cff,
             "dispatcher_blocks": dispatcher_blocks,
-            "back_edges_count": back_edges,
-            "topology": "FLATTENED_DISPATCHER" if has_cff else ("CYCLIC" if back_edges > 0 else "ACYCLIC_TREE")
+            "back_edges_count": len(back_edges),
+            "back_edges": back_edges,
+            "topology": topology
         }
 
 
@@ -361,19 +411,39 @@ class PcodeSSAAnalyzer:
         def _get_varnode_key(vn: Any) -> str:
             if isinstance(vn, dict):
                 k = vn.get("kind", "")
+                size = vn.get("size", 4)
                 if k == "register":
-                    return f"reg:{vn.get('name', '')}"
+                    # SSA Identity: Must account for definition instance (def_seq).
+                    # Different def_seq values represent distinct SSA versions of the register.
+                    def_seq = vn.get("def_seq")
+                    is_input = vn.get("is_input", False)
+                    ver = f"def_{def_seq}" if def_seq is not None else ("input" if is_input else "untracked")
+                    return f"reg:{vn.get('name', '').upper()}:{size}:{ver}"
                 elif k == "unique":
-                    return f"u:{vn.get('unique_id', vn.get('offset', ''))}"
+                    def_seq = vn.get("def_seq")
+                    uid = vn.get("unique_id", vn.get("offset", ""))
+                    ver = f"def_{def_seq}" if def_seq is not None else "uid"
+                    return f"u:{uid}:{size}:{ver}"
                 elif k == "constant":
-                    return f"const:{vn.get('const_val', 0)}"
+                    return f"const:{vn.get('const_val', 0)}:{size}"
+                elif k == "ram":
+                    return f"ram:{vn.get('offset', '')}:{size}"
                 return vn.get("repr", str(vn))
             return str(vn)
 
         def _is_same_varnode(vn1: Any, vn2: Any) -> bool:
             k1 = _get_varnode_key(vn1)
             k2 = _get_varnode_key(vn2)
-            return bool(k1 and k2 and k1 == k2 and not k1.startswith("const:"))
+            if not k1 or not k2 or k1.startswith("const:"):
+                return False
+            # Check SSA definition compatibility:
+            # If both are register dicts with def_seq specified, they MUST match
+            if isinstance(vn1, dict) and isinstance(vn2, dict):
+                d1 = vn1.get("def_seq")
+                d2 = vn2.get("def_seq")
+                if d1 is not None and d2 is not None and d1 != d2:
+                    return False
+            return k1 == k2
 
         for i, op in enumerate(pcode_ops):
             opcode = op.get("opcode", "").upper()
@@ -405,11 +475,20 @@ class PcodeSSAAnalyzer:
                                 target_block_id = None
                                 target_addr = None
 
-                                if cbranch_block_id in block_map:
+                                if basic_blocks and cbranch_block_id in block_map:
                                     blk = block_map[cbranch_block_id]
                                     target_block_id = blk.get("true_out")
                                     if target_block_id in block_map:
                                         target_addr = block_map[target_block_id].get("start")
+                                elif not basic_blocks:
+                                    # Fallback when analyzing raw P-code stream without CFG
+                                    target_addr = str(u_inputs[0].get("offset", u_inputs[0]) if isinstance(u_inputs[0], dict) else u_inputs[0])
+
+                                # Enforce verification:
+                                # When basic_blocks are provided, we MUST resolve the dead target block.
+                                # An Evidence Dossier cannot be emitted if the dead branch target is unverified.
+                                if basic_blocks and (target_block_id is None or target_addr is None):
+                                    continue
 
                                 evidence_dossiers.append({
                                     "finding_type": "PROVEN_OPAQUE_PREDICATE",
@@ -426,7 +505,7 @@ class PcodeSSAAnalyzer:
                                     "dead_block_address": target_addr,
                                     "confidence": 0.98,
                                     "severity": "HIGH",
-                                    "verifiable_patch": "Replace CBRANCH with unconditional jump to fallthrough block."
+                                    "remediation_proposal": "Replace CBRANCH with unconditional jump to fallthrough block."
                                 })
                                 dead_op_indices.add(j)
                                 break
@@ -616,20 +695,25 @@ class GhidraAnnotationPlanner:
 
             if is_placeholder_name:
                 clean_addr = entry_point.replace("0x", "")
-                if has_cff:
-                    new_name = f"REA_CFF_Dispatcher_{clean_addr}"
-                    should_rename = True
+                if has_cff and cfg_report.get("dispatcher_blocks"):
+                    disp = cfg_report["dispatcher_blocks"][0]
+                    if disp.get("confidence", 0) >= 0.80:
+                        new_name = f"REA_CFF_Dispatcher_{clean_addr}"
+                        should_rename = True
                 elif dossiers and dossiers[0].get("confidence", 0) >= 0.90:
                     new_name = f"REA_Deob_{name}"
                     should_rename = True
 
             if should_rename and new_name != name:
+                conf_val = dossiers[0]["confidence"] if dossiers else (
+                    cfg_report["dispatcher_blocks"][0].get("confidence", 0.85) if (has_cff and cfg_report.get("dispatcher_blocks")) else 0.80
+                )
                 rename_actions.append({
                     "action": "rename",
                     "address": entry_point,
                     "original_name": name,
                     "name": new_name,
-                    "confidence": dossiers[0]["confidence"] if dossiers else 0.95,
+                    "confidence": conf_val,
                     "rationale": "Renamed placeholder function based on verified SSA/CFG evidence."
                 })
 
@@ -650,7 +734,8 @@ class GhidraAnnotationPlanner:
                         comment_lines.append(f"  [{idx+1}] Proof: {dos['algebraic_proof']}")
                         if dos.get('dead_block_address'):
                             comment_lines.append(f"      Dead Target: {dos['dead_block_address']} (Block {dos['dead_block_id']})")
-                        comment_lines.append(f"      Patch: {dos['verifiable_patch']}")
+                        patch_text = dos.get('remediation_proposal') or dos.get('verifiable_patch', 'N/A')
+                        comment_lines.append(f"      Patch: {patch_text}")
 
                 comment_actions.append({
                     "action": "plate_comment",

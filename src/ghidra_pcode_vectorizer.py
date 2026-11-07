@@ -395,6 +395,7 @@ class PcodeSSAAnalyzer:
     """
     Exploits Ghidra High P-Code Static Single Assignment (SSA) and Def-Use chains
     to mathematically prove algebraic invariant tautologies (opaque predicates).
+    Requires full definition identity (address + sequence) and verified dead block reachability.
     Never claims deobfuscation without algebraic proof and dead basic block identification.
     """
 
@@ -404,25 +405,44 @@ class PcodeSSAAnalyzer:
         pcode_ops: List[Dict[str, Any]],
         basic_blocks: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
+        # Mathematical invariance proof requires CFG topology to verify dead branch reachability.
+        if not basic_blocks:
+            return {
+                "total_pcode_ops": len(pcode_ops),
+                "evidence_dossiers_count": 0,
+                "evidence_dossiers": [],
+                "prunable_operations": [],
+                "is_obfuscated": False
+            }
+
         evidence_dossiers = []
         dead_op_indices = set()
-        block_map = {b.get("id", idx): b for idx, b in enumerate(basic_blocks or [])}
+        block_map = {b.get("id", idx): b for idx, b in enumerate(basic_blocks)}
 
         def _get_varnode_key(vn: Any) -> str:
             if isinstance(vn, dict):
                 k = vn.get("kind", "")
                 size = vn.get("size", 4)
                 if k == "register":
-                    # SSA Identity: Must account for definition instance (def_seq).
-                    # Different def_seq values represent distinct SSA versions of the register.
+                    # Full SSA Identity: Must account for address + seq (def_id)
+                    def_id = vn.get("def_id")
                     def_seq = vn.get("def_seq")
+                    def_addr = vn.get("def_addr")
                     is_input = vn.get("is_input", False)
-                    ver = f"def_{def_seq}" if def_seq is not None else ("input" if is_input else "untracked")
+                    if def_id:
+                        ver = f"def_{def_id}"
+                    elif def_addr and def_seq is not None:
+                        ver = f"def_{def_addr}:{def_seq}"
+                    elif def_seq is not None:
+                        ver = f"def_{def_seq}"
+                    else:
+                        ver = "input" if is_input else "untracked"
                     return f"reg:{vn.get('name', '').upper()}:{size}:{ver}"
                 elif k == "unique":
+                    def_id = vn.get("def_id")
                     def_seq = vn.get("def_seq")
                     uid = vn.get("unique_id", vn.get("offset", ""))
-                    ver = f"def_{def_seq}" if def_seq is not None else "uid"
+                    ver = f"def_{def_id}" if def_id else (f"def_{def_seq}" if def_seq is not None else "uid")
                     return f"u:{uid}:{size}:{ver}"
                 elif k == "constant":
                     return f"const:{vn.get('const_val', 0)}:{size}"
@@ -436,11 +456,9 @@ class PcodeSSAAnalyzer:
             k2 = _get_varnode_key(vn2)
             if not k1 or not k2 or k1.startswith("const:"):
                 return False
-            # Check SSA definition compatibility:
-            # If both are register dicts with def_seq specified, they MUST match
             if isinstance(vn1, dict) and isinstance(vn2, dict):
-                d1 = vn1.get("def_seq")
-                d2 = vn2.get("def_seq")
+                d1 = vn1.get("def_id") or vn1.get("def_seq")
+                d2 = vn2.get("def_id") or vn2.get("def_seq")
                 if d1 is not None and d2 is not None and d1 != d2:
                     return False
             return k1 == k2
@@ -454,6 +472,8 @@ class PcodeSSAAnalyzer:
                 if _is_same_varnode(inputs[0], inputs[1]):
                     out_key = _get_varnode_key(output) if output else None
                     out_seq = op.get("seq", i)
+                    out_addr = op.get("address", "")
+                    out_id = op.get("op_id", f"{out_addr}:{out_seq}" if out_addr else str(out_seq))
 
                     for j in range(i + 1, min(i + 16, len(pcode_ops))):
                         user_op = pcode_ops[j]
@@ -465,8 +485,22 @@ class PcodeSSAAnalyzer:
                             cond_key = _get_varnode_key(cond_vn)
 
                             is_def_match = False
-                            if isinstance(cond_vn, dict) and cond_vn.get("def_seq") is not None:
-                                is_def_match = (cond_vn.get("def_seq") == out_seq)
+                            if isinstance(cond_vn, dict):
+                                cond_def_id = cond_vn.get("def_id")
+                                cond_def_addr = cond_vn.get("def_addr")
+                                cond_def_seq = cond_vn.get("def_seq")
+
+                                if cond_def_id and out_id:
+                                    is_def_match = (cond_def_id == out_id)
+                                elif cond_def_addr and out_addr and cond_def_addr != out_addr:
+                                    # Different instruction address - strictly NOT a match!
+                                    is_def_match = False
+                                elif cond_def_addr and out_addr:
+                                    is_def_match = (cond_def_addr == out_addr and cond_def_seq == out_seq)
+                                elif cond_def_seq is not None:
+                                    is_def_match = (cond_def_seq == out_seq)
+                                elif out_key and cond_key == out_key:
+                                    is_def_match = True
                             elif out_key and cond_key == out_key:
                                 is_def_match = True
 
@@ -475,25 +509,20 @@ class PcodeSSAAnalyzer:
                                 target_block_id = None
                                 target_addr = None
 
-                                if basic_blocks and cbranch_block_id in block_map:
+                                if cbranch_block_id in block_map:
                                     blk = block_map[cbranch_block_id]
                                     target_block_id = blk.get("true_out")
                                     if target_block_id in block_map:
                                         target_addr = block_map[target_block_id].get("start")
-                                elif not basic_blocks:
-                                    # Fallback when analyzing raw P-code stream without CFG
-                                    target_addr = str(u_inputs[0].get("offset", u_inputs[0]) if isinstance(u_inputs[0], dict) else u_inputs[0])
 
-                                # Enforce verification:
-                                # When basic_blocks are provided, we MUST resolve the dead target block.
-                                # An Evidence Dossier cannot be emitted if the dead branch target is unverified.
-                                if basic_blocks and (target_block_id is None or target_addr is None):
+                                if target_block_id is None or target_addr is None:
                                     continue
 
                                 evidence_dossiers.append({
                                     "finding_type": "PROVEN_OPAQUE_PREDICATE",
                                     "predicate_type": "ALGEBRAIC_ZERO_CBRANCH_OPAQUE",
                                     "generator_seq": out_seq,
+                                    "generator_address": out_addr,
                                     "generator_opcode": opcode,
                                     "cbranch_seq": user_op.get("seq", j),
                                     "cbranch_address": user_op.get("address"),
@@ -693,28 +722,20 @@ class GhidraAnnotationPlanner:
             should_rename = False
             new_name = name
 
-            if is_placeholder_name:
-                clean_addr = entry_point.replace("0x", "")
-                if has_cff and cfg_report.get("dispatcher_blocks"):
-                    disp = cfg_report["dispatcher_blocks"][0]
-                    if disp.get("confidence", 0) >= 0.80:
-                        new_name = f"REA_CFF_Dispatcher_{clean_addr}"
-                        should_rename = True
-                elif dossiers and dossiers[0].get("confidence", 0) >= 0.90:
-                    new_name = f"REA_Deob_{name}"
-                    should_rename = True
+            # Strict policy: ONLY rename if an opaque predicate is mathematically proven with dead block identification.
+            # NEVER auto-rename based on loop topology heuristics alone!
+            if is_placeholder_name and dossiers and dossiers[0].get("confidence", 0) >= 0.90:
+                new_name = f"REA_Deob_{name}"
+                should_rename = True
 
             if should_rename and new_name != name:
-                conf_val = dossiers[0]["confidence"] if dossiers else (
-                    cfg_report["dispatcher_blocks"][0].get("confidence", 0.85) if (has_cff and cfg_report.get("dispatcher_blocks")) else 0.80
-                )
                 rename_actions.append({
                     "action": "rename",
                     "address": entry_point,
                     "original_name": name,
                     "name": new_name,
-                    "confidence": conf_val,
-                    "rationale": "Renamed placeholder function based on verified SSA/CFG evidence."
+                    "confidence": dossiers[0]["confidence"],
+                    "rationale": "Renamed placeholder function based on mathematically proven SSA opaque predicate evidence."
                 })
 
             if dossiers or has_cff:

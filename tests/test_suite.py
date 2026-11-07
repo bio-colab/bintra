@@ -715,10 +715,15 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
                 {
                     "name": "FUN_140001000",
                     "entry_point": "0x140001000",
+                    "basic_blocks": [
+                        {"id": 0, "start": "0x140001000", "true_out": 1, "false_out": 2},
+                        {"id": 1, "start": "0x140001050"},
+                        {"id": 2, "start": "0x140001060"}
+                    ],
                     "pcode_ops": [
-                        {"opcode": "INT_XOR", "inputs": ["rax", "rax"], "output": "u_zero"},
-                        {"opcode": "CBRANCH", "inputs": ["target_dead", "u_zero"]},
-                        {"opcode": "RETURN"}
+                        {"opcode": "INT_XOR", "inputs": ["rax", "rax"], "output": "u_zero", "block_id": 0},
+                        {"opcode": "CBRANCH", "inputs": ["0x140001050", "u_zero"], "block_id": 0},
+                        {"opcode": "RETURN", "block_id": 0}
                     ]
                 },
                 {
@@ -1015,6 +1020,71 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         # mcp_server.py
         from mcp_server import SERVER_VERSION
         self.assertEqual(SERVER_VERSION, "7.4.0")
+
+
+    def test_ssa_analyzer_negative_same_seq_different_address(self):
+        """Negative Test: Verifies that operations with identical seq time at DIFFERENT addresses are NOT matched."""
+        from ghidra_pcode_vectorizer import PcodeSSAAnalyzer
+        pcode_stream = [
+            {
+                "seq": 0,
+                "address": "0x140001000",
+                "opcode": "INT_XOR",
+                "inputs": [
+                    {"kind": "register", "name": "EAX", "size": 4, "def_id": "0x140001000:0"},
+                    {"kind": "register", "name": "EAX", "size": 4, "def_id": "0x140001000:0"}
+                ],
+                "output": {"kind": "unique", "unique_id": 111, "size": 4}
+            },
+            {
+                "seq": 1,
+                "address": "0x140001005",
+                "opcode": "CBRANCH",
+                "inputs": [
+                    {"kind": "ram", "offset": "0x140001050"},
+                    # Condition defined at seq 0, but at DIFFERENT address 0x140002000!
+                    {"kind": "unique", "unique_id": 111, "def_seq": 0, "def_addr": "0x140002000", "def_id": "0x140002000:0", "size": 4}
+                ],
+                "block_id": 0
+            }
+        ]
+        blocks = [
+            {"id": 0, "start": "0x140001000", "true_out": 1, "false_out": 2},
+            {"id": 1, "start": "0x140001050"},
+            {"id": 2, "start": "0x140001060"}
+        ]
+        res = PcodeSSAAnalyzer.analyze_ssa_invariants(pcode_stream, blocks)
+        # MUST NOT evaluate as opaque predicate because generator address != condition def address!
+        self.assertFalse(res["is_obfuscated"])
+        self.assertEqual(res["evidence_dossiers_count"], 0)
+
+    def test_patch_file_structural_pe_header_flagged_unsafe(self):
+        """Verifies that arbitrary patches to PE headers are flagged as unsafe PE_STRUCTURAL_HEADER_MUTATION."""
+        import tempfile
+        from binary_neural_engine import SurgicalBinaryPatcher
+        # Create minimal PE file
+        dos_hdr = bytearray(0x80)
+        dos_hdr[0:2] = b"MZ"
+        dos_hdr[0x3C:0x40] = (0x40).to_bytes(4, "little") # pe_offset = 0x40
+        pe_hdr = b"PE\x00\x00" + b"\x4c\x01" + (1).to_bytes(2, "little") + b"\x00"*12 + (0xe0).to_bytes(2, "little") + (0x102).to_bytes(2, "little")
+        opt_hdr = b"\x0b\x01" + b"\x00"*222
+        sec_hdr = b".text\x00\x00\x00" + (0x1000).to_bytes(4, "little") + (0x1000).to_bytes(4, "little") + (0x200).to_bytes(4, "little") + (0x200).to_bytes(4, "little") + b"\x00"*12 + (0x60000020).to_bytes(4, "little")
+        padding = b"\x90" * 0x300
+        full_pe = bytes(dos_hdr[:0x40] + pe_hdr + opt_hdr + sec_hdr + padding)
+
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(full_pe)
+            src_tmp = f.name
+        out_tmp = src_tmp + ".patched.exe"
+        try:
+            # Patching offset 0x3C (e_lfanew) should NOT be safe
+            res = SurgicalBinaryPatcher.patch_file(src_tmp, out_tmp, 0x3C, "90909090")
+            self.assertFalse(res["is_safe"])
+            self.assertEqual(res["patch_type"], "PE_STRUCTURAL_HEADER_MUTATION")
+            self.assertIn("PE_HEADER_CORRUPTION_HAZARD", res["pain_hazards"])
+        finally:
+            if os.path.exists(src_tmp): os.remove(src_tmp)
+            if os.path.exists(out_tmp): os.remove(out_tmp)
 
 
 if __name__ == "__main__":

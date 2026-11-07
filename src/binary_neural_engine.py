@@ -320,17 +320,19 @@ class BinaryFormatInspector:
         if "ImportTable" not in dd:
             return {"imported_dlls_count": 0, "modules": {}}
         import_rva = int(dd["ImportTable"]["rva"], 16)
+        import_dir_size = int(dd["ImportTable"].get("size", 0))
         import_off = BinaryFormatInspector.rva_to_offset(pe_info, import_rva)
         if import_off is None or import_off + 20 > file_size:
             return {"imported_dlls_count": 0, "modules": {}}
 
+        max_import_end = min(file_size, import_off + import_dir_size) if import_dir_size > 0 else file_size
         modules = {}
         curr = import_off
         step = 8 if is_64 else 4
         mask = 0x8000000000000000 if is_64 else 0x80000000
         fmt = "<Q" if is_64 else "<I"
 
-        while curr + 20 <= file_size and len(modules) < 64:
+        while curr + 20 <= max_import_end and len(modules) < 64:
             f.seek(curr)
             desc = f.read(20)
             if len(desc) < 20:
@@ -339,10 +341,10 @@ class BinaryFormatInspector:
             if ilt_rva == 0 and name_rva == 0:
                 break
             name_off = BinaryFormatInspector.rva_to_offset(pe_info, name_rva)
-            if name_off is not None and name_off < file_size:
+            if name_off is not None and 0 <= name_off < file_size:
                 f.seek(name_off)
                 raw_name = bytearray()
-                while len(raw_name) < 256:
+                while len(raw_name) < 256 and f.tell() < file_size:
                     ch = f.read(1)
                     if not ch or ch == b"\x00":
                         break
@@ -352,7 +354,7 @@ class BinaryFormatInspector:
                 thunk_rva = ilt_rva if ilt_rva != 0 else iat_rva
                 thunk_off = BinaryFormatInspector.rva_to_offset(pe_info, thunk_rva)
                 funcs = []
-                if thunk_off is not None and thunk_off < file_size:
+                if thunk_off is not None and 0 <= thunk_off < file_size:
                     t_curr = thunk_off
                     while t_curr + step <= file_size and len(funcs) < 128:
                         f.seek(t_curr)
@@ -366,10 +368,10 @@ class BinaryFormatInspector:
                             funcs.append(f"Ordinal_{val & 0xFFFF}")
                         else:
                             ibn_off = BinaryFormatInspector.rva_to_offset(pe_info, val)
-                            if ibn_off is not None and ibn_off + 2 < file_size:
+                            if ibn_off is not None and 0 <= ibn_off + 2 < file_size:
                                 f.seek(ibn_off + 2)
                                 raw_fn = bytearray()
-                                while len(raw_fn) < 256:
+                                while len(raw_fn) < 256 and f.tell() < file_size:
                                     ch = f.read(1)
                                     if not ch or ch == b"\x00":
                                         break
@@ -389,6 +391,7 @@ class BinaryFormatInspector:
         if "ExportTable" not in dd:
             return {"exported_functions_count": 0, "functions": []}
         export_rva = int(dd["ExportTable"]["rva"], 16)
+        export_dir_size = int(dd["ExportTable"].get("size", 0))
         export_off = BinaryFormatInspector.rva_to_offset(pe_info, export_rva)
         if export_off is None or export_off + 40 > file_size:
             return {"exported_functions_count": 0, "functions": []}
@@ -409,6 +412,8 @@ class BinaryFormatInspector:
         exported = []
         if names_off and ords_off and funcs_off:
             for idx in range(min(num_names, 256)):
+                if names_off + (idx + 1) * 4 > file_size or ords_off + (idx + 1) * 2 > file_size:
+                    break
                 f.seek(names_off + idx * 4)
                 fn_name_rva_bytes = f.read(4)
                 f.seek(ords_off + idx * 2)
@@ -418,27 +423,48 @@ class BinaryFormatInspector:
                 (fn_name_rva,) = struct.unpack("<I", fn_name_rva_bytes)
                 (ord_val,) = struct.unpack("<H", ord_bytes)
 
+                if ord_val >= num_funcs:
+                    continue
+
+                if funcs_off + (ord_val + 1) * 4 > file_size:
+                    continue
                 f.seek(funcs_off + ord_val * 4)
                 fn_rva_bytes = f.read(4)
                 fn_rva = struct.unpack("<I", fn_rva_bytes)[0] if len(fn_rva_bytes) == 4 else 0
 
+                is_forwarded = (export_dir_size > 0 and export_rva <= fn_rva < export_rva + export_dir_size)
+
                 fn_name_off = BinaryFormatInspector.rva_to_offset(pe_info, fn_name_rva)
                 fn_name = ""
-                if fn_name_off and fn_name_off < file_size:
+                if fn_name_off and 0 <= fn_name_off < file_size:
                     f.seek(fn_name_off)
                     raw_fn = bytearray()
-                    while len(raw_fn) < 256:
+                    while len(raw_fn) < 256 and f.tell() < file_size:
                         ch = f.read(1)
                         if not ch or ch == b"\x00":
                             break
                         raw_fn.extend(ch)
                     fn_name = raw_fn.decode("latin-1", errors="ignore")
 
-                exported.append({
+                exp_entry = {
                     "name": fn_name,
                     "ordinal": ordinal_base + ord_val,
-                    "rva": hex(fn_rva)
-                })
+                    "rva": hex(fn_rva),
+                    "is_forwarded": is_forwarded
+                }
+                if is_forwarded:
+                    fwd_off = BinaryFormatInspector.rva_to_offset(pe_info, fn_rva)
+                    if fwd_off and 0 <= fwd_off < file_size:
+                        f.seek(fwd_off)
+                        raw_fwd = bytearray()
+                        while len(raw_fwd) < 256 and f.tell() < file_size:
+                            ch = f.read(1)
+                            if not ch or ch == b"\x00":
+                                break
+                            raw_fwd.extend(ch)
+                        exp_entry["forwarded_to"] = raw_fwd.decode("latin-1", errors="ignore")
+
+                exported.append(exp_entry)
 
         return {
             "exported_functions_count": num_funcs,
@@ -1081,33 +1107,44 @@ class SurgicalBinaryPatcher:
             raise ValueError("Patch offset exceeds file boundaries.")
 
         pe_info = BinaryFormatInspector.inspect(src_abs)
+        is_pe = (pe_info.get("format") == "PE")
         is_in_executable_section = False
+        is_in_section = False
         target_section_name = "UNKNOWN"
-        first_sec_offset = file_size
 
-        if pe_info.get("format") == "PE":
+        if is_pe:
             for s in pe_info.get("sections", []):
                 s_start = int(s["raw_offset"])
                 s_end = s_start + int(s["raw_size"])
-                if s_start > 0 and s_start < first_sec_offset:
-                    first_sec_offset = s_start
                 if s_start <= file_offset < s_end:
                     target_section_name = s["name"]
-                    is_in_executable_section = s["is_executable"]
+                    is_in_executable_section = s.get("is_executable", False)
+                    is_in_section = True
                     break
 
-        is_header_patch = (file_offset < first_sec_offset)
         original_bytes = bytes(data[file_offset:file_offset + len(patch_bytes)])
 
-        if is_header_patch:
-            is_safe = True
-            reason = "Offset targets PE header/metadata space; stack alignment invariance does not apply."
-            pain_hazards = []
-            pain_score = 0.0
-            patch_type = "PE_HEADER_METADATA"
+        if is_pe and not is_in_section:
+            # Targets PE headers / DOS stub / table descriptors
+            pe_offset = pe_info.get("pe_offset", 0x80)
+            chk_offset = pe_offset + 24 + 64
+            is_checksum_patch = (file_offset == chk_offset and len(patch_bytes) == 4)
+
+            if is_checksum_patch:
+                is_safe = True
+                reason = "Patch specifically updates the PE Optional Header CheckSum field."
+                patch_type = "PE_HEADER_CHECKSUM"
+                pain_hazards = []
+                pain_score = 0.0
+            else:
+                is_safe = False
+                reason = "Patch targets PE structural header/table area without schema verification; high risk of binary corruption."
+                patch_type = "PE_STRUCTURAL_HEADER_MUTATION"
+                pain_hazards = ["PE_HEADER_CORRUPTION_HAZARD"]
+                pain_score = 0.75
         else:
-            patch_type = "CODE_SECTION_MUTATION"
-            if pe_info.get("format") == "PE" and not is_in_executable_section:
+            patch_type = "CODE_SECTION_MUTATION" if is_in_executable_section else "DATA_SECTION_MUTATION"
+            if is_pe and not is_in_executable_section:
                 sys.stderr.write(
                     f"WARNING: Patch offset 0x{file_offset:X} resides in section '{target_section_name}', "
                     f"which is NOT marked as executable (IMAGE_SCN_MEM_EXECUTE). Execution may trigger DEP crash.\n"
@@ -1178,10 +1215,12 @@ class SurgicalBinaryPatcher:
             "patched_sha256": patched_sha,
             "pe_checksum_recalculated": checksum_updated,
             "new_pe_checksum": hex(new_checksum),
+            "is_safe": is_safe,
             "is_stack_safe": is_safe,
             "stack_safety_rationale": reason,
             "nociceptive_pain_score": round(min(pain_score, 1.0), 4),
-            "nociceptive_hazards": pain_hazards
+            "nociceptive_hazards": pain_hazards,
+            "pain_hazards": pain_hazards
         }
 
 

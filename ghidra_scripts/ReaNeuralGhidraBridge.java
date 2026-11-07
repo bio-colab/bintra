@@ -139,8 +139,11 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
             while (opIter.hasNext()) {
                 PcodeOpAST op = opIter.next();
                 Map<String, Object> opData = new HashMap<>();
-                opData.put("seq", op.getSeqnum().getTime());
-                opData.put("address", "0x" + op.getSeqnum().getTarget().toString());
+                String targetAddr = "0x" + op.getSeqnum().getTarget().toString();
+                int opTime = op.getSeqnum().getTime();
+                opData.put("seq", opTime);
+                opData.put("address", targetAddr);
+                opData.put("op_id", targetAddr + ":" + opTime);
                 opData.put("opcode", op.getMnemonic());
                 opData.put("block_id", op.getParent() != null ? op.getParent().getIndex() : -1);
 
@@ -324,13 +327,19 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
         }
         vMap.put("kind", kind);
 
-        // SSA Def
+        // SSA Def: Export address + time to guarantee globally unique definition identity
         PcodeOp defOp = vn.getDef();
         if (defOp != null) {
-            vMap.put("def_seq", defOp.getSeqnum().getTime());
+            String defAddr = "0x" + defOp.getSeqnum().getTarget().toString();
+            int defTime = defOp.getSeqnum().getTime();
+            vMap.put("def_addr", defAddr);
+            vMap.put("def_seq", defTime);
+            vMap.put("def_id", defAddr + ":" + defTime);
             vMap.put("def_opcode", defOp.getMnemonic());
         } else {
+            vMap.put("def_addr", null);
             vMap.put("def_seq", null);
+            vMap.put("def_id", null);
             vMap.put("is_input", vn.isInput());
         }
 

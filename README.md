@@ -33,10 +33,10 @@ Modern Windows applications (games, anti-cheat, endpoint security clients, media
 - **Cross-Layer Induction & Effective Rank:** Evaluates cross-layer composition ($W_{QK}^{(l_2)} W_{OV}^{(l_1)}$) and spectral effective rank to infer alphabet and structural data complexity without running model text.
 
 ### 5. Symbiotic Ghidra Integration (High P-Code Vectorization & Windows Mutation)
-Rather than treating Ghidra as a detached external decompiler, `REA-Neural` establishes a bidirectional pipeline with Ghidra 12.1.4:
+Rather than treating Ghidra as a detached external decompiler, `REA-Neural` is designed to feed and complement Ghidra. Current status: the repository ships the P-code vectorizer/matcher and an annotation **plan generator** only; it does **not** yet include a live transport/bridge to Ghidra (see `skills/reverse-engineer-anything/references/ghidra-bridge-status.md`). Target Ghidra version: 12.1.x (unverified).
 - **High P-Code IR Vectorization:** Translates Ghidra's SSA P-code operations into 64-dimensional continuous behavioral vectors, achieving $>95\%$ cross-architecture semantic matching invariant to compiler registers or optimizations.
 - **Pre-Decompiler Opaque Predicate Pruning:** Simplifies algebraic dead-end branches before AST construction, eliminating decompiler timeouts and sprawling control-flow flattening dispatcher cascades.
-- **Unlocked Windows Database Mutation:** Removes legacy read-only locks, permitting automated function renaming (`set_address_name`), prototype injection (`annotate_native_function`), and C-structure type synthesis on Windows via authenticated loopback TCP.
+- **Windows Database Mutation (plan generation):** Generates JSON-RPC **plans** for function renaming (`set_address_name`), prototype injection (`annotate_native_function`), and C-structure type synthesis. Applying a plan requires an external Ghidra-side script; REA-Neural does not open a TCP connection itself.
 
 ---
 

@@ -684,6 +684,27 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("tensor_input_tensor", c_struct)
         self.assertIn("[1x3x224x224]", c_struct)
 
+    def test_arm64_tightened_detection(self):
+        """Verifies that stray 5f d6 bytes in x86 are not misclassified as ARM64 in SemanticFunctionMatcher."""
+        from binary_neural_engine import SemanticFunctionMatcher
+        # x86 snippet with stray 5f d6 in operand/immediate
+        x86_hex = "55 48 89 e5 b8 5f d6 00 00 5d c3"
+        vec_x86 = SemanticFunctionMatcher.vectorize_function(x86_hex)
+        self.assertEqual(len(vec_x86), 16)
+        # Genuine ARM64 instruction sequence ending with RET
+        arm64_hex = "00 00 80 d2 c0 03 5f d6"
+        vec_arm = SemanticFunctionMatcher.vectorize_function(arm64_hex)
+        self.assertEqual(len(vec_arm), 16)
+
+    def test_sensory_score_semantics_presence(self):
+        """Verifies that sensory evaluation includes explicit score_semantics disclosure."""
+        from binary_neural_engine import SensoryCortex
+        cortex = SensoryCortex()
+        report = cortex.evaluate_all_senses(code_hex="90 90 c3")
+        self.assertIn("score_semantics", report)
+        self.assertIn("STATIC capability-presence", report["score_semantics"])
+        self.assertEqual(report["active_senses_count"], 10)
+
 
 if __name__ == "__main__":
     unittest.main()

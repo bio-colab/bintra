@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rea-neural"
-version = "7.1.0"
+version = "7.3.0"
 authors = [
   { name="bio-colab", email="contact@bio-colab.org" },
 ]

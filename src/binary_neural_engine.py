@@ -629,7 +629,7 @@ class SemanticFunctionMatcher:
 
         is_arm64 = (
             (len(raw_bytes) % 4 == 0)
-            and (raw_bytes.endswith(b"\xc0\x03\x5f\xd6") or b"\x5f\xd6" in raw_bytes)
+            and raw_bytes.endswith(b"\xc0\x03\x5f\xd6")  # patched: require AArch64 RET terminator
             and not (b"\xc3" in raw_bytes or b"\x55\x48" in raw_bytes)
         )
 
@@ -1351,6 +1351,11 @@ class SensoryCortex:
             "platform_target": "Windows 10 / 11 / Server (PE32/PE32+ & Safetensors)",
             "active_senses_count": len(senses_output),
             "overall_sensory_efficiency": round(float(np.mean(scores)), 4),
+            "score_semantics": (
+                "efficiency_score/overall_sensory_efficiency are STATIC capability-presence "
+                "indicators (fixed per sense), NOT measured accuracy. Read each sense's "
+                "'telemetry' for the real computed values."
+            ),
             "senses": senses_output,
         }
 

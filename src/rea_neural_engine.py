@@ -1565,6 +1565,12 @@ def main():
         }, indent=2))
 
     elif args.command == "synthesize-weights":
+        sys.stderr.write(
+            "[REA-Neural SCOPE WARNING] 'synthesize-weights' BUILDS a neural network from "
+            "scratch. This is out of REA-Neural's reverse-engineering scope (it creates a "
+            "standalone AI model, the WSP paper's own agenda) and is kept only as archived "
+            "lineage. See SCOPE.md. It reverse-engineers no Windows binary.\n"
+        )
         tensors = WeightSpaceCompiler.compile_breakout_policy_network()
         # Write fresh safetensors file
         header = {}

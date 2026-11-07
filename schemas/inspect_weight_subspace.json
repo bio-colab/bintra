@@ -1,12 +1,12 @@
 {
   "name": "inspect_weight_subspace",
-  "description": "Extract and inspect low-rank SVD singular modes, dominant directional vectors, or coordinate extreme blocks of a specific tensor within a safetensors or GGUF file using memory mapping. Never loads full model into memory. Returns compact singular values, directional vectors, and an authenticated Evidence record.",
+  "description": "Extract and inspect low-rank SVD singular modes, dominant directional vectors, or coordinate extreme blocks of a specific tensor within a safetensors file using memory mapping. Never loads full model into memory. Returns compact singular values and directional vectors. (Note: GGUF input and Evidence records are not implemented in this repository.)",
   "parameters": {
     "type": "object",
     "properties": {
       "path": {
         "type": "string",
-        "description": "Absolute filesystem path to the local .safetensors or .gguf model file."
+        "description": "Absolute filesystem path to the local .safetensors model file."
       },
       "tensor_name": {
         "type": "string",

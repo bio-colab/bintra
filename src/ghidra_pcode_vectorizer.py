@@ -339,6 +339,11 @@ class GhidraAnnotationPlanner:
     """
     Constructs type-safe JSON-RPC payloads for mutating Ghidra's Program Database
     (set_address_name, annotate_native_function, set_comment) on Windows.
+
+    TRANSPORT STATUS (honest disclosure): this class only GENERATES plan dicts. It opens
+    NO socket/TCP connection, ships NO Ghidra-side script, and applies NOTHING by itself.
+    Executing a plan requires an external Ghidra Headless/PyGhidra script. See
+    references/ghidra-bridge-status.md.
     """
 
     @staticmethod

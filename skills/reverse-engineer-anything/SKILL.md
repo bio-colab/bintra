@@ -8,6 +8,12 @@ metadata:
 
 # REA
 
+> **REA-Neural fork note (honest scope):** this repository does **not** ship the upstream REA
+> MCP server, the `rea-agents` npm package, the `open_binary` tool, or the ~234 MCP tools referenced
+> below (those describe upstream REA). In this fork the **only** runnable surface is the
+> `python src/cli.py ...` commands. Treat MCP / `rea` / `npx rea-agents` instructions below as upstream
+> context, not capabilities present here.
+
 Use REA when a claim depends on a shipped binary or package, decompilation,
 requested runtime evidence, or comparison with
 behavior not established by available source. For ordinary analysis of a

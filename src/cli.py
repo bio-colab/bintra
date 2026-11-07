@@ -75,6 +75,9 @@ Ghidra P-Code & Symbolic Integration Commands:
   ghidra-plan       Generate type-safe Ghidra database mutation and annotation plans
   ghidra-analyze    Batch-analyze exported Ghidra P-Code JSON and generate database mutation plan
   ghidra-headless   Launch Ghidra analyzeHeadless with REA-Neural bridge script to auto-deobfuscate
+
+Agent-Native MCP (Model Context Protocol):
+  mcp               Launch native JSON-RPC 2.0 stdio MCP server for AI models (Claude, Antigravity, Cursor)
 """)
 
 
@@ -98,7 +101,7 @@ def main():
     if cmd in SENSORY_COMMANDS:
         parser = argparse.ArgumentParser(description="REA-Neural 10-Sense Diagnostic Audit")
         parser.add_argument("command", help="sense or sensory-audit")
-        parser.add_argument("--file", default=None, help="Optional path to PE executable or .safetensors model")
+        parser.add_argument("--file", "--binary", "--input", dest="file", default=None, help="Optional path to PE executable or .safetensors model")
         parser.add_argument("--hex", default=None, help="Optional hex string of machine code")
         args = parser.parse_args()
         report = SensoryCortex.evaluate_all_senses(file_path=args.file, code_hex=args.hex)
@@ -162,7 +165,7 @@ def main():
         elif cmd == "ghidra-analyze":
             parser = argparse.ArgumentParser(description="Analyze Ghidra exported High P-Code and emit mutation plan")
             parser.add_argument("command")
-            parser.add_argument("--input", required=True, help="Path to exported Ghidra JSON file")
+            parser.add_argument("--input", "--file", dest="input", required=True, help="Path to exported Ghidra JSON file")
             parser.add_argument("--output", default=None, help="Path to write the generated mutation plan JSON")
             args = parser.parse_args()
 
@@ -178,7 +181,7 @@ def main():
         elif cmd == "ghidra-headless":
             parser = argparse.ArgumentParser(description="Run Ghidra headless analysis with REA-Neural bridge script")
             parser.add_argument("command")
-            parser.add_argument("--binary", required=True, help="Path to target executable (PE/ELF)")
+            parser.add_argument("--binary", "--file", "--input", dest="binary", required=True, help="Path to target executable (PE/ELF)")
             parser.add_argument("--ghidra-path", default=os.environ.get("GHIDRA_INSTALL_DIR", r"C:\Users\Eylias\tools\ghidra"), help="Ghidra installation directory")
             parser.add_argument("--project-dir", default=None, help="Ghidra project directory (default: temp)")
             parser.add_argument("--project-name", default="REANeuralHeadless", help="Ghidra project name")
@@ -213,11 +216,39 @@ def main():
             res = subprocess.run(cmd_args)
             sys.exit(res.returncode)
 
+    # MCP Server Command
+    if cmd in ("mcp", "mcp-server"):
+        from mcp_server import main as mcp_main
+        mcp_main()
+        return
+
+    # Agent-Native Flag Normalization (Permissive Aliases for AI Agents)
     if cmd in BINARY_COMMANDS:
         if cmd == "patch-binary":
             sys.argv[1] = "patch"
+            # Normalize --file / --binary / --input to --source
+            for alt in ("--file", "--binary", "--input"):
+                if alt in sys.argv and "--source" not in sys.argv:
+                    idx = sys.argv.index(alt)
+                    sys.argv[idx] = "--source"
+            # If no --output, default to in-place patch
+            if "--source" in sys.argv and "--output" not in sys.argv:
+                s_idx = sys.argv.index("--source")
+                if s_idx + 1 < len(sys.argv):
+                    sys.argv.extend(["--output", sys.argv[s_idx + 1]])
+            # Normalize --patch to --patch-hex
+            if "--patch" in sys.argv and "--patch-hex" not in sys.argv:
+                p_idx = sys.argv.index("--patch")
+                sys.argv[p_idx] = "--patch-hex"
         elif cmd == "match-functions":
             sys.argv[1] = "match"
+        else:
+            # Normalize --binary or --input to --file for inspect, scan-hybrid, etc.
+            for alt in ("--binary", "--input"):
+                if alt in sys.argv and "--file" not in sys.argv:
+                    idx = sys.argv.index(alt)
+                    sys.argv[idx] = "--file"
+
         binary_neural_engine.main()
 
     elif cmd in WEIGHT_COMMANDS:
@@ -227,6 +258,13 @@ def main():
             sys.argv[1] = "decompile"
         elif cmd == "diff-weights":
             sys.argv[1] = "diff"
+
+        # Normalize --file or --input or --binary to --model
+        for alt in ("--file", "--input", "--binary"):
+            if alt in sys.argv and "--model" not in sys.argv:
+                idx = sys.argv.index(alt)
+                sys.argv[idx] = "--model"
+
         rea_neural_engine.main()
 
     else:

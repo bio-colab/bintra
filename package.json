@@ -4,10 +4,12 @@
   "description": "Continuous Semantic Reverse Engineering & Binary Analysis Framework. Extends REA to continuous semantic program representations, deobfuscation, cross-architecture matching, surgical binary patching, and weight-space programming.",
   "main": "src/cli.py",
   "bin": {
-    "rea-neural": "src/cli.py"
+    "rea-neural": "src/cli.py",
+    "rea-mcp": "src/mcp_server.py"
   },
   "scripts": {
-    "test": "python -m unittest discover -s tests"
+    "test": "python -m unittest discover -s tests",
+    "mcp": "python src/mcp_server.py"
   },
   "keywords": [
     "reverse-engineering",

@@ -2,17 +2,19 @@
 name: reverse-engineer-anything
 description: Reverse engineer native, managed, Electron/JavaScript, packaged, firmware, browser, and modern hybrid targets with REA, featuring continuous semantic deobfuscation, cross-architecture function matching, surgical binary patching, and weight-space neural program analysis. Use shipped-artifact or requested runtime evidence to explain features, compare versions, decompile code, or guide a reconstruction.
 metadata:
-  version: "50.0-neural.1"
-  tool_count: 234
+  version: "7.3.0"
+  tool_count: 12
 ---
 
 # REA
 
-> **REA-Neural fork note (honest scope):** this repository does **not** ship the upstream REA
-> MCP server, the `rea-agents` npm package, the `open_binary` tool, or the ~234 MCP tools referenced
-> below (those describe upstream REA). In this fork the **only** runnable surface is the
-> `python src/cli.py ...` commands. Treat MCP / `rea` / `npx rea-agents` instructions below as upstream
-> context, not capabilities present here.
+> **REA-Neural Agent-Native Architecture (v7.3.0):**  
+> This repository ships its own native Python Model Context Protocol (MCP) server ([`src/mcp_server.py`](../../src/mcp_server.py) or `python src/cli.py mcp`)
+> providing 12 direct, type-safe reverse engineering tools for AI models (`rea_inspect_binary`, `rea_deobfuscate_binary`,
+> `rea_match_functions`, `rea_patch_binary`, `rea_scan_hybrid`, `rea_sensory_audit`, `rea_match_pcode`,
+> `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`, `rea_wsp_audit`, `rea_patch_weights`).  
+> Autonomous agents (Antigravity, Claude Code, Codex, Cursor, Devin) can also execute commands directly via the
+> Unified CLI (`python src/cli.py <command> [options]`). See [`AGENTS.md`](../../AGENTS.md) for the complete agent field guide.
 
 Use REA when a claim depends on a shipped binary or package, decompilation,
 requested runtime evidence, or comparison with

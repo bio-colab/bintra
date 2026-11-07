@@ -753,6 +753,43 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("startTransaction", java_content)
         self.assertIn("ghidra-analyze", java_content)
 
+    def test_mcp_server_initialize_and_tools_list(self):
+        """Verifies that native MCP server implements JSON-RPC 2.0 handshake and 12 tools."""
+        from mcp_server import ReaMcpServer, TOOLS_REGISTRY
+        server = ReaMcpServer()
+        init_res = server.handle_initialize({})
+        self.assertEqual(init_res["serverInfo"]["name"], "rea-neural")
+        self.assertEqual(init_res["serverInfo"]["version"], "7.3.0")
+
+        tools_res = server.handle_tools_list({})
+        self.assertIn("tools", tools_res)
+        self.assertEqual(len(tools_res["tools"]), 12)
+        tool_names = [t["name"] for t in tools_res["tools"]]
+        self.assertIn("rea_inspect_binary", tool_names)
+        self.assertIn("rea_sensory_audit", tool_names)
+        self.assertIn("rea_ghidra_headless", tool_names)
+
+    def test_mcp_server_dispatch_tool_call(self):
+        """Verifies dispatching tools directly through MCP server protocol."""
+        from mcp_server import ReaMcpServer
+        server = ReaMcpServer()
+        audit_res = server.dispatch_tool("rea_sensory_audit", {"code_hex": "55 48 89 e5 31 c0 5d c3"})
+        self.assertEqual(audit_res["active_senses_count"], 10)
+        self.assertIn("score_semantics", audit_res)
+
+        deob_res = server.dispatch_tool("rea_deobfuscate_binary", {"code_hex": "31 c0 74 02 90 90 c3"})
+        self.assertIn("opaque_predicates_detected", deob_res)
+
+    def test_agents_md_documentation_exists(self):
+        """Verifies that AGENTS.md operating guide exists in repository root."""
+        from pathlib import Path
+        repo_root = Path(__file__).resolve().parent.parent
+        agents_md = repo_root / "AGENTS.md"
+        self.assertTrue(agents_md.exists())
+        text = agents_md.read_text(encoding="utf-8")
+        self.assertIn("Autonomous AI Coding Agents", text)
+        self.assertIn("Model Context Protocol (MCP)", text)
+
 
 if __name__ == "__main__":
     unittest.main()

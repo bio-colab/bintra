@@ -38,7 +38,7 @@ WEIGHT_COMMANDS = {
     "wsp-audit", "synthesize-weights"
 }
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
-GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan"}
+GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless"}
 
 
 def print_help():
@@ -73,6 +73,8 @@ Ghidra P-Code & Symbolic Integration Commands:
   match-pcode       Match functions using Ghidra High P-code IR (Architecture-Invariant)
   deobfuscate-pcode Detect and prune P-code algebraic opaque predicates and dispatcher loops
   ghidra-plan       Generate type-safe Ghidra database mutation and annotation plans
+  ghidra-analyze    Batch-analyze exported Ghidra P-Code JSON and generate database mutation plan
+  ghidra-headless   Launch Ghidra analyzeHeadless with REA-Neural bridge script to auto-deobfuscate
 """)
 
 
@@ -157,6 +159,59 @@ def main():
             )
             print(json.dumps(plan, indent=2))
             return
+        elif cmd == "ghidra-analyze":
+            parser = argparse.ArgumentParser(description="Analyze Ghidra exported High P-Code and emit mutation plan")
+            parser.add_argument("command")
+            parser.add_argument("--input", required=True, help="Path to exported Ghidra JSON file")
+            parser.add_argument("--output", default=None, help="Path to write the generated mutation plan JSON")
+            args = parser.parse_args()
+
+            with open(args.input, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+
+            plan = GhidraAnnotationPlanner.analyze_program_export(payload)
+            if args.output:
+                with open(args.output, "w", encoding="utf-8") as f:
+                    json.dump(plan, f, indent=2)
+            print(json.dumps(plan, indent=2))
+            return
+        elif cmd == "ghidra-headless":
+            parser = argparse.ArgumentParser(description="Run Ghidra headless analysis with REA-Neural bridge script")
+            parser.add_argument("command")
+            parser.add_argument("--binary", required=True, help="Path to target executable (PE/ELF)")
+            parser.add_argument("--ghidra-path", default=os.environ.get("GHIDRA_INSTALL_DIR", r"C:\Users\Eylias\tools\ghidra"), help="Ghidra installation directory")
+            parser.add_argument("--project-dir", default=None, help="Ghidra project directory (default: temp)")
+            parser.add_argument("--project-name", default="REANeuralHeadless", help="Ghidra project name")
+            parser.add_argument("--apply", action="store_true", help="Automatically commit mutations to Ghidra database")
+            args = parser.parse_args()
+
+            import subprocess, tempfile
+            from pathlib import Path as P
+            ghidra_dir = P(args.ghidra_path)
+            headless_bat = ghidra_dir / "support" / "analyzeHeadless.bat"
+            if not headless_bat.exists():
+                print(f"Error: analyzeHeadless.bat not found at: {headless_bat}")
+                sys.exit(1)
+
+            repo_root = P(__file__).resolve().parent.parent
+            script_dir = repo_root / "ghidra_scripts"
+            proj_dir = args.project_dir or tempfile.gettempdir()
+            script_args = ["apply"] if args.apply else []
+
+            cmd_args = [
+                str(headless_bat),
+                proj_dir,
+                args.project_name,
+                "-import", args.binary,
+                "-scriptPath", str(script_dir),
+                "-postScript", "ReaNeuralGhidraBridge.java"
+            ] + script_args
+
+            print(f"[REA-Neural] Launching Ghidra Headless Analyzer...")
+            print(f"[REA-Neural] Binary: {args.binary}")
+            print(f"[REA-Neural] Script: {script_dir / 'ReaNeuralGhidraBridge.java'}")
+            res = subprocess.run(cmd_args)
+            sys.exit(res.returncode)
 
     if cmd in BINARY_COMMANDS:
         if cmd == "patch-binary":

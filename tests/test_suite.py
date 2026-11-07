@@ -705,6 +705,54 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("STATIC capability-presence", report["score_semantics"])
         self.assertEqual(report["active_senses_count"], 10)
 
+    def test_ghidra_analyze_program_export(self):
+        """Verifies batch analysis of exported Ghidra High P-Code program payload."""
+        from ghidra_pcode_vectorizer import GhidraAnnotationPlanner
+        payload = {
+            "program_name": "target_crackme.exe",
+            "image_base": "0x140000000",
+            "functions": [
+                {
+                    "name": "FUN_140001000",
+                    "entry_point": "0x140001000",
+                    "pcode_ops": [
+                        {"opcode": "INT_XOR", "inputs": ["rax", "rax"], "output": "u_zero"},
+                        {"opcode": "CBRANCH", "inputs": ["target_dead", "u_zero"]},
+                        {"opcode": "RETURN"}
+                    ]
+                },
+                {
+                    "name": "FUN_140002000",
+                    "entry_point": "0x140002000",
+                    "pcode_ops": [
+                        {"opcode": "INT_ADD", "inputs": ["rcx", "rdx"], "output": "rax"},
+                        {"opcode": "RETURN"}
+                    ]
+                }
+            ]
+        }
+        plan = GhidraAnnotationPlanner.analyze_program_export(payload)
+        self.assertEqual(plan["analyzed_functions"], 2)
+        self.assertEqual(plan["obfuscated_functions"], 1)
+        self.assertEqual(plan["opaque_predicates_total"], 1)
+        self.assertEqual(len(plan["rename_actions"]), 1)
+        self.assertEqual(plan["rename_actions"][0]["name"], "REA_Deob_FUN_140001000")
+        self.assertEqual(len(plan["comment_actions"]), 1)
+
+    def test_ghidra_bridge_scripts_exist(self):
+        """Verifies that Ghidra bridge scripts exist and are well-formed."""
+        from pathlib import Path
+        repo_root = Path(__file__).resolve().parent.parent
+        java_script = repo_root / "ghidra_scripts" / "ReaNeuralGhidraBridge.java"
+        py_script = repo_root / "ghidra_scripts" / "rea_extract_pcode.py"
+        self.assertTrue(java_script.exists())
+        self.assertTrue(py_script.exists())
+
+        java_content = java_script.read_text(encoding="utf-8")
+        self.assertIn("public class ReaNeuralGhidraBridge extends GhidraScript", java_content)
+        self.assertIn("startTransaction", java_content)
+        self.assertIn("ghidra-analyze", java_content)
+
 
 if __name__ == "__main__":
     unittest.main()

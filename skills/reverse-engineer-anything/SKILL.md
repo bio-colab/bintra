@@ -137,14 +137,17 @@ explicit path or endpoint and do not need it.
   Run sensory cortex audit:
   `python src/cli.py sense --file <binary_or_safetensors_path>` or `python src/cli.py sense --hex <hex_bytes>`
   (or via `rea sense --file <path>`). Simultaneously evaluates all 10 cybernetic senses (analytical vision, temporal hearing, active touch, exploratory smell, discriminative taste, deep proprioception, spatial sense, vestibular balance, nociception / pain reflex, and sense of rhythm).
-- Ghidra High P-Code continuous semantic matching & database mutation (Windows unlocked):
-  Run P-code matcher for true architecture- and compiler-invariant function matching:
-  `python src/cli.py match-pcode --func1 <json_or_file> --func2 <json_or_file>` (or via `rea match-pcode ...`).
-  Run P-code opaque predicate simplifier to clean control flow before Ghidra decompilation:
-  `python src/cli.py deobfuscate-pcode --file <pcode_json>` (or via `rea deobfuscate-pcode ...`).
-  Generate Ghidra Program Database mutation plan (renaming, prototype annotation, comments):
-  `python src/cli.py ghidra-plan --address <addr> --name <func_name> --return-type <type> --comment <cmt>` (or via `rea ghidra-plan ...`).
-  Mutating tools `set_address_name` and `annotate_native_function` are now enabled natively on Windows via authenticated loopback TCP.
+- Ghidra High P-Code continuous semantic symbiosis & database mutation:
+  Execute native Ghidra bridge script inside Ghidra GUI or via headless automation:
+  `python src/cli.py ghidra-headless --binary <target_exe> --apply`
+  or run `ghidra_scripts/ReaNeuralGhidraBridge.java` from Ghidra Script Manager.
+  Extracts High P-Code, Varnodes, and CFG via `DecompInterface`, detects algebraic opaque predicates,
+  and commits function renames and plate comments into Ghidra's Program Database with user approval.
+  Batch-analyze exported Ghidra P-Code JSON:
+  `python src/cli.py ghidra-analyze --input <exported_json> --output <mutation_plan.json>`.
+  Run P-code matcher for architecture-invariant matching:
+  `python src/cli.py match-pcode --func1 <json_or_file> --func2 <json_or_file>`.
+  See the [Ghidra integration guide](references/ghidra-bridge-status.md).
 
 - ASAR or extracted JavaScript/Electron tree:
   `analyze_javascript_application`.

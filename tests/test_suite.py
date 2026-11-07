@@ -825,5 +825,74 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("Model Context Protocol (MCP)", text)
 
 
+    def test_cfg_analyzer_topology_and_cff(self):
+        """Verifies CFG topology extraction, cyclomatic complexity, and CFF dispatcher loop detection."""
+        from ghidra_pcode_vectorizer import ControlFlowGraphAnalyzer
+        # Synthetic CFG with a central dispatcher block (Block 1) with in-degree 3, out-degree 2
+        blocks = [
+            {"id": 0, "start": "0x140001000", "predecessors": [], "successors": [1]},
+            {"id": 1, "start": "0x140001010", "predecessors": [0, 2, 3], "successors": [2, 3]},
+            {"id": 2, "start": "0x140001030", "predecessors": [1], "successors": [1]},
+            {"id": 3, "start": "0x140001050", "predecessors": [1], "successors": [1, 4]},
+            {"id": 4, "start": "0x140001070", "predecessors": [3], "successors": []}
+        ]
+        cfg = ControlFlowGraphAnalyzer.analyze_cfg(blocks)
+        self.assertEqual(cfg["block_count"], 5)
+        self.assertEqual(cfg["edge_count"], 6)
+        self.assertEqual(cfg["cyclomatic_complexity"], 3) # 6 - 5 + 2 = 3
+        self.assertTrue(cfg["has_cff_backbone"])
+        self.assertEqual(cfg["topology"], "FLATTENED_DISPATCHER")
+        self.assertEqual(len(cfg["dispatcher_blocks"]), 1)
+        self.assertEqual(cfg["dispatcher_blocks"][0]["block_id"], 1)
+
+    def test_pcode_ssa_analyzer_varnodes(self):
+        """Verifies High P-Code SSA Def-Use analysis and mathematical invariant proof."""
+        from ghidra_pcode_vectorizer import PcodeSSAAnalyzer
+        pcode_ops = [
+            {
+                "seq": 10,
+                "address": "0x140001000",
+                "opcode": "INT_XOR",
+                "inputs": [
+                    {"kind": "register", "name": "EAX", "size": 4},
+                    {"kind": "register", "name": "EAX", "size": 4}
+                ],
+                "output": {"kind": "unique", "unique_id": 501, "size": 4}
+            },
+            {
+                "seq": 11,
+                "address": "0x140001005",
+                "opcode": "CBRANCH",
+                "inputs": [
+                    {"kind": "ram", "offset": "0x140001050"},
+                    {"kind": "unique", "unique_id": 501, "def_seq": 10, "size": 4}
+                ],
+                "block_id": 0
+            }
+        ]
+        blocks = [
+            {"id": 0, "start": "0x140001000", "true_out": 2, "false_out": 1},
+            {"id": 1, "start": "0x140001010"},
+            {"id": 2, "start": "0x140001050"}
+        ]
+        res = PcodeSSAAnalyzer.analyze_ssa_invariants(pcode_ops, blocks)
+        self.assertTrue(res["is_obfuscated"])
+        self.assertEqual(res["evidence_dossiers_count"], 1)
+        dossier = res["evidence_dossiers"][0]
+        self.assertEqual(dossier["dead_block_id"], 2)
+        self.assertEqual(dossier["dead_block_address"], "0x140001050")
+        self.assertIn("mathematically proves condition=0 in SSA", dossier["algebraic_proof"])
+
+    def test_scope_decoupling_synthesize_weights(self):
+        """Verifies that synthesize-weights is decoupled from active CLI commands per SCOPE.md."""
+        import subprocess, sys
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        cli_path = os.path.join(repo_root, "src", "cli.py")
+        res = subprocess.run([sys.executable, cli_path, "synthesize-weights"], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("decoupled_from_active_scope", res.stdout)
+        self.assertIn("SCOPE.md", res.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

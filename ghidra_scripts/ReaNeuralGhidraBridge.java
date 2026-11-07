@@ -1,4 +1,4 @@
-// REA-Neural Ghidra Bridge: Extracts High P-Code, runs semantic deobfuscation, and mutates Ghidra DB.
+// REA-Neural Ghidra Bridge: Extracts High P-Code, SSA Def-Use chains, and Full CFG, runs evidence-based semantic deobfuscation, and commits verified mutations.
 //@category REA-Neural
 //@keybinding 
 //@menupath Tools.REA-Neural.Run Semantic Deobfuscation Bridge
@@ -22,8 +22,11 @@ import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionIterator;
 import ghidra.program.model.listing.CodeUnit;
 import ghidra.program.model.pcode.HighFunction;
+import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.PcodeOpAST;
 import ghidra.program.model.pcode.VarnodeAST;
+import ghidra.program.model.pcode.PcodeBlockBasic;
+import ghidra.program.model.pcode.PcodeBlock;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.symbol.SourceType;
 
@@ -38,7 +41,7 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
     @Override
     public void run() throws Exception {
         println("=================================================================");
-        println(" [REA-Neural] Initiating Symbiotic Ghidra Bridge (v7.3.0)");
+        println(" [REA-Neural] Initiating Symbiotic Ghidra Bridge (v7.4.0)");
         println("=================================================================");
 
         if (currentProgram == null) {
@@ -57,8 +60,8 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
         DecompInterface decomp = new DecompInterface();
         decomp.openProgram(currentProgram);
 
-        // 2. Extract Functions and High P-Code
-        println("[REA-Neural] Extracting High P-Code from program functions...");
+        // 2. Extract Functions, Full CFG, and High P-Code with SSA Def-Use
+        println("[REA-Neural] Extracting High P-Code, SSA Def-Use, and CFG from program functions...");
         List<Map<String, Object>> functionsList = new ArrayList<>();
         FunctionIterator funcIter = currentProgram.getFunctionManager().getFunctions(true);
         int totalFuncs = 0;
@@ -89,29 +92,74 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
             funcData.put("parameter_count", func.getParameterCount());
             funcData.put("return_type", func.getReturnType().getName());
 
+            // 2a. Extract Full CFG (Basic Blocks, In/Out Edges, Branch Topology)
+            List<Map<String, Object>> blocksList = new ArrayList<>();
+            ArrayList<PcodeBlockBasic> bBlocks = highFunc.getBasicBlocks();
+            if (bBlocks != null) {
+                for (PcodeBlockBasic block : bBlocks) {
+                    Map<String, Object> blockData = new HashMap<>();
+                    blockData.put("id", block.getIndex());
+                    blockData.put("start", "0x" + block.getStart().toString());
+                    blockData.put("stop", "0x" + block.getStop().toString());
+                    blockData.put("in_degree", block.getInSize());
+                    blockData.put("out_degree", block.getOutSize());
+
+                    List<Integer> inBlocks = new ArrayList<>();
+                    for (int i = 0; i < block.getInSize(); i++) {
+                        inBlocks.add(block.getIn(i).getIndex());
+                    }
+                    blockData.put("predecessors", inBlocks);
+
+                    List<Integer> outBlocks = new ArrayList<>();
+                    for (int i = 0; i < block.getOutSize(); i++) {
+                        outBlocks.add(block.getOut(i).getIndex());
+                    }
+                    blockData.put("successors", outBlocks);
+
+                    if (block.getOutSize() >= 2) {
+                        try {
+                            if (block.getTrueOut() != null) {
+                                blockData.put("true_out", block.getTrueOut().getIndex());
+                            }
+                        } catch (Exception ignored) {}
+                        try {
+                            if (block.getFalseOut() != null) {
+                                blockData.put("false_out", block.getFalseOut().getIndex());
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                    blocksList.add(blockData);
+                }
+            }
+            funcData.put("basic_blocks", blocksList);
+
+            // 2b. Extract High P-Code with SSA Def-Use and Varnode Metadata
             List<Map<String, Object>> pcodeOpsList = new ArrayList<>();
             Iterator<PcodeOpAST> opIter = highFunc.getPcodeOps();
             while (opIter.hasNext()) {
                 PcodeOpAST op = opIter.next();
                 Map<String, Object> opData = new HashMap<>();
+                opData.put("seq", op.getSeqnum().getTime());
+                opData.put("address", "0x" + op.getSeqnum().getTarget().toString());
                 opData.put("opcode", op.getMnemonic());
+                opData.put("block_id", op.getParent() != null ? op.getParent().getIndex() : -1);
 
-                List<String> inputs = new ArrayList<>();
+                List<Map<String, Object>> inputs = new ArrayList<>();
                 for (int i = 0; i < op.getNumInputs(); i++) {
                     VarnodeAST inVn = (VarnodeAST) op.getInput(i);
-                    inputs.add(inVn != null ? formatVarnode(inVn) : "null");
+                    inputs.add(serializeVarnode(inVn));
                 }
                 opData.put("inputs", inputs);
 
                 VarnodeAST outVn = (VarnodeAST) op.getOutput();
-                opData.put("output", outVn != null ? formatVarnode(outVn) : null);
+                opData.put("output", serializeVarnode(outVn));
                 pcodeOpsList.add(opData);
             }
             funcData.put("pcode_ops", pcodeOpsList);
             functionsList.add(funcData);
         }
 
-        println("[REA-Neural] Extracted High P-Code for " + decompiledCount + " / " + totalFuncs + " functions.");
+        println("[REA-Neural] Extracted High P-Code & Full CFG for " + decompiledCount + " / " + totalFuncs + " functions.");
 
         // 3. Serialize to JSON
         Map<String, Object> payload = new HashMap<>();
@@ -129,7 +177,7 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
         try (FileWriter writer = new FileWriter(tempExport)) {
             gson.toJson(payload, writer);
         }
-        println("[REA-Neural] Exported P-Code JSON to: " + tempExport.getAbsolutePath());
+        println("[REA-Neural] Exported P-Code & CFG JSON to: " + tempExport.getAbsolutePath());
 
         // 4. Invoke REA Engine
         println("[REA-Neural] Invoking REA Continuous Semantic Engine (ghidra-analyze)...");
@@ -166,39 +214,44 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
         }
 
         int opaqueDetected = planJson.has("opaque_predicates_total") ? planJson.get("opaque_predicates_total").getAsInt() : 0;
+        int cffDetected = planJson.has("cff_backbones_total") ? planJson.get("cff_backbones_total").getAsInt() : 0;
         JsonArray renames = planJson.has("rename_actions") ? planJson.getAsJsonArray("rename_actions") : new JsonArray();
         JsonArray comments = planJson.has("comment_actions") ? planJson.getAsJsonArray("comment_actions") : new JsonArray();
+        JsonArray evidenceList = planJson.has("evidence_dossiers") ? planJson.getAsJsonArray("evidence_dossiers") : new JsonArray();
 
         println("[REA-Neural] Analysis Complete:");
-        println("  * Total Opaque Predicates Detected: " + opaqueDetected);
-        println("  * Proposed Function Renames: " + renames.size());
-        println("  * Proposed Plate Comments: " + comments.size());
+        println("  * Proven Invariant Tautologies (Opaque Predicates): " + opaqueDetected);
+        println("  * Control Flow Flattening (CFF) Backbones: " + cffDetected);
+        println("  * Evidence Dossiers Generated: " + evidenceList.size());
+        println("  * Verified Rename Recommendations: " + renames.size());
+        println("  * Verified Plate Comment / Evidence Actions: " + comments.size());
 
         // 6. User Confirmation
         boolean shouldApply = false;
         if (isRunningHeadless()) {
-            // In headless mode, check for script argument "apply" or default to true
             String[] args = getScriptArgs();
             shouldApply = (args != null && args.length > 0 && "apply".equalsIgnoreCase(args[0]));
             if (!shouldApply) {
-                println("[REA-Neural] Headless mode: mutations generated but not applied (pass 'apply' argument to commit).");
+                println("[REA-Neural] Headless mode: evidence dossiers generated but mutations not applied (pass 'apply' argument to commit).");
             }
         } else {
             String confirmMsg = String.format(
                 "REA-Neural Semantic Analysis Complete:\n\n" +
                 " - Analyzed Functions: %d\n" +
-                " - Opaque Predicates Detected: %d\n" +
-                " - Proposed Function Renames: %d\n" +
-                " - Proposed Plate Comments: %d\n\n" +
-                "Do you want to apply these mutations directly to the Ghidra Program Database?",
-                decompiledCount, opaqueDetected, renames.size(), comments.size()
+                " - Proven Opaque Predicates: %d\n" +
+                " - CFF Dispatcher Backbones: %d\n" +
+                " - Evidence Dossiers: %d\n" +
+                " - Verified Rename Actions: %d\n" +
+                " - Plate Comments: %d\n\n" +
+                "Do you want to apply these verified mutations directly to the Ghidra Program Database?",
+                decompiledCount, opaqueDetected, cffDetected, evidenceList.size(), renames.size(), comments.size()
             );
             shouldApply = askYesNo("REA-Neural Mutation Plan", confirmMsg);
         }
 
-        // 7. Apply Mutations in Transaction
+        // 7. Apply Verified Mutations in Safe Transaction
         if (shouldApply) {
-            println("[REA-Neural] Committing mutations to Ghidra Program Database...");
+            println("[REA-Neural] Committing verified mutations to Ghidra Program Database...");
             int txId = currentProgram.startTransaction("REA-Neural Semantic Deobfuscation");
             boolean commitSuccess = false;
             try {
@@ -211,13 +264,14 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
                     if (addr != null) {
                         Function targetFunc = currentProgram.getFunctionManager().getFunctionAt(addr);
                         if (targetFunc != null) {
+                            String orig = targetFunc.getName();
                             targetFunc.setName(newName, SourceType.USER_DEFINED);
-                            println("   [RENAME] " + addrStr + " -> " + newName);
+                            println("   [RENAME] " + addrStr + " (" + orig + ") -> " + newName);
                         }
                     }
                 }
 
-                // Apply Comments
+                // Apply Comments & Bookmarks
                 for (JsonElement elem : comments) {
                     JsonObject act = elem.getAsJsonObject();
                     String addrStr = act.get("address").getAsString();
@@ -226,9 +280,9 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
                     if (addr != null) {
                         setPlateComment(addr, commentText);
                         currentProgram.getBookmarkManager().setBookmark(
-                            addr, "REA-Neural", "Semantic Deobfuscation", "Deobfuscated by REA-Neural continuous semantics"
+                            addr, "REA-Neural", "Evidence-Based Deobfuscation", "Analyzed with High P-Code SSA & CFG"
                         );
-                        println("   [COMMENT] Added plate comment at " + addrStr);
+                        println("   [COMMENT] Added verified plate comment at " + addrStr);
                     }
                 }
                 commitSuccess = true;
@@ -239,12 +293,60 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
             }
 
             if (commitSuccess) {
-                println("[REA-Neural] Successfully applied all mutations to Program Database!");
+                println("[REA-Neural] Successfully applied all verified mutations to Program Database!");
             }
         } else {
             println("[REA-Neural] Database mutation skipped per user request.");
         }
         println("=================================================================");
+    }
+
+    private Map<String, Object> serializeVarnode(VarnodeAST vn) {
+        if (vn == null) return null;
+        Map<String, Object> vMap = new HashMap<>();
+        vMap.put("size", vn.getSize());
+        vMap.put("offset", "0x" + Long.toHexString(vn.getOffset()));
+
+        String kind = "ram";
+        if (vn.isConstant()) {
+            kind = "constant";
+            vMap.put("const_val", vn.getOffset());
+        } else if (vn.isRegister()) {
+            kind = "register";
+            String regName = currentProgram.getRegister(vn.getAddress(), vn.getSize()) != null ?
+                currentProgram.getRegister(vn.getAddress(), vn.getSize()).getName() : "reg";
+            vMap.put("name", regName);
+        } else if (vn.isUnique()) {
+            kind = "unique";
+            vMap.put("unique_id", vn.getUniqueId());
+        } else if (vn.isAddress()) {
+            kind = "address";
+        }
+        vMap.put("kind", kind);
+
+        // SSA Def
+        PcodeOp defOp = vn.getDef();
+        if (defOp != null) {
+            vMap.put("def_seq", defOp.getSeqnum().getTime());
+            vMap.put("def_opcode", defOp.getMnemonic());
+        } else {
+            vMap.put("def_seq", null);
+            vMap.put("is_input", vn.isInput());
+        }
+
+        // SSA Use count
+        int uses = 0;
+        Iterator<PcodeOp> descIter = vn.getDescendants();
+        while (descIter.hasNext()) {
+            descIter.next();
+            uses++;
+        }
+        vMap.put("use_count", uses);
+
+        // Debug string representation for backwards compatibility
+        vMap.put("repr", formatVarnode(vn));
+
+        return vMap;
     }
 
     private String formatVarnode(VarnodeAST vn) {
@@ -283,7 +385,6 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
         File standardD = new File("D:\\rea-neural");
         if (standardD.exists()) return standardD;
 
-        // Check relative to script location
         File scriptFile = getSourceFile().getFile(true);
         if (scriptFile != null && scriptFile.getParentFile() != null) {
             File parentDir = scriptFile.getParentFile().getParentFile();

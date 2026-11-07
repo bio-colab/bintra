@@ -35,8 +35,9 @@ BINARY_COMMANDS = {"inspect", "deobfuscate", "match", "match-functions", "patch-
 WEIGHT_COMMANDS = {
     "subspace", "decompile", "decompile-circuit", "patch-weights",
     "diff", "diff-weights", "probe-trace", "verify-behavior",
-    "wsp-audit", "synthesize-weights"
+    "wsp-audit"
 }
+ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless"}
 
@@ -64,7 +65,6 @@ Weight-Space / Neural Commands:
   probe-trace       Probe temporal activation traces across token steps (Temporal Hearing)
   verify-behavior      Verify neural equilibrium and Lipschitz bounds (Vestibular Balance)
   wsp-audit            Run MIT CSAIL WSP audit (Effective Rank, Cross-Layer Induction, Amenability, Backdoors)
-  synthesize-weights   Compile neural network weights from scratch without training (Exp 5 & 6)
 
 Metaphorical Sensory Cortex Commands:
   sense             Run all 10 Metaphorical Senses on a binary (--file), model (--file), or code (--hex)
@@ -251,6 +251,26 @@ def main():
                     sys.argv[idx] = "--file"
 
         binary_neural_engine.main()
+
+    elif cmd in ARCHIVED_SCOPE_COMMANDS:
+        scope_msg = {
+            "status": "decoupled_from_active_scope",
+            "command": cmd,
+            "message": (
+                "Command 'synthesize-weights' has been decoupled from REA-Neural's active reverse-engineering interface. "
+                "Per SCOPE.md, REA-Neural focuses on continuous semantic reverse engineering, decompilation, "
+                "and embedded neural tensor auditing. Standalone neural model synthesis is preserved only as historical lineage."
+            ),
+            "reference": "SCOPE.md"
+        }
+        if "--archived-lineage" in sys.argv:
+            print(f"[SCOPE WARNING] Running {cmd} under historical research lineage (--archived-lineage).")
+            rea_neural_engine.main()
+            return
+        else:
+            scope_msg["hint"] = "To invoke for paper reproduction, provide flag: --archived-lineage"
+            print(json.dumps(scope_msg, indent=2))
+            sys.exit(0)
 
     elif cmd in WEIGHT_COMMANDS:
         if cmd == "patch-weights":

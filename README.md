@@ -48,7 +48,8 @@ D:/rea-neural/
 ├── src/
 │   ├── cli.py                     # Unified CLI entry point
 │   ├── binary_neural_engine.py    # PE binary analysis, deobfuscator & patcher
-│   └── rea_neural_engine.py      # Weight-space SVD & circuit decompiler
+│   ├── rea_neural_engine.py       # Weight-space SVD & circuit decompiler
+│   └── sensory_cortex.py          # 10 Metaphorical Senses evaluation cortex
 ├── skills/
 │   └── reverse-engineer-anything/ # Agent-native skill specification
 │       ├── SKILL.md               # Main skill contract
@@ -94,6 +95,9 @@ python src/cli.py patch `
 
 # Scan a native Windows binary for embedded neural logic (ONNX, DirectML, GGUF)
 python src/cli.py scan-hybrid --file application.exe
+
+# Holistic multi-modal binary inspection & 10 Metaphorical Senses evaluation
+python src/cli.py sense --file application.exe --hex "55 48 89 e5 5d c3"
 
 # Run the automated Windows test suite
 python tests/test_suite.py

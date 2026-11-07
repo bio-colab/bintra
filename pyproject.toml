@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rea-neural"
-version = "7.0.0.post1"
+version = "7.1.0"
 authors = [
   { name="bio-colab", email="contact@bio-colab.org" },
 ]
-description = "Agent-native continuous semantic reverse engineering and binary analysis framework (Fork of REA for Windows PE/DLL binaries)."
+description = "Agent-native continuous semantic reverse engineering and binary analysis framework (Fork of REA for Windows PE/DLL binaries with 10-Sense Sensory Cortex)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -24,3 +24,7 @@ dependencies = [
 
 [project.scripts]
 rea-neural = "cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["cli", "binary_neural_engine", "rea_neural_engine", "sensory_cortex"]

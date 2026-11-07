@@ -99,30 +99,34 @@ explicit path or endpoint and do not need it.
 
 - Obfuscated native code, control flow flattening, or algebraic opaque predicates:
   Run continuous semantic deobfuscator through CLI:
-  `python "C:\Users\Eylias\.gemini\config\skills\reverse-engineer-anything\scripts\binary_neural_engine.py" deobfuscate --hex <hex_bytes>`
+  `python src/cli.py deobfuscate --hex <hex_bytes>`
   (or via `rea deobfuscate --hex <hex_bytes>`). Projects basic blocks into continuous
   state transition vectors, isolating dead fallthrough branches and recovering canonical CFG.
   See the [continuous deobfuscation guide](references/neural-circuit-decompilation.md).
 - Cross-architecture / cross-compiler function identification (stripped binaries, x86 vs ARM64, -O0 vs -O3):
   Run continuous semantic function matcher:
-  `python "C:\Users\Eylias\.gemini\config\skills\reverse-engineer-anything\scripts\binary_neural_engine.py" match --func1 <hex> --func2 <hex>`
+  `python src/cli.py match --func1 <hex> --func2 <hex>`
   (or via `rea match --func1 <hex> --func2 <hex>`). Computes continuous behavioral vector
   embeddings of assembly routines; similarity >= 0.90 establishes semantic equivalence.
 - Goal-driven surgical binary patching (safe instruction modification, license bypass, vulnerability fix):
   Run surgical binary patcher:
-  `python "C:\Users\Eylias\.gemini\config\skills\reverse-engineer-anything\scripts\binary_neural_engine.py" patch --source <in_exe> --output <out_exe> --offset <hex_offset> --patch-hex <hex>`
+  `python src/cli.py patch --source <in_exe> --output <out_exe> --offset <hex_offset> --patch-hex <hex>`
   (or via `rea patch-binary ...`). Executes minimal instruction perturbations while preserving
   runtime stack balance (RBP/RSP frame alignment) and recalculating PE/ELF integrity checksums.
   See the [surgical binary patching guide](references/neural-binary-patching.md).
 - Modern hybrid binary (native executable embedding neural inference logic / AI models in .rsrc or .rodata):
   Run hybrid binary dissector:
-  `python "C:\Users\Eylias\.gemini\config\skills\reverse-engineer-anything\scripts\binary_neural_engine.py" scan-hybrid --file <exe_or_dll_path>`
+  `python src/cli.py scan-hybrid --file <exe_or_dll_path>`
   (or via `rea scan-hybrid --file <path>`). Detects embedded ONNX, TFLite, GGUF, Safetensors,
   and TorchScript runtime containers, and traces native system API bridge boundaries.
 - Continuous weight-space decomposition and attention circuit reverse engineering:
   Run weight-space engine:
-  `python "C:\Users\Eylias\.gemini\config\skills\reverse-engineer-anything\scripts\rea_neural_engine.py" subspace --model <path> --tensor <name>`
+  `python src/cli.py subspace --model <path> --tensor <name>`
   See the [weight space programming specification](references/weight-space-programming.md).
+- Holistic multi-modal binary inspection & 10 Metaphorical Senses evaluation:
+  Run sensory cortex audit:
+  `python src/cli.py sense --file <binary_or_safetensors_path>` or `python src/cli.py sense --hex <hex_bytes>`
+  (or via `rea sense --file <path>`). Simultaneously evaluates all 10 cybernetic senses (analytical vision, temporal hearing, active touch, exploratory smell, discriminative taste, deep proprioception, spatial sense, vestibular balance, nociception / pain reflex, and sense of rhythm).
 
 - ASAR or extracted JavaScript/Electron tree:
   `analyze_javascript_application`.

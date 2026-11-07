@@ -1,63 +1,100 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 REA-Neural Unified Command-Line Interface.
-Dispatches to Binary Engine (deobfuscation, semantic matching, surgical binary patching, hybrid scanning)
-or Weight-Space Engine (SVD, circuit decompilation, model weight surgery).
+Dispatches to Binary Engine (inspect, deobfuscate, match, patch-binary, scan-hybrid),
+Weight-Space Engine (subspace, decompile, patch-weights, diff-weights, probe-trace, verify-behavior),
+or Metaphorical Sensory Cortex (sense / sensory-audit).
 """
 
 import sys
 import os
+import json
+import argparse
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, SCRIPT_DIR)
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
 
 import binary_neural_engine
 import rea_neural_engine
+from binary_neural_engine import SensoryCortex
+
+
+def _ensure_utf8_stdio() -> None:
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is not None and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
 
 BINARY_COMMANDS = {"inspect", "deobfuscate", "match", "match-functions", "patch-binary", "scan-hybrid"}
-WEIGHT_COMMANDS = {"subspace", "decompile", "decompile-circuit", "patch-weights", "diff", "diff-weights"}
+WEIGHT_COMMANDS = {
+    "subspace", "decompile", "decompile-circuit", "patch-weights",
+    "diff", "diff-weights", "probe-trace", "verify-behavior"
+}
+SENSORY_COMMANDS = {"sense", "sensory-audit"}
+
 
 def print_help():
     print("""
-REA-Neural Unified CLI v7.0.0-neural.1
+REA-Neural Unified CLI v7.1.0-neural (Windows-Native & 10-Sense Edition)
 Autonomous Continuous Semantic Reverse Engineering & Binary Analysis
 
 Usage:
   python src/cli.py <command> [options]
 
-Binary / Executable Commands:
-  inspect           Inspect PE/ELF executable headers and sections
-  deobfuscate       Detect and prune opaque predicates in machine code
-  match             Semantically match functions across compilers / architectures
-  patch-binary      Surgically patch a binary file on disk with stack preservation & PE checksum
-  scan-hybrid       Scan an executable for verified embedded neural logic (ONNX, TFLite, etc.)
+Binary / Windows Executable Commands:
+  inspect           Inspect PE32/PE32+/ELF headers, mitigations (ASLR/DEP/CFG), and sections
+  deobfuscate       Detect and prune REX-aware opaque predicates & CFF dispatcher loops
+  match             Semantically match functions across compilers / architectures (x86-64 / ARM64)
+  patch-binary      Surgically patch a binary file on disk with stack proprioception & PE checksum
+  scan-hybrid       Scan an executable for embedded neural logic (DirectML, WinML, ONNX, GGUF, TFLite)
 
 Weight-Space / Neural Commands:
-  subspace          Extract truncated SVD singular modes from weight tensors
-  decompile         Decompile an attention head slice into symbolic pseudocode
+  subspace          Extract SVD modes, sparse extremes, or coordinate slices from weight tensors
+  decompile         Decompile attention heads, MLP projections, or LayerNorm drift into pseudocode
   patch-weights     Surgically patch a safetensors weight tensor without gradients
   diff-weights      Compare baseline and patched models with Frobenius diff
+  probe-trace       Probe temporal activation traces across token steps (Temporal Hearing)
+  verify-behavior   Verify neural equilibrium and Lipschitz bounds (Vestibular Balance)
+
+Metaphorical Sensory Cortex Commands:
+  sense             Run all 10 Metaphorical Senses on a binary (--file), model (--file), or code (--hex)
 """)
 
+
 def main():
+    _ensure_utf8_stdio()
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
         print_help()
         sys.exit(0)
 
     cmd = sys.argv[1]
 
-    # Resolve disambiguation for 'patch'
     if cmd == "patch":
         if "--patch-hex" in sys.argv or "--offset" in sys.argv:
             cmd = "patch-binary"
-        elif "--alpha" in sys.argv or "--mode-index" in sys.argv or "--tensor" in sys.argv:
+        elif "--alpha" in sys.argv or "--mode-index" in sys.argv or "--tensor" in sys.argv or "--operation" in sys.argv:
             cmd = "patch-weights"
         else:
             print("Ambiguous command 'patch'. Please specify 'patch-binary' for PE files or 'patch-weights' for model tensors.")
             sys.exit(1)
 
+    if cmd in SENSORY_COMMANDS:
+        parser = argparse.ArgumentParser(description="REA-Neural 10-Sense Diagnostic Audit")
+        parser.add_argument("command", help="sense or sensory-audit")
+        parser.add_argument("--file", default=None, help="Optional path to PE executable or .safetensors model")
+        parser.add_argument("--hex", default=None, help="Optional hex string of machine code")
+        args = parser.parse_args()
+        report = SensoryCortex.evaluate_all_senses(file_path=args.file, code_hex=args.hex)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return
+
     if cmd in BINARY_COMMANDS:
-        # Translate aliases
         if cmd == "patch-binary":
             sys.argv[1] = "patch"
         elif cmd == "match-functions":
@@ -65,7 +102,6 @@ def main():
         binary_neural_engine.main()
 
     elif cmd in WEIGHT_COMMANDS:
-        # Translate aliases
         if cmd == "patch-weights":
             sys.argv[1] = "patch"
         elif cmd == "decompile-circuit":
@@ -77,6 +113,7 @@ def main():
     else:
         print(f"Unknown command '{cmd}'. Run 'cli.py help' for usage.")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

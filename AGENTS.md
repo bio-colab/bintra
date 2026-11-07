@@ -21,7 +21,7 @@ Launch the native zero-dependency MCP server via stdio:
   }
 }
 ```
-Exposes 13 type-safe tools (`rea_inspect_binary`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_dump_bytes`, `rea_scan_hybrid`, `rea_sensory_audit`, `rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`, `rea_wsp_audit`, `rea_patch_weights`).
+Exposes 17 type-safe tools: core binary analysis (`rea_inspect_binary`, `rea_dump_bytes`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_scan_hybrid`, `rea_sensory_audit`), Ghidra P-Code integration (`rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`), Windows intelligence & diagnostics (`rea_windows_env_audit`, `rea_resolve_dependencies`, `rea_inspect_crash_reports`, `rea_correlate_failure_evidence`), and embedded weights security (`rea_wsp_audit`, `rea_patch_weights`).
 
 ### Modality 2: Unified CLI (`src/cli.py`) -- Recommended for Terminal / Bash / PowerShell
 ```powershell
@@ -35,6 +35,10 @@ import sys
 sys.path.insert(0, r"D:\rea-neural\src")
 from binary_neural_engine import BinaryFormatInspector, ContinuousDeobfuscator, SurgicalBinaryPatcher, SensoryCortex
 from ghidra_pcode_vectorizer import GhidraAnnotationPlanner, PcodeDeobfuscator
+from windows_intelligence import (
+    WindowsOSProfiler, WindowsDependencyResolver, WindowsDeviceInspector,
+    WindowsSecurityInspector, WindowsCrashAnalyzer, DiagnosticEvidenceCorrelator
+)
 ```
 
 ---
@@ -70,6 +74,10 @@ from ghidra_pcode_vectorizer import GhidraAnnotationPlanner, PcodeDeobfuscator
 | `ghidra-headless`| Run Ghidra headless deobfuscation | `--binary <path> [--apply]` | Executes `ReaNeuralGhidraBridge.java` via `analyzeHeadless.bat` |
 | `wsp-audit` | Audit embedded weights | `--model <model.safetensors>` | `task_domain_inference`, `receptive_field_profile`, `amenability` |
 | `patch-weights` | Column direction subtraction | `--source <in> --output <out> --tensor <t>` | `operation`, `sparsity_ratio`, `frobenius_norm_delta` |
+| `win-audit` | Profile host OS, graphics, security | `[--binary <path>] [--format json|md]` | `os`, `devices`, `security` |
+| `resolve-deps` | Safe DLL search order & exports audit | `--binary <path> [--format json|md]` | `verdict`, `loader_mode`, `resolved_dlls`, `missing_dlls` |
+| `wer-inspect` | Scan WER archives & Event Log 1000 | `[--binary <name>] [--format json|md]` | `wer_reports`, `event_log_errors`, `counts` |
+| `diagnose` | Correlate OS, crash & PE into Dossier | `--binary <path> [--crash <f>] [--ghidra <f>]` | `verdict`, `root_cause_summary`, `binary_mapping` |
 
 ---
 
@@ -89,3 +97,34 @@ When asked to reverse engineer an obfuscated Windows executable using Ghidra:
    - With `--apply`, the script automatically commits function renames (`REA_Deob_...`) and detailed plate comments into Ghidra's Program Database in a safe transaction.
 3. **Inspect the Output Plan:**  
    The agent can read the generated `mutation_plan.json` to immediately report discovered keys, bypassed license checks, or deobfuscated dispatchers to the user.
+
+
+---
+
+## 5. Windows System Intelligence & Failure Diagnostic Workflow
+
+When an executable crashes, fails to launch, or encounters runtime access violations on Windows:
+
+1. **Host Environment & Privilege Audit:**
+   ```powershell
+   python src/cli.py win-audit --binary "path/to/target.exe" --format md
+   ```
+   Checks real kernel version (via `ntdll.RtlGetVersion`), WOW64 emulation, AppCompatFlags registry shims, token integrity level, and directory write ACLs.
+
+2. **Loader Dependency & Missing Exports Verification:**
+   ```powershell
+   python src/cli.py resolve-deps --binary "path/to/target.exe" --format md
+   ```
+   Simulates Safe DLL search order, resolves MinWin API-Set virtual contracts (e.g., `api-ms-win-core-*` -> `kernelbase.dll`), detects 32-bit vs 64-bit architecture mismatches, and parses up to 4096 exports from disk DLLs to identify unexported APIs (`0xC0000139`).
+
+3. **Crash Telemetry & Event Log Inspection:**
+   ```powershell
+   python src/cli.py wer-inspect --binary "target.exe"
+   ```
+   Parses `Report.wer` archives and Application Event Log (Event ID 1000/1001) without requiring WinDbg or heavy symbols.
+
+4. **Authoritative Failure Evidence Dossier Synthesis:**
+   ```powershell
+   python src/cli.py diagnose --binary "path/to/target.exe" --format md
+   ```
+   Cross-references runtime crash offset (`FaultOffset`), PE section layout, RVAs, and Ghidra decompilation into an actionable engineering dossier with root cause diagnosis and mitigation guidance.

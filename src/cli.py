@@ -38,6 +38,7 @@ WEIGHT_COMMANDS = {
     "wsp-audit", "synthesize-weights"
 }
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
+GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan"}
 
 
 def print_help():
@@ -67,6 +68,11 @@ Weight-Space / Neural Commands:
 
 Metaphorical Sensory Cortex Commands:
   sense             Run all 10 Metaphorical Senses on a binary (--file), model (--file), or code (--hex)
+
+Ghidra P-Code & Symbolic Integration Commands:
+  match-pcode       Match functions using Ghidra High P-code IR (Architecture-Invariant)
+  deobfuscate-pcode Detect and prune P-code algebraic opaque predicates and dispatcher loops
+  ghidra-plan       Generate type-safe Ghidra database mutation and annotation plans
 """)
 
 
@@ -96,6 +102,61 @@ def main():
         report = SensoryCortex.evaluate_all_senses(file_path=args.file, code_hex=args.hex)
         print(json.dumps(report, indent=2, ensure_ascii=False))
         return
+
+    if cmd in GHIDRA_COMMANDS:
+        from ghidra_pcode_vectorizer import (
+            PcodeVectorizer, PcodeFunctionMatcher, PcodeDeobfuscator, GhidraAnnotationPlanner
+        )
+        if cmd == "match-pcode":
+            parser = argparse.ArgumentParser(description="Match two functions using Ghidra P-code")
+            parser.add_argument("command")
+            parser.add_argument("--func1", required=True, help="JSON file or inline JSON string of function 1 P-code ops")
+            parser.add_argument("--func2", required=True, help="JSON file or inline JSON string of function 2 P-code ops")
+            args = parser.parse_args()
+            def _load_pcode(val):
+                if os.path.exists(val):
+                    with open(val, "r", encoding="utf-8") as f:
+                        return json.load(f)
+                try:
+                    return json.loads(val)
+                except Exception:
+                    import ast
+                    return ast.literal_eval(val)
+            p1 = _load_pcode(args.func1)
+            p2 = _load_pcode(args.func2)
+            res = PcodeFunctionMatcher.match(p1, p2)
+            print(json.dumps(res, indent=2))
+            return
+        elif cmd == "deobfuscate-pcode":
+            parser = argparse.ArgumentParser(description="Detect and simplify P-code opaque predicates")
+            parser.add_argument("command")
+            parser.add_argument("--file", default=None, help="JSON file containing P-code ops")
+            parser.add_argument("--pcode", default=None, help="Inline JSON string of P-code ops")
+            args = parser.parse_args()
+            if args.file and os.path.exists(args.file):
+                with open(args.file, "r", encoding="utf-8") as f:
+                    ops = json.load(f)
+            elif args.pcode:
+                ops = json.loads(args.pcode)
+            else:
+                print("Must provide --file or --pcode JSON")
+                sys.exit(1)
+            res = PcodeDeobfuscator.detect_opaque_predicates(ops)
+            print(json.dumps(res, indent=2))
+            return
+        elif cmd == "ghidra-plan":
+            parser = argparse.ArgumentParser(description="Generate Ghidra Program Database annotation plan")
+            parser.add_argument("command")
+            parser.add_argument("--address", required=True, help="Target function address")
+            parser.add_argument("--name", required=True, help="Recovered function name")
+            parser.add_argument("--return-type", default="void", help="Return type")
+            parser.add_argument("--comment", default=None, help="Optional decompilation comment")
+            args = parser.parse_args()
+            plan = GhidraAnnotationPlanner.build_function_annotation_plan(
+                args.address, args.name, return_type=args.return_type, comment=args.comment
+            )
+            print(json.dumps(plan, indent=2))
+            return
 
     if cmd in BINARY_COMMANDS:
         if cmd == "patch-binary":

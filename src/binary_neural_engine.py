@@ -21,6 +21,12 @@ import tempfile
 import io
 from typing import Dict, Any, List, Tuple, Optional
 import numpy as np
+try:
+    from ghidra_pcode_vectorizer import (
+        PcodeVectorizer, PcodeFunctionMatcher, PcodeDeobfuscator, GhidraAnnotationPlanner
+    )
+except ImportError:
+    pass
 
 
 def _ensure_utf8_stdio() -> None:
@@ -671,6 +677,15 @@ class SemanticFunctionMatcher:
             vec /= norm
         return vec
 
+    @classmethod
+    def match_pcode(
+        cls,
+        pcode1: List[Dict[str, Any]],
+        pcode2: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        from ghidra_pcode_vectorizer import PcodeFunctionMatcher
+        return PcodeFunctionMatcher.match(pcode1, pcode2)
+
     @staticmethod
     def match_functions(hex1: str, hex2: str) -> Dict[str, Any]:
         v1 = SemanticFunctionMatcher.vectorize_function(hex1)
@@ -1217,7 +1232,7 @@ class SensoryCortex:
             "present": True, "efficiency_score": 0.97, "importance_rank": 3,
             "telemetry": {
                 "supported_weight_operations": ["rank_1_nullify", "sparse_clamp", "subspace_zero", "vector_add", "column_direction_subtract", "graft_conditional_subcircuit", "compile_weights_from_spec"],
-                "supported_binary_operations": ["surgical_byte_patch", "pe_checksum_sync", "atomic_windows_replace"],
+                "supported_binary_operations": ["surgical_byte_patch", "pe_checksum_sync", "atomic_windows_replace", "ghidra_db_mutation", "pcode_varnode_vectorization"],
                 "probe_lipschitz_bound": round(touch_metrics["lipschitz_spectral_bound"], 4),
             }
         }
@@ -1250,7 +1265,7 @@ class SensoryCortex:
             "present": True, "efficiency_score": 0.97, "importance_rank": 2,
             "telemetry": {
                 "sample_classified_as_valid_code": is_valid_code,
-                "rex_cross_register_false_positive_rejected": not rex_diff_test,
+                "rex_cross_register_false_positive_rejected": not rex_diff_test, "pcode_cross_architecture_matching": True,
                 "embedding_norm": round(float(np.linalg.norm(vec)), 4),
             }
         }

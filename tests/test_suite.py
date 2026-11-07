@@ -587,5 +587,103 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn(7, res["suspect_trigger_neurons"])
 
 
+    # --- 5 Ghidra P-Code Continuous Semantic Vectorizer Tests (Total: 40 Tests) ---
+
+    def test_ghidra_pcode_opcode_classification_and_vectorization(self):
+        """Verifies Ghidra P-code operations vectorization into a 64-D unit sphere vector."""
+        from ghidra_pcode_vectorizer import PcodeVectorizer, PCODE_CATEGORIES
+        ops = [
+            {"opcode": "INT_ADD", "inputs": ["a", "b"], "output": "c"},
+            {"opcode": "INT_SUB", "inputs": ["c", "1"], "output": "c"},
+            {"opcode": "CBRANCH", "inputs": ["ram_target", "c"]},
+            {"opcode": "RETURN", "inputs": ["c"]}
+        ]
+        res = PcodeVectorizer.vectorize_pcode_ops(ops)
+        vec = np.array(res["vector"], dtype=np.float32)
+        self.assertEqual(len(vec), 64)
+        self.assertAlmostEqual(float(np.linalg.norm(vec)), 1.0, places=4)
+        self.assertGreater(res["effective_rank"], 1.0)
+        self.assertEqual(res["op_count"], 4)
+        self.assertEqual(res["category_histogram"]["ALU_ARITH"], 2)
+        self.assertEqual(res["category_histogram"]["CONTROL_BRANCH_COND"], 1)
+        self.assertEqual(res["category_histogram"]["CONTROL_RETURN"], 1)
+
+    def test_ghidra_pcode_cross_architecture_semantic_matching(self):
+        """Verifies architecture-invariant semantic matching of identical logic routines via P-code."""
+        from ghidra_pcode_vectorizer import PcodeFunctionMatcher
+        # Simulate x86-64 loop vs ARM64 loop in Ghidra P-code (both reduce to same SSA sequence)
+        x86_pcode = [
+            {"opcode": "LOAD", "inputs": ["rsp", "8"], "output": "u1"},
+            {"opcode": "INT_ADD", "inputs": ["u1", "10"], "output": "u2"},
+            {"opcode": "STORE", "inputs": ["rsp", "8", "u2"]},
+            {"opcode": "INT_LESS", "inputs": ["u2", "100"], "output": "b1"},
+            {"opcode": "CBRANCH", "inputs": ["0x140001000", "b1"]},
+            {"opcode": "RETURN"}
+        ]
+        arm64_pcode = [
+            {"opcode": "LOAD", "inputs": ["sp", "8"], "output": "v1"},
+            {"opcode": "INT_ADD", "inputs": ["v1", "10"], "output": "v2"},
+            {"opcode": "STORE", "inputs": ["sp", "8", "v2"]},
+            {"opcode": "INT_LESS", "inputs": ["v2", "100"], "output": "c1"},
+            {"opcode": "CBRANCH", "inputs": ["0x00010000", "c1"]},
+            {"opcode": "RETURN"}
+        ]
+        match_res = PcodeFunctionMatcher.match(x86_pcode, arm64_pcode)
+        self.assertTrue(match_res["is_semantic_match"])
+        self.assertGreaterEqual(match_res["pcode_cosine_similarity"], 0.95)
+        self.assertEqual(match_res["confidence"], "HIGH")
+
+    def test_ghidra_pcode_divergent_function_rejection(self):
+        """Verifies that divergent P-code routines are rejected with low cosine similarity."""
+        from ghidra_pcode_vectorizer import PcodeFunctionMatcher
+        arith_routine = [
+            {"opcode": "INT_ADD"}, {"opcode": "INT_SUB"}, {"opcode": "INT_MULT"},
+            {"opcode": "INT_DIV"}, {"opcode": "RETURN"}
+        ]
+        float_call_routine = [
+            {"opcode": "FLOAT_ADD"}, {"opcode": "FLOAT_MULT"}, {"opcode": "CALL"},
+            {"opcode": "CALLIND"}, {"opcode": "RETURN"}
+        ]
+        match_res = PcodeFunctionMatcher.match(arith_routine, float_call_routine)
+        self.assertFalse(match_res["is_semantic_match"])
+        self.assertEqual(match_res["confidence"], "LOW")
+        self.assertLess(match_res["pcode_cosine_similarity"], 0.85)
+
+    def test_ghidra_pcode_opaque_predicate_detection(self):
+        """Verifies algebraic dead code and opaque predicate detection in P-code stream."""
+        from ghidra_pcode_vectorizer import PcodeDeobfuscator
+        pcode_stream = [
+            {"opcode": "INT_XOR", "inputs": ["rax", "rax"], "output": "u_zero"},
+            {"opcode": "CBRANCH", "inputs": ["target_dead", "u_zero"]},
+            {"opcode": "INT_ADD", "inputs": ["rcx", "1"], "output": "rcx"},
+            {"opcode": "RETURN"}
+        ]
+        report = PcodeDeobfuscator.detect_opaque_predicates(pcode_stream)
+        self.assertTrue(report["is_obfuscated"])
+        self.assertEqual(report["opaque_predicates_count"], 1)
+        self.assertEqual(report["detected_predicates"][0]["predicate_type"], "ALGEBRAIC_ZERO_CBRANCH_OPAQUE")
+        self.assertIn(1, report["prunable_operations"])
+
+    def test_ghidra_annotation_plan_and_c_struct_synthesis(self):
+        """Verifies Ghidra database mutation planning and C header struct synthesis for hybrid binaries."""
+        from ghidra_pcode_vectorizer import GhidraAnnotationPlanner
+        rename_plan = GhidraAnnotationPlanner.build_rename_plan("0x140001000", "DeobfuscatedKeyCheck")
+        self.assertEqual(rename_plan["method"], "set_address_name")
+        self.assertEqual(rename_plan["params"]["name"], "DeobfuscatedKeyCheck")
+
+        annot_plan = GhidraAnnotationPlanner.build_function_annotation_plan(
+            "0x140001000", "DeobfuscatedKeyCheck", return_type="int", comment="Bypassed by REA"
+        )
+        self.assertEqual(annot_plan["method"], "annotate_native_function")
+        self.assertEqual(annot_plan["params"]["return_type"], "int")
+
+        c_struct = GhidraAnnotationPlanner.build_hybrid_c_struct(
+            "DirectML_Detector", ["input_tensor", "output_probs"], [[1, 3, 224, 224], [1, 1000]]
+        )
+        self.assertIn("struct DirectML_Detector", c_struct)
+        self.assertIn("tensor_input_tensor", c_struct)
+        self.assertIn("[1x3x224x224]", c_struct)
+
+
 if __name__ == "__main__":
     unittest.main()

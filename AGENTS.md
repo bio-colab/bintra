@@ -21,7 +21,7 @@ Launch the native zero-dependency MCP server via stdio:
   }
 }
 ```
-Exposes 12 type-safe tools (`rea_inspect_binary`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_scan_hybrid`, `rea_sensory_audit`, `rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`, `rea_wsp_audit`, `rea_patch_weights`).
+Exposes 13 type-safe tools (`rea_inspect_binary`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_dump_bytes`, `rea_scan_hybrid`, `rea_sensory_audit`, `rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`, `rea_wsp_audit`, `rea_patch_weights`).
 
 ### Modality 2: Unified CLI (`src/cli.py`) -- Recommended for Terminal / Bash / PowerShell
 ```powershell
@@ -57,8 +57,9 @@ from ghidra_pcode_vectorizer import GhidraAnnotationPlanner, PcodeDeobfuscator
 
 | Command | Purpose | Input Flags | Expected Output JSON Keys |
 |:---|:---|:---|:---|
-| `inspect` | PE32/PE32+ deep inspection | `--file <path>` | `format`, `headers`, `mitigations`, `sections`, `shannon_entropy` |
-| `deobfuscate` | Prune opaque predicates & CFF | `--file <path>` or `--hex "<bytes>"` | `opaque_predicates`, `control_flow_flattening`, `pruned_hex` |
+| `inspect` | PE32/PE32+ deep inspection (headers, imports, exports) | `--file <path>` | `format`, `mitigations`, `imports`, `exports`, `sections` |
+| `dump` | Extract raw bytes & hex preview at offset/RVA | `--file <path> --offset <N> [--length <L>]` | `file`, `offset`, `length`, `hex`, `ascii_preview` |
+| `deobfuscate` | Prune opaque predicates & CFF | `--file <path> [--offset <N>]` or `--hex "<bytes>"` | `opaque_predicates`, `control_flow_flattening`, `pruned_hex` |
 | `match` | Cross-architecture matching | `--func1 "<hex>" --func2 "<hex>"` | `cosine_similarity`, `is_semantic_match`, `confidence` |
 | `patch-binary` | Surgical byte patch with RSP balance | `--file <path> --offset <N> --patch "<hex>"` | `success`, `target_offset`, `patch_length`, `pe_checksum_updated` |
 | `scan-hybrid` | Scan embedded AI runtimes | `--file <path>` | `embedded_logic_assets_count`, `embedded_assets`, `shannon_entropy` |

@@ -71,7 +71,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
     },
     {
         "name": "rea_deobfuscate_binary",
-        "description": "Detects algebraic opaque predicates (e.g. xor r8,r8 with REX awareness) and control flow flattening (CFF) dispatcher loops in machine code.",
+        "description": "Detects algebraic opaque predicates (e.g. xor r8,r8 with REX awareness) and control flow flattening (CFF) dispatcher loops in machine code or executable files.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -81,9 +81,39 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                 },
                 "file_path": {
                     "type": "string",
-                    "description": "Optional path to executable file to deobfuscate in-place or extract sample from"
+                    "description": "Optional path to executable file to deobfuscate (analyzes entry point if offset omitted)"
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Optional file offset to start analysis at (defaults to entry point)"
+                },
+                "length": {
+                    "type": "integer",
+                    "description": "Number of bytes to analyze (default 4096)"
                 }
             }
+        }
+    },
+    {
+        "name": "rea_dump_bytes",
+        "description": "Extracts and displays raw bytes/machine code hex and ASCII preview from a binary executable at a given offset.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to binary executable on disk"
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Byte offset in file to read from (e.g. 0x4e0778)"
+                },
+                "length": {
+                    "type": "integer",
+                    "description": "Number of bytes to read (default 64, max 65536)"
+                }
+            },
+            "required": ["file_path", "offset"]
         }
     },
     {
@@ -347,19 +377,26 @@ class ReaMcpServer:
     def dispatch_tool(self, name: str, args: Dict[str, Any]) -> Any:
         if name == "rea_inspect_binary":
             path = args["file_path"]
-            return BinaryFormatInspector.inspect_pe(path)
+            return BinaryFormatInspector.inspect(path)
 
         elif name == "rea_deobfuscate_binary":
             code_hex = args.get("code_hex")
             file_path = args.get("file_path")
+            offset = args.get("offset")
+            length = int(args.get("length", 4096))
             if code_hex:
                 raw_bytes = bytes.fromhex(code_hex.replace(" ", "").replace("\n", ""))
+                return ContinuousDeobfuscator.deobfuscate_cfg(raw_bytes)
             elif file_path and os.path.exists(file_path):
-                with open(file_path, "rb") as f:
-                    raw_bytes = f.read(4096)
+                return ContinuousDeobfuscator.deobfuscate_file(file_path, offset=offset, length=length)
             else:
                 raise ValueError("Must provide 'code_hex' or valid 'file_path'")
-            return ContinuousDeobfuscator.deobfuscate_cfg(raw_bytes)
+
+        elif name == "rea_dump_bytes":
+            path = args["file_path"]
+            offset = int(args["offset"])
+            length = int(args.get("length", 64))
+            return SurgicalBinaryPatcher.read_bytes(path, offset, length)
 
         elif name == "rea_match_functions":
             f1_hex = args["func1_hex"]
@@ -368,16 +405,16 @@ class ReaMcpServer:
 
         elif name == "rea_patch_binary":
             path = args["file_path"]
+            out_path = args.get("output_path", path)
             offset = int(args["offset"])
             patch_hex = args["patch_hex"]
-            patch_bytes = bytes.fromhex(patch_hex.replace(" ", "").replace("\n", ""))
             force = bool(args.get("force", False))
-            return SurgicalBinaryPatcher.surgical_byte_patch(
-                file_path=path,
-                target_offset=offset,
-                replacement_bytes=patch_bytes,
-                allow_stack_rebalance=True,
-                force=force
+            return SurgicalBinaryPatcher.patch_file(
+                source_path=path,
+                output_path=out_path,
+                file_offset=offset,
+                patch_hex=patch_hex,
+                enforce_nociception=not force
             )
 
         elif name == "rea_scan_hybrid":

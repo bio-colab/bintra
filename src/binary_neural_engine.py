@@ -50,6 +50,17 @@ class BinaryFormatInspector:
     IMAGE_SCN_MEM_READ = 0x40000000
     IMAGE_SCN_MEM_WRITE = 0x80000000
 
+    # COFF File Header Characteristics
+    IMAGE_FILE_RELOCS_STRIPPED = 0x0001
+    IMAGE_FILE_EXECUTABLE_IMAGE = 0x0002
+    IMAGE_FILE_LINE_NUMS_STRIPPED = 0x0004
+    IMAGE_FILE_LOCAL_SYMS_STRIPPED = 0x0008
+    IMAGE_FILE_LARGE_ADDRESS_AWARE = 0x0020
+    IMAGE_FILE_32BIT_MACHINE = 0x0100
+    IMAGE_FILE_DEBUG_STRIPPED = 0x0200
+    IMAGE_FILE_DLL = 0x2000
+
+    # Optional Header DllCharacteristics
     IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA = 0x0020
     IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE = 0x0040
     IMAGE_DLLCHARACTERISTICS_NX_COMPAT = 0x0100
@@ -74,6 +85,12 @@ class BinaryFormatInspector:
 
     @staticmethod
     def inspect(file_path: str) -> Dict[str, Any]:
+        if not os.path.exists(file_path):
+            return {
+                "format": "FILE_NOT_FOUND",
+                "error": f"Target file does not exist: {file_path}",
+                "file_path": file_path
+            }
         with open(file_path, "rb") as f:
             magic = f.read(4)
 
@@ -239,6 +256,7 @@ class BinaryFormatInspector:
                 "dep_nx_compat": bool(dll_chars & BinaryFormatInspector.IMAGE_DLLCHARACTERISTICS_NX_COMPAT),
                 "control_flow_guard_cfg": bool(dll_chars & BinaryFormatInspector.IMAGE_DLLCHARACTERISTICS_GUARD_CF),
                 "no_seh": bool(dll_chars & BinaryFormatInspector.IMAGE_DLLCHARACTERISTICS_NO_SEH),
+                "large_address_aware_4gb": bool(characteristics & BinaryFormatInspector.IMAGE_FILE_LARGE_ADDRESS_AWARE),
             }
 
             sections = []
@@ -275,6 +293,7 @@ class BinaryFormatInspector:
                 "pe_type": pe_type,
                 "pe_offset": pe_offset,
                 "machine": machine_str,
+                "coff_characteristics": hex(characteristics),
                 "image_base": hex(image_base),
                 "entry_point_rva": hex(entry_point_rva),
                 "subsystem": subsystem,
@@ -287,7 +306,144 @@ class BinaryFormatInspector:
             }
             ep_file_off = BinaryFormatInspector.rva_to_offset(result, entry_point_rva)
             result["entry_point_file_offset"] = hex(ep_file_off) if ep_file_off is not None else None
+
+            # High-Fidelity Import & Export Directory Analysis
+            is_64_bit = (pe_type.startswith("PE32+"))
+            result["imports"] = BinaryFormatInspector._parse_pe_imports(f, file_size, result, is_64_bit)
+            result["exports"] = BinaryFormatInspector._parse_pe_exports(f, file_size, result)
+
             return result
+
+    @staticmethod
+    def _parse_pe_imports(f, file_size: int, pe_info: Dict[str, Any], is_64: bool) -> Dict[str, Any]:
+        dd = pe_info.get("data_directories", {})
+        if "ImportTable" not in dd:
+            return {"imported_dlls_count": 0, "modules": {}}
+        import_rva = int(dd["ImportTable"]["rva"], 16)
+        import_off = BinaryFormatInspector.rva_to_offset(pe_info, import_rva)
+        if import_off is None or import_off + 20 > file_size:
+            return {"imported_dlls_count": 0, "modules": {}}
+
+        modules = {}
+        curr = import_off
+        step = 8 if is_64 else 4
+        mask = 0x8000000000000000 if is_64 else 0x80000000
+        fmt = "<Q" if is_64 else "<I"
+
+        while curr + 20 <= file_size and len(modules) < 64:
+            f.seek(curr)
+            desc = f.read(20)
+            if len(desc) < 20:
+                break
+            ilt_rva, time_date, forwarder, name_rva, iat_rva = struct.unpack("<IIIII", desc)
+            if ilt_rva == 0 and name_rva == 0:
+                break
+            name_off = BinaryFormatInspector.rva_to_offset(pe_info, name_rva)
+            if name_off is not None and name_off < file_size:
+                f.seek(name_off)
+                raw_name = bytearray()
+                while len(raw_name) < 256:
+                    ch = f.read(1)
+                    if not ch or ch == b"\x00":
+                        break
+                    raw_name.extend(ch)
+                mod_name = raw_name.decode("latin-1", errors="ignore")
+
+                thunk_rva = ilt_rva if ilt_rva != 0 else iat_rva
+                thunk_off = BinaryFormatInspector.rva_to_offset(pe_info, thunk_rva)
+                funcs = []
+                if thunk_off is not None and thunk_off < file_size:
+                    t_curr = thunk_off
+                    while t_curr + step <= file_size and len(funcs) < 128:
+                        f.seek(t_curr)
+                        t_bytes = f.read(step)
+                        if len(t_bytes) < step:
+                            break
+                        val = struct.unpack(fmt, t_bytes)[0]
+                        if val == 0:
+                            break
+                        if val & mask:
+                            funcs.append(f"Ordinal_{val & 0xFFFF}")
+                        else:
+                            ibn_off = BinaryFormatInspector.rva_to_offset(pe_info, val)
+                            if ibn_off is not None and ibn_off + 2 < file_size:
+                                f.seek(ibn_off + 2)
+                                raw_fn = bytearray()
+                                while len(raw_fn) < 256:
+                                    ch = f.read(1)
+                                    if not ch or ch == b"\x00":
+                                        break
+                                    raw_fn.extend(ch)
+                                funcs.append(raw_fn.decode("latin-1", errors="ignore"))
+                        t_curr += step
+                modules[mod_name] = funcs
+            curr += 20
+        return {
+            "imported_dlls_count": len(modules),
+            "modules": modules
+        }
+
+    @staticmethod
+    def _parse_pe_exports(f, file_size: int, pe_info: Dict[str, Any]) -> Dict[str, Any]:
+        dd = pe_info.get("data_directories", {})
+        if "ExportTable" not in dd:
+            return {"exported_functions_count": 0, "functions": []}
+        export_rva = int(dd["ExportTable"]["rva"], 16)
+        export_off = BinaryFormatInspector.rva_to_offset(pe_info, export_rva)
+        if export_off is None or export_off + 40 > file_size:
+            return {"exported_functions_count": 0, "functions": []}
+
+        f.seek(export_off)
+        exp_bytes = f.read(40)
+        if len(exp_bytes) < 40:
+            return {"exported_functions_count": 0, "functions": []}
+
+        flags, time_date, major, minor, name_rva, ordinal_base, num_funcs, num_names, funcs_rva, names_rva, ordinals_rva = struct.unpack(
+            "<IIHHIIIIIII", exp_bytes
+        )
+
+        funcs_off = BinaryFormatInspector.rva_to_offset(pe_info, funcs_rva)
+        names_off = BinaryFormatInspector.rva_to_offset(pe_info, names_rva)
+        ords_off = BinaryFormatInspector.rva_to_offset(pe_info, ordinals_rva)
+
+        exported = []
+        if names_off and ords_off and funcs_off:
+            for idx in range(min(num_names, 256)):
+                f.seek(names_off + idx * 4)
+                fn_name_rva_bytes = f.read(4)
+                f.seek(ords_off + idx * 2)
+                ord_bytes = f.read(2)
+                if len(fn_name_rva_bytes) < 4 or len(ord_bytes) < 2:
+                    break
+                (fn_name_rva,) = struct.unpack("<I", fn_name_rva_bytes)
+                (ord_val,) = struct.unpack("<H", ord_bytes)
+
+                f.seek(funcs_off + ord_val * 4)
+                fn_rva_bytes = f.read(4)
+                fn_rva = struct.unpack("<I", fn_rva_bytes)[0] if len(fn_rva_bytes) == 4 else 0
+
+                fn_name_off = BinaryFormatInspector.rva_to_offset(pe_info, fn_name_rva)
+                fn_name = ""
+                if fn_name_off and fn_name_off < file_size:
+                    f.seek(fn_name_off)
+                    raw_fn = bytearray()
+                    while len(raw_fn) < 256:
+                        ch = f.read(1)
+                        if not ch or ch == b"\x00":
+                            break
+                        raw_fn.extend(ch)
+                    fn_name = raw_fn.decode("latin-1", errors="ignore")
+
+                exported.append({
+                    "name": fn_name,
+                    "ordinal": ordinal_base + ord_val,
+                    "rva": hex(fn_rva)
+                })
+
+        return {
+            "exported_functions_count": num_funcs,
+            "functions": exported
+        }
 
     @staticmethod
     def _parse_elf(file_path: str) -> Dict[str, Any]:
@@ -513,6 +669,34 @@ class ContinuousDeobfuscator:
             "complexity_reduction_percentage": round((dead_bytes / max(len(code_bytes), 1)) * 100, 2)
         }
 
+    @staticmethod
+    def deobfuscate_file(file_path: str, offset: Optional[int] = None, length: int = 4096) -> Dict[str, Any]:
+        """Deobfuscates machine code directly from a binary file at a specified offset or entry point."""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        pe_info = BinaryFormatInspector.inspect(file_path)
+        actual_offset = offset
+        if actual_offset is None:
+            if pe_info.get("format") == "PE" and pe_info.get("entry_point_file_offset"):
+                actual_offset = int(pe_info["entry_point_file_offset"], 16)
+            elif pe_info.get("sections"):
+                for sec in pe_info["sections"]:
+                    if sec.get("is_executable"):
+                        actual_offset = int(sec["raw_offset"])
+                        break
+            if actual_offset is None:
+                actual_offset = 0
+
+        with open(file_path, "rb") as f:
+            f.seek(actual_offset)
+            code_bytes = f.read(min(length, 65536))
+
+        res = ContinuousDeobfuscator.deobfuscate_cfg(code_bytes)
+        res["source_file"] = file_path
+        res["analysis_file_offset"] = hex(actual_offset)
+        return res
+
 
 class SemanticFunctionMatcher:
     """
@@ -624,7 +808,7 @@ class SemanticFunctionMatcher:
         raw_bytes = bytes.fromhex(assembly_hex.replace(" ", "").replace("\n", ""))
         vec = np.zeros(16, dtype=np.float32)
 
-        if len(raw_bytes) < 4:
+        if len(raw_bytes) < 2:
             return vec
 
         is_arm64 = (
@@ -639,15 +823,11 @@ class SemanticFunctionMatcher:
             insns = SemanticFunctionMatcher.decode_instructions_x86(raw_bytes)
 
         total = len(insns)
-        if total < 3:
+        if total < 2:
             return vec
 
         invalid_ratio = insns.count("invalid") / total
-        if invalid_ratio > 0.18:
-            return vec
-
-        has_flow = any(x in insns for x in ("ret", "jump", "call"))
-        if not has_flow:
+        if invalid_ratio > 0.35 and total > 2:
             return vec
 
         vec[0] = insns.count("alu") / total
@@ -663,7 +843,7 @@ class SemanticFunctionMatcher:
         vec[9] = insns.count("jump") / max(insns.count("call"), 1)
         vec[10] = insns.count("alu") / max(insns.count("mov"), 1)
 
-        # Populate previously unused dimensions [11..15] with structural invariants
+        # Populate structural invariants and operational bigrams
         bigrams = list(zip(insns[:-1], insns[1:]))
         num_bi = max(len(bigrams), 1)
         vec[11] = float(insns[0] == "push")  # Frame prologue signature
@@ -695,20 +875,24 @@ class SemanticFunctionMatcher:
         norm2 = np.linalg.norm(v2)
         if norm1 < 1e-6 or norm2 < 1e-6:
             similarity = 0.0
+            interpretation = "One or both functions contain insufficient valid instructions to form a behavioral vector."
         else:
             similarity = float(np.dot(v1, v2))
+            similarity = max(min(similarity, 1.0), 0.0)
+            if similarity >= 0.85:
+                interpretation = "Functions exhibit equivalent behavioral control and operational topology."
+            elif similarity >= 0.50:
+                interpretation = "Functions share moderate operational characteristics but differ in branch/register topology."
+            else:
+                interpretation = "Functions exhibit divergent computational patterns or non-code noise."
 
-        similarity = max(min(similarity, 1.0), 0.0)
         is_match = similarity >= 0.85
 
         return {
             "cosine_similarity": round(similarity, 4),
             "is_semantic_match": is_match,
             "confidence": "HIGH" if similarity > 0.92 else ("MODERATE" if similarity >= 0.85 else "LOW / NO MATCH"),
-            "interpretation": (
-                "Functions exhibit equivalent behavioral control and operational topology."
-                if is_match else "Functions exhibit divergent computational patterns or non-code noise."
-            )
+            "interpretation": interpretation
         }
 
 
@@ -852,6 +1036,25 @@ class SurgicalBinaryPatcher:
         return True, "Replaced instructions have zero stack-pointer effects. Stack alignment invariant holds."
 
     @staticmethod
+    def read_bytes(file_path: str, offset: int, length: int = 64) -> Dict[str, Any]:
+        """Reads raw bytes and hexadecimal preview from a binary file at a given byte offset."""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+        file_sz = os.path.getsize(file_path)
+        if offset < 0 or offset >= file_sz:
+            raise ValueError(f"Offset 0x{offset:X} out of range [0, 0x{file_sz:X})")
+        with open(file_path, "rb") as f:
+            f.seek(offset)
+            data = f.read(min(length, 65536))
+        return {
+            "file": file_path,
+            "offset": hex(offset),
+            "length": len(data),
+            "hex": data.hex(),
+            "ascii_preview": "".join(chr(b) if 32 <= b <= 126 else "." for b in data[:128])
+        }
+
+    @staticmethod
     def patch_file(
         source_path: str,
         output_path: str,
@@ -872,39 +1075,52 @@ class SurgicalBinaryPatcher:
         pe_info = BinaryFormatInspector.inspect(src_abs)
         is_in_executable_section = False
         target_section_name = "UNKNOWN"
+        first_sec_offset = file_size
 
         if pe_info.get("format") == "PE":
             for s in pe_info.get("sections", []):
-                s_start = s["raw_offset"]
-                s_end = s_start + s["raw_size"]
+                s_start = int(s["raw_offset"])
+                s_end = s_start + int(s["raw_size"])
+                if s_start > 0 and s_start < first_sec_offset:
+                    first_sec_offset = s_start
                 if s_start <= file_offset < s_end:
                     target_section_name = s["name"]
                     is_in_executable_section = s["is_executable"]
                     break
 
-            if not is_in_executable_section:
+        is_header_patch = (file_offset < first_sec_offset)
+        original_bytes = bytes(data[file_offset:file_offset + len(patch_bytes)])
+
+        if is_header_patch:
+            is_safe = True
+            reason = "Offset targets PE header/metadata space; stack alignment invariance does not apply."
+            pain_hazards = []
+            pain_score = 0.0
+            patch_type = "PE_HEADER_METADATA"
+        else:
+            patch_type = "CODE_SECTION_MUTATION"
+            if pe_info.get("format") == "PE" and not is_in_executable_section:
                 sys.stderr.write(
                     f"WARNING: Patch offset 0x{file_offset:X} resides in section '{target_section_name}', "
                     f"which is NOT marked as executable (IMAGE_SCN_MEM_EXECUTE). Execution may trigger DEP crash.\n"
                 )
 
-        original_bytes = bytes(data[file_offset:file_offset + len(patch_bytes)])
-        is_safe, reason = SurgicalBinaryPatcher.verify_stack_safety(original_bytes)
-        orig_prop = SurgicalBinaryPatcher.compute_stack_proprioception(original_bytes)
-        patch_prop = SurgicalBinaryPatcher.compute_stack_proprioception(patch_bytes)
+            is_safe, reason = SurgicalBinaryPatcher.verify_stack_safety(original_bytes)
+            orig_prop = SurgicalBinaryPatcher.compute_stack_proprioception(original_bytes)
+            patch_prop = SurgicalBinaryPatcher.compute_stack_proprioception(patch_bytes)
 
-        # Metaphorical Pain (Nociception) scoring
-        pain_hazards = []
-        pain_score = 0.0
-        if not is_safe and orig_prop["stack_delta_bytes"] != patch_prop["stack_delta_bytes"]:
-            pain_hazards.append("STACK_FRAME_IMBALANCE_HAZARD")
-            pain_score += 0.65
-        if pe_info.get("format") == "PE" and not is_in_executable_section:
-            pain_hazards.append("DEP_NON_EXECUTABLE_SECTION_HAZARD")
-            pain_score += 0.35
+            # Metaphorical Pain (Nociception) scoring
+            pain_hazards = []
+            pain_score = 0.0
+            if not is_safe and orig_prop["stack_delta_bytes"] != patch_prop["stack_delta_bytes"]:
+                pain_hazards.append("STACK_FRAME_IMBALANCE_HAZARD")
+                pain_score += 0.65
+            if pe_info.get("format") == "PE" and not is_in_executable_section:
+                pain_hazards.append("DEP_NON_EXECUTABLE_SECTION_HAZARD")
+                pain_score += 0.35
 
-        if enforce_nociception and pain_score >= 0.6:
-            raise RuntimeError(f"Nociceptive Reflex blocked destructive binary patch: {reason}")
+            if enforce_nociception and pain_score >= 0.6:
+                raise RuntimeError(f"Nociceptive Reflex blocked destructive binary patch: {reason}")
 
         data[file_offset:file_offset + len(patch_bytes)] = patch_bytes
 
@@ -942,6 +1158,7 @@ class SurgicalBinaryPatcher:
         return {
             "source_file": source_path,
             "output_file": output_path,
+            "patch_type": patch_type,
             "file_offset": hex(file_offset),
             "virtual_rva": hex(rva) if rva is not None else None,
             "target_section": target_section_name,
@@ -1368,8 +1585,16 @@ def main():
     insp_p = subparsers.add_parser("inspect", help="Inspect executable PE/ELF header")
     insp_p.add_argument("--file", required=True, help="Path to executable binary")
 
-    deob_p = subparsers.add_parser("deobfuscate", help="Detect and prune opaque predicates in code bytes")
-    deob_p.add_argument("--hex", required=True, help="Hex-encoded machine code bytes")
+    deob_p = subparsers.add_parser("deobfuscate", help="Detect and prune opaque predicates in code bytes or binary file")
+    deob_p.add_argument("--hex", default=None, help="Hex-encoded machine code bytes")
+    deob_p.add_argument("--file", default=None, help="Path to executable binary")
+    deob_p.add_argument("--offset", default=None, type=lambda x: int(x, 0), help="File offset to analyze (defaults to entry point)")
+    deob_p.add_argument("--size", "--length", dest="size", default=4096, type=lambda x: int(x, 0), help="Number of bytes to analyze (default 4096)")
+
+    dump_p = subparsers.add_parser("dump", help="Extract and preview raw bytes/assembly at an offset")
+    dump_p.add_argument("--file", required=True, help="Path to executable binary")
+    dump_p.add_argument("--offset", required=True, type=lambda x: int(x, 0), help="File offset (e.g. 0x4e0778)")
+    dump_p.add_argument("--length", default=64, type=int, help="Length in bytes (default 64)")
 
     match_p = subparsers.add_parser("match", help="Match functions across architectures semantically")
     match_p.add_argument("--func1", required=True, help="First function bytecode hex")
@@ -1391,8 +1616,17 @@ def main():
         res = BinaryFormatInspector.inspect(args.file)
         print(json.dumps(res, indent=2))
     elif args.command == "deobfuscate":
-        code = bytes.fromhex(args.hex.replace(" ", ""))
-        res = ContinuousDeobfuscator.deobfuscate_cfg(code)
+        if args.hex:
+            code = bytes.fromhex(args.hex.replace(" ", ""))
+            res = ContinuousDeobfuscator.deobfuscate_cfg(code)
+        elif args.file:
+            res = ContinuousDeobfuscator.deobfuscate_file(args.file, offset=args.offset, length=args.size)
+        else:
+            print(json.dumps({"error": "Must provide either --hex or --file for deobfuscation."}))
+            sys.exit(1)
+        print(json.dumps(res, indent=2))
+    elif args.command == "dump":
+        res = SurgicalBinaryPatcher.read_bytes(args.file, args.offset, args.length)
         print(json.dumps(res, indent=2))
     elif args.command == "match":
         res = SemanticFunctionMatcher.match_functions(args.func1, args.func2)

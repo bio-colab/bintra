@@ -31,7 +31,7 @@ def _ensure_utf8_stdio() -> None:
                 pass
 
 
-BINARY_COMMANDS = {"inspect", "deobfuscate", "match", "match-functions", "patch-binary", "scan-hybrid"}
+BINARY_COMMANDS = {"inspect", "deobfuscate", "match", "match-functions", "patch-binary", "scan-hybrid", "dump"}
 WEIGHT_COMMANDS = {
     "subspace", "decompile", "decompile-circuit", "patch-weights",
     "diff", "diff-weights", "probe-trace", "verify-behavior",
@@ -206,6 +206,7 @@ def main():
                 proj_dir,
                 args.project_name,
                 "-import", args.binary,
+                "-overwrite",
                 "-scriptPath", str(script_dir),
                 "-postScript", "ReaNeuralGhidraBridge.java"
             ] + script_args
@@ -273,4 +274,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (FileNotFoundError, ValueError, KeyError) as e:
+        print(json.dumps({
+            "status": "error",
+            "error_type": type(e).__name__,
+            "message": str(e)
+        }, indent=2))
+        sys.exit(1)

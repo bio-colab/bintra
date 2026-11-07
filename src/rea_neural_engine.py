@@ -55,6 +55,10 @@ class SafetensorsHandler:
             header_len_bytes = f.read(8)
             if len(header_len_bytes) < 8:
                 raise ValueError("Invalid safetensors file: too small (< 8 bytes).")
+            if header_len_bytes.startswith(b"MZ"):
+                raise ValueError(f"Target file '{os.path.basename(file_path)}' is a Windows PE executable, not a .safetensors neural model.")
+            if header_len_bytes.startswith(b"\x7fELF"):
+                raise ValueError(f"Target file '{os.path.basename(file_path)}' is a Linux ELF binary, not a .safetensors neural model.")
             (header_len,) = struct.unpack("<Q", header_len_bytes)
             if header_len <= 0 or header_len > 100_000_000:
                 raise ValueError(f"Invalid safetensors header length: {header_len}")

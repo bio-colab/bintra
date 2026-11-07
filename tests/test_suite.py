@@ -763,7 +763,9 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
         tools_res = server.handle_tools_list({})
         self.assertIn("tools", tools_res)
-        self.assertEqual(len(tools_res["tools"]), 12)
+        self.assertEqual(len(tools_res["tools"]), 13)
+        tool_names = [t["name"] for t in tools_res["tools"]]
+        self.assertIn("rea_dump_bytes", tool_names)
         tool_names = [t["name"] for t in tools_res["tools"]]
         self.assertIn("rea_inspect_binary", tool_names)
         self.assertIn("rea_sensory_audit", tool_names)
@@ -779,6 +781,38 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
         deob_res = server.dispatch_tool("rea_deobfuscate_binary", {"code_hex": "31 c0 74 02 90 90 c3"})
         self.assertIn("opaque_predicates_detected", deob_res)
+
+
+    def test_semantic_matcher_short_identical_functions(self):
+        """Verifies that identical assembly blocks (even short straight-line sequences) achieve high match."""
+        from binary_neural_engine import SemanticFunctionMatcher
+        # push ebp; mov ebp, esp
+        res = SemanticFunctionMatcher.match_functions("558bec", "558bec")
+        self.assertTrue(res["is_semantic_match"])
+        self.assertEqual(res["cosine_similarity"], 1.0)
+        self.assertEqual(res["confidence"], "HIGH")
+
+    def test_inspect_nonexistent_file_returns_error_dict(self):
+        """Verifies that inspecting a non-existent file returns a structured dict rather than crashing."""
+        from binary_neural_engine import BinaryFormatInspector
+        res = BinaryFormatInspector.inspect("C:/non_existent_fake_binary_12345.exe")
+        self.assertEqual(res["format"], "FILE_NOT_FOUND")
+        self.assertIn("error", res)
+
+    def test_read_bytes_dump(self):
+        """Verifies dumping raw bytes from file."""
+        import tempfile, os
+        from binary_neural_engine import SurgicalBinaryPatcher
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(b"\x55\x89\xe5\x90\x90\xc3")
+            tmp = f.name
+        try:
+            dump_res = SurgicalBinaryPatcher.read_bytes(tmp, 0, 4)
+            self.assertEqual(dump_res["hex"], "5589e590")
+            self.assertEqual(dump_res["length"], 4)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
 
     def test_agents_md_documentation_exists(self):
         """Verifies that AGENTS.md operating guide exists in repository root."""

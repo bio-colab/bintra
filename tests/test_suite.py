@@ -2028,5 +2028,84 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertTrue(any("does not map to any exported basic block boundary" in u for u in dossier["unknowns"]))
 
 
+    def test_nociceptive_pain_reflex_blocks_replacement_stack_corruption(self):
+        """Verifies Fix for Audit 5.2: Guard inspects replacement bytes and blocks sub rsp over neutral code."""
+        from binary_neural_engine import SurgicalBinaryPatcher
+        import tempfile
+
+        pe_bytes = _create_synthetic_pe64()
+        with tempfile.NamedTemporaryFile(suffix=".exe", delete=False) as tf:
+            tf.write(pe_bytes)
+            pe_path = tf.name
+
+        try:
+            # At offset 0x240 in .text section, inject destructive 'sub rsp, 0x28' (48 83 ec 28)
+            # over previously neutral bytes. With enforce_nociception=True, this MUST raise RuntimeError!
+            with self.assertRaises(RuntimeError) as ctx:
+                SurgicalBinaryPatcher.patch_file(
+                    pe_path,
+                    pe_path,
+                    0x240,
+                    "4883ec28",
+                    enforce_nociception=True
+                )
+            self.assertIn("Nociceptive Reflex blocked destructive binary patch", str(ctx.exception))
+            self.assertIn("Stack frame balance violated", str(ctx.exception))
+
+            # When enforce_nociception=False, it should record the STACK_FRAME_IMBALANCE_HAZARD
+            res = SurgicalBinaryPatcher.patch_file(
+                pe_path,
+                pe_path,
+                0x240,
+                "4883ec28",
+                enforce_nociception=False
+            )
+            self.assertFalse(res["is_safe"])
+            self.assertIn("STACK_FRAME_IMBALANCE_HAZARD", res["pain_hazards"])
+            self.assertGreaterEqual(res["pain_score"], 0.65)
+        finally:
+            if os.path.exists(pe_path):
+                os.remove(pe_path)
+
+    def test_semantic_function_matcher_real_gcc_x86_vs_arm64(self):
+        """Verifies Fix for Audit 5.1: Real compiler instructions are disassembled via Capstone without collapse."""
+        from binary_neural_engine import SemanticFunctionMatcher
+
+        # Real compiled arithmetic function:
+        # x86-64 (add edi, esi; mov eax, edi; ret)
+        x86_hex = "01f789f8c3"
+        # ARM64 (add w0, w0, w1; ret)
+        arm_hex = "0000010bc0035fd6"
+
+        res = SemanticFunctionMatcher.match_functions(x86_hex, arm_hex)
+        self.assertGreater(res["cosine_similarity"], 0.85)
+        self.assertTrue(res["is_semantic_match"])
+        self.assertIn(res["confidence"], ("HIGH", "MODERATE"))
+        self.assertNotEqual(res["cosine_similarity"], 0.0)
+
+    def test_control_flow_flattening_x64_rsp_dispatcher(self):
+        """Verifies Fix for Audit 5.1/Table 3: Detects 64-bit RSP-based dispatcher loops."""
+        from binary_neural_engine import ContinuousDeobfuscator
+        import struct
+
+        # Construct synthetic x64 CFF block:
+        # 3 comparisons against [rsp+8] (81 7C 24 08 imm32)
+        # 3 assignments to [rsp+8] (C7 44 24 08 imm32)
+        cff_stream = bytearray()
+        for state in (0x10, 0x20, 0x30):
+            # CMP [rsp+8], state
+            cff_stream.extend(b"\x81\x7C\x24\x08" + struct.pack("<I", state))
+            # NOP padding
+            cff_stream.extend(b"\x90\x90\x90\x90")
+            # MOV [rsp+8], state + 1
+            cff_stream.extend(b"\xC7\x44\x24\x08" + struct.pack("<I", state + 1))
+            cff_stream.extend(b"\x90\x90\x90\x90")
+
+        res = ContinuousDeobfuscator.detect_control_flow_flattening(bytes(cff_stream))
+        self.assertTrue(res["has_control_flow_flattening"])
+        self.assertEqual(res["dispatcher_comparisons_count"], 3)
+        self.assertEqual(res["state_transitions_count"], 3)
+        self.assertGreater(res["dispatcher_cadence_regularity"], 0.0)
+
 if __name__ == "__main__":
     unittest.main()

@@ -22,6 +22,13 @@ import io
 from typing import Dict, Any, List, Tuple, Optional
 import numpy as np
 try:
+    import capstone
+    from capstone import Cs, CS_ARCH_X86, CS_MODE_64, CS_ARCH_ARM64, CS_MODE_ARM
+    HAS_CAPSTONE = True
+except ImportError:
+    HAS_CAPSTONE = False
+
+try:
     from ghidra_pcode_vectorizer import (
         PcodeVectorizer, PcodeFunctionMatcher, PcodeDeobfuscator, GhidraAnnotationPlanner
     )
@@ -641,21 +648,105 @@ class ContinuousDeobfuscator:
         state_comparisons = []
         state_assignments = []
 
-        for i in range(len(code_bytes) - 6):
-            if code_bytes[i] == 0x81 and code_bytes[i+1] == 0x7D:
+        n = len(code_bytes)
+        i = 0
+        while i < n - 3:
+            matched_step = 1
+
+            # 1. 32-bit EBP Frame Pointer: CMP [ebp+disp8], imm32 (81 7D disp8 imm32)
+            if i + 6 < n and code_bytes[i] == 0x81 and code_bytes[i+1] == 0x7D:
                 imm = struct.unpack("<I", code_bytes[i+3:i+7])[0]
                 state_comparisons.append({
                     "offset": i,
                     "state_value": hex(imm),
-                    "stack_var_offset": code_bytes[i+2]
+                    "stack_var_offset": code_bytes[i+2],
+                    "mechanism": "EBP_DISP8_CMP32"
                 })
-            elif code_bytes[i] == 0xC7 and code_bytes[i+1] == 0x45:
+                matched_step = 7
+            # 2. 32-bit EBP Frame Pointer: CMP [ebp+disp8], imm8 (83 7D disp8 imm8)
+            elif i + 3 < n and code_bytes[i] == 0x83 and code_bytes[i+1] == 0x7D:
+                imm = code_bytes[i+3]
+                state_comparisons.append({
+                    "offset": i,
+                    "state_value": hex(imm),
+                    "stack_var_offset": code_bytes[i+2],
+                    "mechanism": "EBP_DISP8_CMP8"
+                })
+                matched_step = 4
+            # 3. 32-bit EBP Frame Pointer: MOV [ebp+disp8], imm32 (C7 45 disp8 imm32)
+            elif i + 6 < n and code_bytes[i] == 0xC7 and code_bytes[i+1] == 0x45:
                 imm = struct.unpack("<I", code_bytes[i+3:i+7])[0]
                 state_assignments.append({
                     "offset": i,
                     "target_state": hex(imm),
-                    "stack_var_offset": code_bytes[i+2]
+                    "stack_var_offset": code_bytes[i+2],
+                    "mechanism": "EBP_DISP8_MOV32"
                 })
+                matched_step = 7
+
+            # 4. 64-bit RSP Stack Pointer: CMP [rsp+disp8], imm32 (81 7C 24 disp8 imm32)
+            elif i + 7 < n and code_bytes[i] == 0x81 and code_bytes[i+1] == 0x7C and code_bytes[i+2] == 0x24:
+                imm = struct.unpack("<I", code_bytes[i+4:i+8])[0]
+                state_comparisons.append({
+                    "offset": i,
+                    "state_value": hex(imm),
+                    "stack_var_offset": code_bytes[i+3],
+                    "mechanism": "RSP_DISP8_CMP32"
+                })
+                matched_step = 8
+            # 5. 64-bit RSP Stack Pointer: CMP [rsp+disp8], imm8 (83 7C 24 disp8 imm8)
+            elif i + 4 < n and code_bytes[i] == 0x83 and code_bytes[i+1] == 0x7C and code_bytes[i+2] == 0x24:
+                imm = code_bytes[i+4]
+                state_comparisons.append({
+                    "offset": i,
+                    "state_value": hex(imm),
+                    "stack_var_offset": code_bytes[i+3],
+                    "mechanism": "RSP_DISP8_CMP8"
+                })
+                matched_step = 5
+            # 6. 64-bit RSP Stack Pointer: MOV [rsp+disp8], imm32 (C7 44 24 disp8 imm32)
+            elif i + 7 < n and code_bytes[i] == 0xC7 and code_bytes[i+1] == 0x44 and code_bytes[i+2] == 0x24:
+                imm = struct.unpack("<I", code_bytes[i+4:i+8])[0]
+                state_assignments.append({
+                    "offset": i,
+                    "target_state": hex(imm),
+                    "stack_var_offset": code_bytes[i+3],
+                    "mechanism": "RSP_DISP8_MOV32"
+                })
+                matched_step = 8
+
+            # 7. Register state variable: CMP reg32, imm32 (81 F8..FF imm32)
+            elif i + 5 < n and code_bytes[i] == 0x81 and 0xF8 <= code_bytes[i+1] <= 0xFF:
+                imm = struct.unpack("<I", code_bytes[i+2:i+6])[0]
+                state_comparisons.append({
+                    "offset": i,
+                    "state_value": hex(imm),
+                    "register_id": code_bytes[i+1] - 0xF8,
+                    "mechanism": "REG_CMP32"
+                })
+                matched_step = 6
+            # 8. Register state variable: CMP reg32, imm8 (83 F8..FF imm8)
+            elif i + 2 < n and code_bytes[i] == 0x83 and 0xF8 <= code_bytes[i+1] <= 0xFF:
+                imm = code_bytes[i+2]
+                state_comparisons.append({
+                    "offset": i,
+                    "state_value": hex(imm),
+                    "register_id": code_bytes[i+1] - 0xF8,
+                    "mechanism": "REG_CMP8"
+                })
+                matched_step = 3
+            # 9. Register state assignment: MOV reg32, imm32 (B8..BF imm32)
+            elif i + 4 < n and 0xB8 <= code_bytes[i] <= 0xBF:
+                imm = struct.unpack("<I", code_bytes[i+1:i+5])[0]
+                state_assignments.append({
+                    "offset": i,
+                    "target_state": hex(imm),
+                    "register_id": code_bytes[i] - 0xB8,
+                    "mechanism": "REG_MOV32"
+                })
+                matched_step = 5
+
+            i += matched_step
 
         has_cff = len(state_comparisons) >= 3 and len(state_assignments) >= 3
 
@@ -739,13 +830,52 @@ class SemanticFunctionMatcher:
 
     @staticmethod
     def decode_instructions_x86(b: bytes) -> List[str]:
-        """Decodes instruction stream to extract functional categories and detect invalid noise."""
+        """Decodes instruction stream to extract functional categories using Capstone (with pure-Python fallback)."""
+        if HAS_CAPSTONE:
+            try:
+                md = Cs(CS_ARCH_X86, CS_MODE_64)
+                raw_insns = list(md.disasm(b, 0))
+                bytes_decoded = sum(len(i.bytes) for i in raw_insns)
+                # If less than 70% of the byte buffer can be disassembled into valid instructions, it is non-code noise
+                if len(b) >= 8 and bytes_decoded < 0.70 * len(b):
+                    return ["invalid"] * len(b)
+
+                insns = []
+                for i in raw_insns:
+                    m = i.mnemonic.lower()
+                    if m in ("push", "pushfq"):
+                        insns.append("push")
+                    elif m in ("pop", "popfq"):
+                        insns.append("pop")
+                    elif m.startswith("ret"):
+                        insns.append("ret")
+                    elif m == "nop":
+                        insns.append("nop")
+                    elif m.startswith("j") or m in ("loop", "loope", "loopne"):
+                        insns.append("jump")
+                    elif m.startswith("call"):
+                        insns.append("call")
+                    elif m.startswith("mov") or m.startswith("cmov") or m in ("lea",):
+                        insns.append("mov")
+                    elif m in ("add", "adc", "sub", "sbb", "mul", "imul", "div", "idiv",
+                               "and", "or", "xor", "not", "neg", "shl", "shr", "sar",
+                               "rol", "ror", "cmp", "test", "inc", "dec",
+                               "xorps", "xorpd", "addps", "addss", "subps", "subss"):
+                        insns.append("alu")
+                    else:
+                        insns.append("alu")
+                if len(insns) >= 2:
+                    return insns
+            except Exception:
+                pass
+
+        # Enhanced pure-Python fallback
         idx = 0
         insns = []
         n = len(b)
         while idx < n:
             b0 = b[idx]
-            if b0 in (0x48, 0x49, 0x4C, 0x4D, 0x40, 0x41, 0x44, 0x45):
+            if 0x40 <= b0 <= 0x4F:
                 idx += 1
                 if idx >= n:
                     break
@@ -763,7 +893,7 @@ class SemanticFunctionMatcher:
             elif b0 == 0x90:
                 insns.append("nop")
                 idx += 1
-            elif b0 in (0x31, 0x33, 0x29, 0x2B, 0x85, 0x01, 0x03, 0x21, 0x09):
+            elif b0 in (0x31, 0x33, 0x29, 0x2B, 0x85, 0x01, 0x03, 0x21, 0x09, 0x39, 0x3B):
                 if idx + 1 >= n:
                     break
                 insns.append("alu")
@@ -782,26 +912,32 @@ class SemanticFunctionMatcher:
                     break
                 insns.append("mov")
                 idx += len_insn
-            elif b0 in range(0xB8, 0xC0):  # MOV reg, imm32
+            elif b0 in range(0xB8, 0xC0):
                 if idx + 5 > n:
                     break
                 insns.append("mov")
                 idx += 5
-            elif b0 == 0x83:
-                if idx + 2 >= n:
+            elif b0 in (0x80, 0x81, 0x83):
+                sz = 3 if b0 == 0x83 else (6 if b0 == 0x81 else 3)
+                if idx + sz > n:
                     break
                 insns.append("alu")
-                idx += 3
+                idx += sz
             elif b0 in (0xE8, 0xE9):
                 if idx + 4 >= n:
                     break
                 insns.append("call" if b0 == 0xE8 else "jump")
                 idx += 5
-            elif b0 == 0x0F and idx + 1 < n and b[idx+1] in (0x84, 0x85):
+            elif b0 == 0x0F and idx + 1 < n and b[idx+1] in range(0x80, 0x90):
                 if idx + 5 >= n:
                     break
                 insns.append("jump")
                 idx += 6
+            elif b0 == 0x0F and idx + 1 < n and b[idx+1] in range(0x40, 0x50):  # CMOVcc
+                if idx + 2 >= n:
+                    break
+                insns.append("mov")
+                idx += 3
             else:
                 insns.append("invalid")
                 idx += 1
@@ -810,7 +946,43 @@ class SemanticFunctionMatcher:
 
     @staticmethod
     def decode_instructions_arm64(b: bytes) -> List[str]:
-        """Decodes 32-bit fixed-width ARM64 instructions into functional categories."""
+        """Decodes ARM64 instructions into canonical categories via Capstone (with pure-Python fallback)."""
+        if HAS_CAPSTONE:
+            try:
+                md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
+                raw_insns = list(md.disasm(b, 0))
+                bytes_decoded = sum(len(i.bytes) for i in raw_insns)
+                if len(b) >= 8 and bytes_decoded < 0.70 * len(b):
+                    return ["invalid"] * len(b)
+
+                insns = []
+                for i in raw_insns:
+                    m = i.mnemonic.lower()
+                    if m.startswith("ret"):
+                        insns.append("ret")
+                    elif m.startswith("b") or m.startswith("cb") or m.startswith("tb"):
+                        insns.append("call" if m.startswith("bl") else "jump")
+                    elif m in ("stp", "str") and ("sp" in i.op_str.lower() and "!" in i.op_str):
+                        insns.append("push")
+                    elif m in ("ldp", "ldr") and ("sp" in i.op_str.lower()):
+                        insns.append("pop")
+                    elif m.startswith("mov") or m.startswith("ldr") or m.startswith("str") or m.startswith("adr"):
+                        insns.append("mov")
+                    elif m in ("add", "adds", "sub", "subs", "cmp", "cmn", "neg", "negs",
+                               "mul", "smull", "umull", "sdiv", "udiv",
+                               "and", "ands", "orr", "eor", "eon", "bic", "bics",
+                               "lsl", "lsr", "asr", "ror", "tst"):
+                        insns.append("alu")
+                    elif m == "nop":
+                        insns.append("nop")
+                    else:
+                        insns.append("alu")
+                if len(insns) >= 2:
+                    return insns
+            except Exception:
+                pass
+
+        # Pure-Python fallback
         insns = []
         n = len(b) - (len(b) % 4)
         for i in range(0, n, 4):
@@ -1150,16 +1322,36 @@ class SurgicalBinaryPatcher:
                     f"which is NOT marked as executable (IMAGE_SCN_MEM_EXECUTE). Execution may trigger DEP crash.\n"
                 )
 
-            is_safe, reason = SurgicalBinaryPatcher.verify_stack_safety(original_bytes)
+            orig_safe, orig_reason = SurgicalBinaryPatcher.verify_stack_safety(original_bytes)
+            patch_safe, patch_reason = SurgicalBinaryPatcher.verify_stack_safety(patch_bytes)
             orig_prop = SurgicalBinaryPatcher.compute_stack_proprioception(original_bytes)
             patch_prop = SurgicalBinaryPatcher.compute_stack_proprioception(patch_bytes)
 
-            # Metaphorical Pain (Nociception) scoring
+            # Metaphorical Pain (Nociception) scoring: rigorously inspect replacement bytes & frame balance
             pain_hazards = []
             pain_score = 0.0
-            if not is_safe and orig_prop["stack_delta_bytes"] != patch_prop["stack_delta_bytes"]:
+            is_safe = patch_safe
+            reason = patch_reason
+
+            # Case 1: Stack delta discrepancy (replacement alters net stack frame pointer effect)
+            if orig_prop["stack_delta_bytes"] != patch_prop["stack_delta_bytes"]:
                 pain_hazards.append("STACK_FRAME_IMBALANCE_HAZARD")
                 pain_score += 0.65
+                is_safe = False
+                reason = (
+                    f"Stack frame balance violated: original stack delta is {orig_prop['stack_delta_bytes']} bytes, "
+                    f"but replacement delta is {patch_prop['stack_delta_bytes']} bytes."
+                )
+
+            # Case 2: Replacement introduces dangerous stack instructions where original had none
+            if not patch_safe and orig_safe:
+                if "STACK_FRAME_IMBALANCE_HAZARD" not in pain_hazards:
+                    pain_hazards.append("STACK_FRAME_IMBALANCE_HAZARD")
+                    pain_score += 0.65
+                is_safe = False
+                reason = f"Replacement bytes introduce stack-violating instructions: {patch_reason}"
+
+            # Case 3: Executing in non-executable section
             if pe_info.get("format") == "PE" and not is_in_executable_section:
                 pain_hazards.append("DEP_NON_EXECUTABLE_SECTION_HAZARD")
                 pain_score += 0.35
@@ -1219,6 +1411,7 @@ class SurgicalBinaryPatcher:
             "is_stack_safe": is_safe,
             "stack_safety_rationale": reason,
             "nociceptive_pain_score": round(min(pain_score, 1.0), 4),
+            "pain_score": round(min(pain_score, 1.0), 4),
             "nociceptive_hazards": pain_hazards,
             "pain_hazards": pain_hazards
         }

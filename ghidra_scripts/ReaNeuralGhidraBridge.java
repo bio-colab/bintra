@@ -394,16 +394,21 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
             File f = new File(envRoot);
             if (f.exists()) return f;
         }
-        File standardD = new File("D:\\rea-neural");
-        if (standardD.exists()) return standardD;
-
-        File scriptFile = getSourceFile().getFile(true);
-        if (scriptFile != null && scriptFile.getParentFile() != null) {
-            File parentDir = scriptFile.getParentFile().getParentFile();
-            if (parentDir != null && new File(parentDir, "src/cli.py").exists()) {
-                return parentDir;
+        try {
+            File scriptFile = getSourceFile().getFile(true);
+            if (scriptFile != null && scriptFile.getParentFile() != null) {
+                File parentDir = scriptFile.getParentFile().getParentFile();
+                if (parentDir != null && new File(parentDir, "src/cli.py").exists()) {
+                    return parentDir;
+                }
             }
-        }
+        } catch (Exception ignored) {}
+
+        File cwd = new File(".");
+        if (new File(cwd, "src/cli.py").exists()) return cwd;
+        File parentCwd = new File("..");
+        if (new File(parentCwd, "src/cli.py").exists()) return parentCwd;
+
         return null;
     }
 

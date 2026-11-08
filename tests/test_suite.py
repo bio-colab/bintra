@@ -1824,5 +1824,209 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
                 self.assertEqual(res["status"], "error")
                 self.assertIn("requires elevated administrative privileges", res["error"])
 
+    def test_command_executor_output_truncation_5mb(self):
+        """Verifies 5MB output truncation guard in CommandExecutor."""
+        from windows_intelligence.command_engine import CommandExecutor
+        from unittest.mock import patch
+        import subprocess
+
+        large_output_str = "A" * (6 * 1024 * 1024)
+        mock_proc = subprocess.CompletedProcess(
+            args=["cmd.exe", "/c", "ver"],
+            returncode=0,
+            stdout=large_output_str,
+            stderr=""
+        )
+
+        with patch("subprocess.run", return_value=mock_proc):
+            res = CommandExecutor.execute("os_ver")
+            self.assertEqual(res["status"], "success")
+            self.assertTrue(res["is_truncated"])
+
+    def test_command_executor_sc_query_arguments(self):
+        """Verifies sc.exe query argument parsing with both separate and merged state= all flags."""
+        from windows_intelligence.command_engine import CommandExecutor
+        # 1. Separate tokens
+        res1 = CommandExecutor.execute("service_list", extra_flags=["state=", "all"])
+        self.assertEqual(res1["status"], "success")
+        self.assertEqual(res1["exit_code"], 0)
+        self.assertIsInstance(res1["data"], list)
+        self.assertGreater(len(res1["data"]), 0)
+        self.assertIn("service_name", res1["data"][0])
+
+        # 2. Merged space token
+        res2 = CommandExecutor.execute("service_list", extra_flags=["state= all"])
+        self.assertEqual(res2["status"], "success")
+        self.assertEqual(res2["exit_code"], 0)
+        self.assertIsInstance(res2["data"], list)
+        self.assertGreater(len(res2["data"]), 0)
+        self.assertIn("service_name", res2["data"][0])
+
+    def test_powershell_executor_depth_4(self):
+        """Verifies PowerShellExecutor generates command scripts with -Depth 4."""
+        from windows_intelligence.command_engine import PowerShellExecutor
+        cmd = PowerShellExecutor.build_command("Get-Process")
+        self.assertIn("-Depth 4", cmd)
+
+    def test_zero_hardcoded_developer_paths(self):
+        """Verifies zero occurrences of developer paths (Eylias, D:\rea-neural) in source code and ghidra scripts."""
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        disallowed = ["C:\\Users\\Eylias", "D:\\rea-neural", "/Users/Eylias", "users/eylias"]
+        scanned_exts = (".py", ".java", ".md", ".json")
+
+        for root_dir in (os.path.join(repo_root, "src"), os.path.join(repo_root, "ghidra_scripts")):
+            for root, _, files in os.walk(root_dir):
+                for f in files:
+                    if f.endswith(scanned_exts):
+                        p = os.path.join(root, f)
+                        with open(p, "r", encoding="utf-8", errors="ignore") as fh:
+                            fc = fh.read().lower()
+                            self.assertNotIn("c:\\users\\eylias", fc, f"Leaked developer path in {p}")
+                            self.assertNotIn("d:\\rea-neural", fc, f"Leaked developer path in {p}")
+
+    def test_minidump_parser_stream_bounds_and_miscinfo_stream_15(self):
+        """Verifies MiniDumpParser bounds checking and strict Stream 15 MiscInfo mapping."""
+        from windows_intelligence.runtime_telemetry import MiniDumpParser
+        import tempfile
+        import struct
+
+        with tempfile.NamedTemporaryFile(suffix=".dmp", delete=False) as tf:
+            dmp_path = tf.name
+            # Construct synthetic dump: 1 stream with out-of-bounds RVA
+            hdr = struct.pack("<IIIIII", 0x504D444D, 0x0000A793, 1, 32, 0, 1600000000)
+            # Stream entry: Stream 15 (MiscInfo), size 24, RVA 999999 (far beyond file size)
+            stream_entry = struct.pack("<III", 15, 24, 999999)
+            tf.write(hdr)
+            tf.write(stream_entry)
+
+        try:
+            res = MiniDumpParser.parse_minidump(dmp_path)
+            self.assertEqual(res["status"], "success")
+            # The out of bounds stream was skipped defensively
+            self.assertIsNone(res["misc_info"])
+        finally:
+            if os.path.exists(dmp_path):
+                os.remove(dmp_path)
+
+    def test_minidump_thread_registers_and_context_keys(self):
+        """Verifies both thread_registers and thread_context are populated in ExceptionStream."""
+        from windows_intelligence.runtime_telemetry import MiniDumpParser
+        import tempfile
+        import struct
+
+        fd, dmp_path = tempfile.mkstemp(suffix=".dmp")
+        try:
+            # Build valid minimal MDMP with ExceptionStream (6)
+            ctx_bytes = b"\x00" * 1300
+            ctx_mutable = bytearray(ctx_bytes)
+            struct.pack_into("<Q", ctx_mutable, 248, 0x140001050)
+            struct.pack_into("<Q", ctx_mutable, 152, 0x7FFFFFFF0000)
+
+            exc_record = bytearray(168)
+            # ctx_rva is at offset 32 (hdr) + 12 (stream entry) + 168 (exc_record) = 212
+            struct.pack_into("<IIIIQQII15QII", exc_record, 0,
+                             1, 0, 0xC0000005, 0, 0, 0x140001050, 2, 0,
+                             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                             len(ctx_mutable), 212)
+
+            # Header is exactly 32 bytes: 6 uint32s (24 bytes) + 8 reserved bytes
+            hdr = struct.pack("<IIIIIIQ", 0x504D444D, 0x0000A793, 1, 32, 0, 1600000000, 0)
+            stream_entry = struct.pack("<III", 6, 168, 44)
+
+            with os.fdopen(fd, "wb") as f:
+                f.write(hdr)
+                f.write(stream_entry)
+                f.write(exc_record)
+                f.write(ctx_mutable)
+
+            res = MiniDumpParser.parse_minidump(dmp_path)
+            self.assertEqual(res["status"], "success")
+            exc_info = res["exception_info"]
+            self.assertIsNotNone(exc_info)
+            self.assertIn("thread_registers", exc_info)
+            self.assertIn("thread_context", exc_info)
+            self.assertEqual(exc_info["thread_registers"]["rip"], "0x140001050")
+            self.assertEqual(exc_info["thread_context"]["rip"], "0x140001050")
+            self.assertEqual(exc_info["fault_module"], "UNKNOWN_MODULE")
+            self.assertTrue(exc_info["is_unloaded_or_unmapped"])
+        finally:
+            if os.path.exists(dmp_path):
+                os.remove(dmp_path)
+
+    def test_security_inspector_policy_estimation(self):
+        """Verifies WindowsSecurityInspector returns explicit POLICY_ESTIMATION semantics."""
+        from windows_intelligence.security_inspector import WindowsSecurityInspector
+        res = WindowsSecurityInspector.test_directory_write_access(r"C:\Windows")
+        self.assertEqual(res["evaluation_type"], "POLICY_ESTIMATION")
+        self.assertTrue(res["is_read_only_audit"])
+        self.assertTrue(res["is_program_files_path"])
+        self.assertIn("methodology", res)
+        self.assertIn("notice", res)
+
+    def test_registry_reader_truncation_metadata_and_access_denied(self):
+        """Verifies registry reader truncation metadata and ACCESS_DENIED preservation in analyzer."""
+        from windows_intelligence.registry_intelligence import WindowsRegistryReader, WindowsRegistryAnalyzer
+        from unittest.mock import patch
+
+        # Test truncation metadata
+        key_res = WindowsRegistryReader._read_single_view(
+            WindowsRegistryReader.HIVE_MAP["HKLM"],
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+            0,
+            include_subkeys=True,
+            max_subkeys=2
+        )
+        self.assertTrue(key_res["exists"])
+        self.assertEqual(key_res["subkeys_count"], 2)
+        self.assertGreater(key_res["total_subkeys"], 2)
+        self.assertTrue(key_res["is_truncated"])
+
+        # Test ACCESS_DENIED preservation in analyzer
+        mock_dual_view = {
+            "view_64": {"exists": True, "access_denied": True, "error": "AccessDenied"},
+            "view_32": {"exists": True, "access_denied": True, "error": "AccessDenied"}
+        }
+        with patch.object(WindowsRegistryReader, "query_key_dual_view", return_value=mock_dual_view):
+            pol = WindowsRegistryAnalyzer.evaluate_critical_policies()
+            self.assertIn("ACCESS_DENIED", pol["safedllsearch_mode_status"])
+            self.assertIn("ACCESS_DENIED", pol["uac_status"])
+
+    def test_causality_synthesizer_exact_block_containment_and_unknowns(self):
+        """Verifies exact basic block containment matching and unknowns ledger generation."""
+        from windows_intelligence.evidence_engine import CausalitySynthesizer
+        cmd_path = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "System32", "cmd.exe")
+
+        # Non-contiguous blocks: Block A [0x140001000 - 0x140001020], Block B [0x140001080 - 0x1400010A0]
+        # Fault VA is at 0x140001050 (in the gap between blocks!)
+        ghidra_export = {
+            "functions": [
+                {
+                    "name": "GapFunc",
+                    "entry_point": "0x140001000",
+                    "size": 0x200,
+                    "basic_blocks": [
+                        {"start": "0x140001000", "end": "0x140001020"},
+                        {"start": "0x140001080", "end": "0x1400010A0"}
+                    ]
+                }
+            ]
+        }
+        crash_rec = {
+            "source": "MINIDUMP",
+            "exception_code": "0xc0000005",
+            "exception_name": "STATUS_ACCESS_VIOLATION",
+            "fault_module": "cmd.exe",
+            "fault_offset": "0x1050"
+        }
+
+        dossier = CausalitySynthesizer.synthesize_dossier(cmd_path, crash_record=crash_rec, ghidra_export=ghidra_export)
+        self.assertEqual(dossier["status"], "success")
+        # Notice: It does NOT match any block because 0x140001050 is not in Block A or Block B
+        self.assertNotIn("ghidra_basic_block", dossier["binary_mapping"])
+        # Unknowns ledger captures the unmapped block boundary
+        self.assertIn("unknowns", dossier)
+        self.assertTrue(any("does not map to any exported basic block boundary" in u for u in dossier["unknowns"]))
+
+
 if __name__ == "__main__":
     unittest.main()

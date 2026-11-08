@@ -252,7 +252,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                 },
                 "ghidra_path": {
                     "type": "string",
-                    "description": "Optional Ghidra install path (defaults to C:\\Users\\Eylias\\tools\\ghidra or GHIDRA_INSTALL_DIR)"
+                    "description": "Optional Ghidra install path (defaults to C:\\ghidra or GHIDRA_INSTALL_DIR)"
                 },
                 "apply": {
                     "type": "boolean",
@@ -642,7 +642,7 @@ class ReaMcpServer:
         elif name == "rea_ghidra_headless":
             import subprocess, tempfile
             bin_path = args["binary_path"]
-            ghidra_dir = Path(args.get("ghidra_path") or os.environ.get("GHIDRA_INSTALL_DIR", r"C:\Users\Eylias\tools\ghidra"))
+            ghidra_dir = Path(args.get("ghidra_path") or os.environ.get("GHIDRA_INSTALL_DIR", r"C:\ghidra"))
             headless_bat = ghidra_dir / "support" / "analyzeHeadless.bat"
             if not headless_bat.exists():
                 raise FileNotFoundError(f"analyzeHeadless.bat not found at: {headless_bat}")

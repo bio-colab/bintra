@@ -69,6 +69,8 @@ class WindowsRegistryAnalyzer:
         """
         findings = []
         hazards = []
+        sd_val = None
+        lua_val = None
 
         # 1. SafeDllSearchMode Audit
         sd_res = WindowsRegistryReader.query_key_dual_view(
@@ -76,21 +78,26 @@ class WindowsRegistryAnalyzer:
             r"SYSTEM\CurrentControlSet\Control\Session Manager",
             target_values=("SafeDllSearchMode",)
         )
-        sd_val = sd_res.get("view_64", {}).get("values", {}).get("SafeDllSearchMode", {}).get("value")
-        if sd_val == 0:
-            hazards.append({
-                "policy": "SafeDllSearchMode",
-                "severity": "WARNING",
-                "description": "SafeDllSearchMode is explicitly disabled (0). Current working directory is searched before system directories."
-            })
-            findings.append("SafeDllSearchMode is explicitly disabled (0).")
-            sd_status = "EXPLICIT_DISABLED"
-        elif sd_val == 1:
-            findings.append("SafeDllSearchMode is explicitly enabled (1).")
-            sd_status = "EXPLICIT_ENABLED"
+        v64_sd = sd_res.get("view_64", {})
+        if v64_sd.get("error") == "AccessDenied" or v64_sd.get("access_denied"):
+            sd_status = "ACCESS_DENIED (Insufficient Permissions to Query Registry)"
+            findings.append("SafeDllSearchMode query failed: Access Denied.")
         else:
-            findings.append("SafeDllSearchMode is NOT_CONFIGURED (Defaulting to OS Default: Enabled on modern Windows).")
-            sd_status = "NOT_CONFIGURED (OS_DEFAULT_ENABLED)"
+            sd_val = v64_sd.get("values", {}).get("SafeDllSearchMode", {}).get("value")
+            if sd_val == 0:
+                hazards.append({
+                    "policy": "SafeDllSearchMode",
+                    "severity": "WARNING",
+                    "description": "SafeDllSearchMode is explicitly disabled (0). Current working directory is searched before system directories."
+                })
+                findings.append("SafeDllSearchMode is explicitly disabled (0).")
+                sd_status = "EXPLICIT_DISABLED"
+            elif sd_val == 1:
+                findings.append("SafeDllSearchMode is explicitly enabled (1).")
+                sd_status = "EXPLICIT_ENABLED"
+            else:
+                findings.append("SafeDllSearchMode is NOT_CONFIGURED (Defaulting to OS Default: Enabled on modern Windows).")
+                sd_status = "NOT_CONFIGURED (OS_DEFAULT_ENABLED)"
 
         # 2. UAC EnableLUA Audit
         uac_res = WindowsRegistryReader.query_key_dual_view(
@@ -98,21 +105,26 @@ class WindowsRegistryAnalyzer:
             r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
             target_values=("EnableLUA", "ConsentPromptBehaviorAdmin")
         )
-        lua_val = uac_res.get("view_64", {}).get("values", {}).get("EnableLUA", {}).get("value")
-        if lua_val == 0:
-            hazards.append({
-                "policy": "EnableLUA",
-                "severity": "WARNING",
-                "description": "UAC is explicitly disabled (EnableLUA=0). Token virtualization for legacy apps is inactive."
-            })
-            findings.append("UAC EnableLUA is explicitly disabled (0).")
-            lua_status = "EXPLICIT_DISABLED"
-        elif lua_val == 1:
-            findings.append("UAC EnableLUA is explicitly enabled (1).")
-            lua_status = "EXPLICIT_ENABLED"
+        v64_uac = uac_res.get("view_64", {})
+        if v64_uac.get("error") == "AccessDenied" or v64_uac.get("access_denied"):
+            lua_status = "ACCESS_DENIED (Insufficient Permissions to Query Registry)"
+            findings.append("UAC EnableLUA query failed: Access Denied.")
         else:
-            findings.append("UAC EnableLUA is NOT_CONFIGURED (Defaulting to OS Default: Enabled).")
-            lua_status = "NOT_CONFIGURED (OS_DEFAULT_ENABLED)"
+            lua_val = v64_uac.get("values", {}).get("EnableLUA", {}).get("value")
+            if lua_val == 0:
+                hazards.append({
+                    "policy": "EnableLUA",
+                    "severity": "WARNING",
+                    "description": "UAC is explicitly disabled (EnableLUA=0). Token virtualization for legacy apps is inactive."
+                })
+                findings.append("UAC EnableLUA is explicitly disabled (0).")
+                lua_status = "EXPLICIT_DISABLED"
+            elif lua_val == 1:
+                findings.append("UAC EnableLUA is explicitly enabled (1).")
+                lua_status = "EXPLICIT_ENABLED"
+            else:
+                findings.append("UAC EnableLUA is NOT_CONFIGURED (Defaulting to OS Default: Enabled).")
+                lua_status = "NOT_CONFIGURED (OS_DEFAULT_ENABLED)"
 
         # 3. KnownDLLs Verification
         kd_res = WindowsRegistryReader.query_key_dual_view(

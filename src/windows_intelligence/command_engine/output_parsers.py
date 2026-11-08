@@ -7,7 +7,14 @@ Transforms unformatted text, CSV, and XML output into normalized JSON schemas.
 import re
 import csv
 import io
+import sys
 from typing import Dict, Any, List, Optional
+
+# Elevate CSV field size limit to handle large truncated telemetry streams
+try:
+    csv.field_size_limit(min(2147483647, sys.maxsize))
+except Exception:
+    pass
 
 
 class OutputParsers:

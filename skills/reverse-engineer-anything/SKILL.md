@@ -12,9 +12,9 @@ metadata:
 >
 > **REA-Neural Agent-Native Architecture (v7.4.0):**  
 > This repository ships its own native Python Model Context Protocol (MCP) server ([`src/mcp_server.py`](../../src/mcp_server.py) or `python src/cli.py mcp`)
-> providing 13 direct, type-safe reverse engineering tools for AI models (`rea_inspect_binary`, `rea_deobfuscate_binary`,
-> `rea_match_functions`, `rea_patch_binary`, `rea_dump_bytes`, `rea_scan_hybrid`, `rea_sensory_audit`, `rea_match_pcode`,
-> `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`, `rea_wsp_audit`, `rea_patch_weights`).  
+> providing **25 direct, type-safe tools for AI models** structured across two specialized operational tiers:
+> 1. **Core Binary & Decompilation Engine (13 Tools):** `rea_inspect_binary`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_dump_bytes`, `rea_scan_hybrid`, `rea_sensory_audit`, `rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`, `rea_wsp_audit`, `rea_patch_weights`.
+> 2. **Windows System Intelligence & Forensics Tier (12 Tools):** `rea_win_os_profile`, `rea_win_resolve_deps`, `rea_win_device_audit`, `rea_win_security_audit`, `rea_win_wer_inspect`, `rea_win_diagnose`, `rea_win_cmd_exec`, `rea_win_ps_exec`, `rea_win_reg_query`, `rea_win_reg_audit`, `rea_win_etw_audit`, `rea_win_events_query`.
 > Autonomous agents (Antigravity, Claude Code, Codex, Cursor, Devin) can also execute commands directly via the
 > Unified CLI (`python src/cli.py <command> [options]`). See [`AGENTS.md`](../../AGENTS.md) for the complete agent field guide.
 
@@ -55,7 +55,7 @@ before asking for a restart. Read that guide before a second repair attempt.
 
 1. Diagnose without changing REA or client configuration. `npx` may download
    the package and write to npm's cache. For Codex, run
-   `npx -y rea-agents@6.8.0 doctor --client codex --json`. Substitute the current
+   `python src/cli.py diagnose --help --client codex --json`. Substitute the current
    supported client: `claude_code`, `claude_desktop`, `codex`, `cursor`,
    `gemini_cli`, `windsurf`, `devin`, `opencode`, `antigravity`, `copilot_cli`,
    `commandcode`, `vscode`, `grok_build`, `omp`, or `grok_bot`. `grok_bot` has no local
@@ -69,12 +69,12 @@ before asking for a restart. Read that guide before a second repair attempt.
    that provider: static JavaScript inspection needs neither Hopper nor Ghidra,
    and Android inspection has separate bring-your-own JADX/Java prerequisites.
 3. For a configuration repair, prepare the read-only plan:
-   `npx -y rea-agents@6.8.0 setup --client codex --dry-run --json`.
+   `pip install -e . --client codex --dry-run --json`.
    Use the current client's ID, show its exact proposed paths, backups, and
    changes, and obtain approval before setup writes configuration or installs
    Hopper. Setup normally installs the matching bundled skill too; include that
    replacement in the reviewed plan. After approval, apply the same scope with
-   `npx -y rea-agents@6.8.0 setup --client codex --yes`. Add `--install-hopper`
+   `pip install -e . --client codex --yes`. Add `--install-hopper`
    only if that separate installation was needed and explicitly approved.
 4. Restart/reconnect the affected agent. Verify that REA tools actually appear
    in the session, then resume the original investigation. If they remain
@@ -88,7 +88,7 @@ registration with a version-pinned `rea-agents` package or continue through the 
 A concrete CLI fallback for an operator-supplied JavaScript tree or ASAR is:
 
 ```bash
-npx -y rea-agents@6.8.0 analyze-javascript-application /absolute/path/to/app --json
+python src/cli.py inspect /absolute/path/to/app --json
 ```
 
 No MCP registration or native engine is required. Read the returned Evidence,

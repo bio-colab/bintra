@@ -1,8 +1,8 @@
-# Ghidra Integration Architecture & Operational Guide (v7.3.0)
+# Ghidra Integration Architecture & Operational Guide (v7.4.0)
 
 ## Overview
 REA-Neural provides **file-exchange + headless orchestration** integration with Ghidra (target 12.1.x / 11.x, **unverified**).
-> **Honest status (aligned with `README.md`):** there is **no live TCP/socket bridge** to a running Ghidra instance. What ships is: (a) in-engine scripts (`ghidra_scripts/ReaNeuralGhidraBridge.java`, `rea_extract_pcode.py`), (b) a headless orchestrator (`cli.py ghidra-headless`) that launches `analyzeHeadless.bat` with the bridge as a `-postScript`, and (c) a P-code vectorizer/matcher plus an annotation **plan generator** (`cli.py ghidra-analyze`) that consumes exported JSON. The 6-step cycle below is the DESIGN; the loop is only truly closed once `rea_extract_pcode.py` exports live P-code into `ghidra-analyze` automatically.
+> **Honest status (aligned with `README.md`):** there is **no live TCP/socket bridge** to a running Ghidra instance. What ships is: (a) in-engine scripts (`ghidra_scripts/ReaNeuralGhidraBridge.java`, `rea_extract_pcode.py`), (b) a headless orchestrator (`cli.py ghidra-headless`) that launches `analyzeHeadless.bat` with the bridge as a `-postScript`, and (c) a P-code vectorizer/matcher plus an annotation **plan generator** (`cli.py ghidra-analyze`) that consumes exported JSON. The 6-step cycle below is the DESIGN; and `ReaNeuralGhidraBridge.java` integrates end-to-end: extracting High P-Code / CFG to JSON, invoking `cli.py ghidra-analyze`, and applying the mutation plan to the Program Database.
 
 ---
 
@@ -63,7 +63,7 @@ sequenceDiagram
 
 ### Method A: Inside Ghidra GUI (Interactive)
 1. In Ghidra, open the **Script Manager** (`Window` -> `Script Manager`).
-2. Click the **Script Directories** icon and add the path: `D:\rea-neural\ghidra_scripts`.
+2. Click the **Script Directories** icon and add the path: `C:\path\to\rea-neural\ghidra_scripts`.
 3. Filter by category `REA-Neural`.
 4. Select `ReaNeuralGhidraBridge.java` and click **Run**.
 5. Once analysis completes, review the summary dialog and click **Yes** to apply all deobfuscated renames and comments to the Program Database.

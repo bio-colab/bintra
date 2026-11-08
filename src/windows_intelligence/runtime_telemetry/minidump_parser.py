@@ -2,7 +2,7 @@
 """
 Pure-Python Multi-Stream MiniDump (.dmp) Parser & Crash Intelligence Engine.
 Parses MDMP directory headers, SystemInfo (Stream 7), ThreadList (Stream 3),
-ModuleList (Stream 4), MiscInfo (Stream 10), and ExceptionRecord (Stream 6).
+ModuleList (Stream 4), MiscInfo (Stream 15), and ExceptionRecord (Stream 6).
 Provides deterministic root cause attribution and access violation parameter analysis
 (Read / Write / DEP execution, NULL pointer dereferences).
 """
@@ -94,6 +94,7 @@ class MiniDumpParser:
             return {"status": "error", "error": f"Dump file not found: {dmp_path}"}
 
         try:
+            file_size = os.path.getsize(dmp_path)
             with open(dmp_path, "rb") as f:
                 header = f.read(32)
                 if len(header) < 32 or header[:4] != b"MDMP":
@@ -111,6 +112,9 @@ class MiniDumpParser:
                     if len(entry) < 12:
                         break
                     st_type, data_size, rva = struct.unpack("<III", entry)
+                    # Defensive stream bounds verification against file size
+                    if rva < 0 or rva + data_size > file_size:
+                        continue
                     stream_map[st_type] = (data_size, rva)
                     streams_detected.append({
                         "stream_id": st_type,
@@ -123,34 +127,32 @@ class MiniDumpParser:
                 system_info = None
                 if 7 in stream_map:
                     sz, rva = stream_map[7]
-                    system_info = cls._parse_system_info_stream(f, rva, sz)
+                    system_info = cls._parse_system_info_stream(f, rva, sz, file_size)
 
                 # 2. Misc Info Stream (Stream 15)
+                # Note: Stream 10 is CommentStreamA in the Microsoft MiniDump specification; Stream 15 is MiscInfoStream.
                 misc_info = None
                 if 15 in stream_map:
                     sz, rva = stream_map[15]
-                    misc_info = cls._parse_misc_info_stream(f, rva, sz)
-                elif 10 in stream_map and stream_map[10][0] == 24:
-                    sz, rva = stream_map[10]
-                    misc_info = cls._parse_misc_info_stream(f, rva, sz)
+                    misc_info = cls._parse_misc_info_stream(f, rva, sz, file_size)
 
                 # 3. Thread List Stream (Stream 3)
                 threads = []
                 if 3 in stream_map:
                     sz, rva = stream_map[3]
-                    threads = cls._parse_thread_list_stream(f, rva, sz)
+                    threads = cls._parse_thread_list_stream(f, rva, sz, file_size)
 
                 # 4. Module List Stream (Stream 4)
                 modules = []
                 if 4 in stream_map:
                     sz, rva = stream_map[4]
-                    modules = cls._parse_module_list_stream(f, rva, sz)
+                    modules = cls._parse_module_list_stream(f, rva, sz, file_size)
 
                 # 5. Exception Stream (Stream 6)
                 exception_info = None
                 if 6 in stream_map:
                     sz, rva = stream_map[6]
-                    exception_info = cls._parse_exception_stream(f, rva, sz)
+                    exception_info = cls._parse_exception_stream(f, rva, sz, file_size)
 
                 # 6. Correlate Fault Address with Loaded Modules
                 cls._correlate_fault(exception_info, modules)
@@ -173,9 +175,9 @@ class MiniDumpParser:
             return {"status": "error", "error": f"Failed to parse minidump: {e}", "file_path": dmp_path}
 
     @classmethod
-    def _parse_system_info_stream(cls, f, rva: int, size: int) -> Optional[Dict[str, Any]]:
+    def _parse_system_info_stream(cls, f, rva: int, size: int, file_size: int = 0) -> Optional[Dict[str, Any]]:
         """Parses MINIDUMP_SYSTEM_INFO (Stream 7)."""
-        if size < 48:
+        if size < 48 or rva < 0 or (file_size > 0 and rva + size > file_size):
             return None
         f.seek(rva)
         fmt = "<HHHBBIIIIIHH16s"
@@ -195,9 +197,9 @@ class MiniDumpParser:
         }
 
     @classmethod
-    def _parse_misc_info_stream(cls, f, rva: int, size: int) -> Optional[Dict[str, Any]]:
-        """Parses MINIDUMP_MISC_INFO (Stream 10)."""
-        if size < 24:
+    def _parse_misc_info_stream(cls, f, rva: int, size: int, file_size: int = 0) -> Optional[Dict[str, Any]]:
+        """Parses MINIDUMP_MISC_INFO (Stream 15)."""
+        if size < 24 or rva < 0 or (file_size > 0 and rva + size > file_size):
             return None
         f.seek(rva)
         raw = f.read(24)
@@ -212,9 +214,9 @@ class MiniDumpParser:
         }
 
     @classmethod
-    def _parse_thread_list_stream(cls, f, rva: int, size: int) -> List[Dict[str, Any]]:
+    def _parse_thread_list_stream(cls, f, rva: int, size: int, file_size: int = 0) -> List[Dict[str, Any]]:
         """Parses MINIDUMP_THREAD_LIST (Stream 3)."""
-        if size < 4:
+        if size < 4 or rva < 0 or (file_size > 0 and rva + size > file_size):
             return []
         f.seek(rva)
         raw_num = f.read(4)
@@ -238,9 +240,9 @@ class MiniDumpParser:
         return threads
 
     @classmethod
-    def _parse_module_list_stream(cls, f, rva: int, size: int) -> List[Dict[str, Any]]:
+    def _parse_module_list_stream(cls, f, rva: int, size: int, file_size: int = 0) -> List[Dict[str, Any]]:
         """Parses MINIDUMP_MODULE_LIST (Stream 4)."""
-        if size < 4:
+        if size < 4 or rva < 0 or (file_size > 0 and rva + size > file_size):
             return []
         f.seek(rva)
         raw_num = f.read(4)
@@ -270,9 +272,9 @@ class MiniDumpParser:
         return modules
 
     @classmethod
-    def _parse_exception_stream(cls, f, rva: int, size: int) -> Optional[Dict[str, Any]]:
+    def _parse_exception_stream(cls, f, rva: int, size: int, file_size: int = 0) -> Optional[Dict[str, Any]]:
         """Parses MINIDUMP_EXCEPTION_STREAM (Stream 6) including access violation parameters."""
-        if size < 168:
+        if size < 168 or rva < 0 or (file_size > 0 and rva + size > file_size):
             return None
         f.seek(rva)
         fmt = "<IIIIQQII15QII"
@@ -340,6 +342,7 @@ class MiniDumpParser:
                         "rcx": hex(rcx),
                         "rdx": hex(rdx)
                     }
+                    info["thread_context"] = dict(info["thread_registers"])
                 elif len(ctx_bytes) >= 716:
                     # x86 context
                     (eip,) = struct.unpack("<I", ctx_bytes[184:188])
@@ -357,6 +360,7 @@ class MiniDumpParser:
                         "ecx": hex(ecx),
                         "edx": hex(edx)
                     }
+                    info["thread_context"] = dict(info["thread_registers"])
             except Exception:
                 pass
 
@@ -383,9 +387,11 @@ class MiniDumpParser:
         if fault_module:
             exception_info["fault_module"] = fault_module
             exception_info["fault_offset"] = fault_offset
+            exception_info["is_unloaded_or_unmapped"] = False
         else:
-            exception_info["fault_module"] = "UNKNOWN_OR_UNLOADED_MODULE"
+            exception_info["fault_module"] = "UNKNOWN_MODULE"
             exception_info["fault_offset"] = hex(exc_addr)
+            exception_info["is_unloaded_or_unmapped"] = True
 
         del exception_info["exception_address_int"]
 

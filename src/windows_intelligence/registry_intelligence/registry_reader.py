@@ -46,12 +46,32 @@ class WindowsRegistryReader:
         max_subkeys: int = 100
     ) -> List[str]:
         """Enumerates child subkey names under a given registry path in a specific view."""
+        subkeys, _, _ = cls.enumerate_subkeys_with_count(hive_handle, subkey, view_flag, max_subkeys)
+        return subkeys
+
+    @classmethod
+    def enumerate_subkeys_with_count(
+        cls,
+        hive_handle: int,
+        subkey: str,
+        view_flag: int = 0,
+        max_subkeys: int = 100
+    ) -> Tuple[List[str], int, bool]:
+        """
+        Enumerates child subkey names along with total count and truncation status.
+        Returns: (sampled_subkeys, total_subkeys_count, is_truncated)
+        """
         if not winreg:
-            return []
+            return [], 0, False
         access = winreg.KEY_READ | view_flag
         subkeys = []
+        total_count = 0
         try:
             with winreg.OpenKey(hive_handle, subkey, 0, access) as key:
+                try:
+                    total_count, _, _ = winreg.QueryInfoKey(key)
+                except Exception:
+                    total_count = 0
                 idx = 0
                 while len(subkeys) < max_subkeys:
                     try:
@@ -60,9 +80,12 @@ class WindowsRegistryReader:
                         idx += 1
                     except OSError:
                         break
+                if total_count == 0:
+                    total_count = len(subkeys)
         except Exception:
             pass
-        return subkeys
+        is_truncated = total_count > len(subkeys)
+        return subkeys, total_count, is_truncated
 
     @classmethod
     def _read_single_view(
@@ -113,8 +136,12 @@ class WindowsRegistryReader:
                 }
 
                 if include_subkeys:
-                    subkeys = cls.enumerate_subkeys(hive_handle, subkey, view_flag, max_subkeys=max_subkeys)
+                    subkeys, total_count, is_truncated = cls.enumerate_subkeys_with_count(
+                        hive_handle, subkey, view_flag, max_subkeys=max_subkeys
+                    )
                     result["subkeys_count"] = len(subkeys)
+                    result["total_subkeys"] = total_count
+                    result["is_truncated"] = is_truncated
                     result["subkeys"] = subkeys
 
                     # Deep sample child values if target_values was specified
@@ -135,7 +162,7 @@ class WindowsRegistryReader:
         except FileNotFoundError:
             return {"exists": False}
         except PermissionError:
-            return {"exists": True, "error": "AccessDenied"}
+            return {"exists": True, "access_denied": True, "error": "AccessDenied"}
         except Exception as e:
             return {"exists": False, "error": str(e)}
 

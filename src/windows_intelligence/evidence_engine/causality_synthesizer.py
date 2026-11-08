@@ -227,7 +227,7 @@ class CausalitySynthesizer:
             exc_name = crash_record.get("exception_name", "UNKNOWN")
 
             raw_fault_mod = crash_record.get("fault_module")
-            if raw_fault_mod and str(raw_fault_mod).strip():
+            if raw_fault_mod and str(raw_fault_mod).strip() and str(raw_fault_mod).strip() not in ("UNKNOWN_MODULE", "UNKNOWN_OR_UNLOADED_MODULE"):
                 fault_mod = str(raw_fault_mod).strip()
                 is_internal = os.path.basename(fault_mod).lower() == bin_name.lower()
             else:
@@ -369,7 +369,7 @@ class CausalitySynthesizer:
 
         if crash_record:
             raw_mod = crash_record.get("fault_module")
-            if raw_mod and str(raw_mod).strip():
+            if raw_mod and str(raw_mod).strip() and str(raw_mod).strip() not in ("UNKNOWN_MODULE", "UNKNOWN_OR_UNLOADED_MODULE"):
                 raw_fault_module = str(raw_mod).strip()
                 is_internal_fault = (target_name == os.path.basename(raw_fault_module).lower())
             else:
@@ -430,18 +430,30 @@ class CausalitySynthesizer:
                                     matching_func = func
                                     break
 
-                            # Basic blocks (supporting start, end, stop, and size)
+                            # Exact basic block interval containment check (b_start <= va <= b_end)
                             blocks = func.get("basic_blocks", [])
-                            if blocks:
-                                b_starts = [int(b["start"], 16) for b in blocks if "start" in b]
-                                b_ends = [
-                                    int(b.get("end") or b.get("stop"), 16)
-                                    if (b.get("end") or b.get("stop")) else (int(b["start"], 16) + int(b.get("size", 1)))
-                                    for b in blocks if "start" in b
-                                ]
-                                if b_starts and min(b_starts) <= va <= max(b_ends):
-                                    matching_func = func
-                                    break
+                            matched_block = None
+                            for b in blocks:
+                                if "start" not in b:
+                                    continue
+                                try:
+                                    b_s = int(b["start"], 16)
+                                    if b.get("end") or b.get("stop"):
+                                        b_e = int(b.get("end") or b.get("stop"), 16)
+                                    elif b.get("size"):
+                                        b_e = b_s + int(b["size"])
+                                    else:
+                                        b_e = b_s + 1
+                                    if b_s <= va <= b_e:
+                                        matching_func = func
+                                        matched_block = b
+                                        break
+                                except (ValueError, TypeError):
+                                    continue
+                            if matching_func:
+                                if matched_block:
+                                    binary_mapping["ghidra_basic_block"] = matched_block.get("start")
+                                break
 
                             f_ops = func.get("pcode_ops", [])
                             if f_ops:
@@ -500,7 +512,7 @@ class CausalitySynthesizer:
             elif raw_fault_module != "UNKNOWN_MODULE":
                 facts.append(f"Faulting module is explicitly reported as external runtime: '{raw_fault_module}'.")
 
-            ctx = crash_record.get("thread_context")
+            ctx = crash_record.get("thread_context") or crash_record.get("thread_registers")
             if ctx and isinstance(ctx, dict):
                 reg_str = ", ".join(f"{k}={v}" for k, v in list(ctx.items())[:6])
                 facts.append(f"CPU thread context registers at exception: {reg_str}.")
@@ -585,6 +597,20 @@ class CausalitySynthesizer:
         if "AV_ROOT_CAUSE" in graph.nodes and target_node_id in graph.nodes:
             causal_chain = graph.find_causal_path(target_node_id, "AV_ROOT_CAUSE")
 
+        # 5. Compile Epistemic Unknowns Ledger
+        unknowns = []
+        if not crash_record:
+            unknowns.append("Empirical crash telemetry is unavailable (no local MiniDump or Event 1000 record detected).")
+        elif raw_fault_module == "UNKNOWN_MODULE":
+            unknowns.append(f"Faulting module unmapped: exception occurred at unmapped virtual address {hex(fault_offset)}.")
+        if is_internal_fault:
+            if not ghidra_export:
+                unknowns.append("Ghidra decompilation export unavailable: internal RVA cannot be resolved to AST/CFG.")
+            elif binary_mapping and not binary_mapping.get("ghidra_function_name"):
+                unknowns.append(f"Internal fault address {hex(va)} does not map to any exported Ghidra function.")
+            elif binary_mapping and not binary_mapping.get("ghidra_basic_block"):
+                unknowns.append(f"Internal fault address {hex(va)} does not map to any exported basic block boundary.")
+
         dossier = {
             "status": "success",
             "binary_path": norm_path,
@@ -593,8 +619,10 @@ class CausalitySynthesizer:
             "epistemic_classification": {
                 "facts": facts,
                 "observations": observations,
-                "hypotheses": hypotheses
+                "hypotheses": hypotheses,
+                "unknowns": unknowns
             },
+            "unknowns": unknowns,
             "root_cause_summary": root_cause_points or ["No critical failure conditions detected in host Windows environment."],
             "remediation_advisory": remediation_steps or ["System and application dependencies are healthy."],
             "os_environment": os_data,
@@ -646,6 +674,15 @@ class CausalitySynthesizer:
             lines.append(f"- **[HYPOTHESIS]** {h}")
         if not ep.get("hypotheses"):
             lines.append("- *(No failure hypotheses generated)*")
+
+        lines.extend([
+            "",
+            "### Known Unknowns & Epistemic Boundaries",
+        ])
+        for u in ep.get("unknowns", []):
+            lines.append(f"- **[UNKNOWN]** {u}")
+        if not ep.get("unknowns"):
+            lines.append("- *(All diagnostic variables empirically resolved)*")
 
         lines.extend([
             "",

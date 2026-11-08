@@ -100,7 +100,14 @@ class WindowsSecurityInspector:
         0xC0000005 access violations when attempting to write config or save states without UAC virtualization.
         """
         if not os.path.isdir(target_dir):
-            return {"directory": target_dir, "exists": False, "is_writable": False, "is_read_only_audit": True}
+            return {
+                "directory": target_dir,
+                "exists": False,
+                "is_writable": False,
+                "is_read_only_audit": True,
+                "evaluation_type": "POLICY_ESTIMATION",
+                "notice": "Target directory does not exist on disk."
+            }
 
         norm_dir = os.path.abspath(target_dir).lower()
         is_program_files = (
@@ -118,6 +125,10 @@ class WindowsSecurityInspector:
             "exists": True,
             "is_writable": is_writable,
             "is_read_only_audit": True,
+            "evaluation_type": "POLICY_ESTIMATION",
+            "confidence": 0.95 if is_program_files else 0.85,
+            "methodology": "In-memory policy heuristic (evaluates system protected roots against token elevation; zero disk mutation)",
+            "notice": "Heuristic policy evaluation without filesystem DACL probing. Actual permissions may vary based on explicit user/group ACLs.",
             "is_program_files_path": is_program_files,
             "is_elevated_admin": is_admin
         }

@@ -17,7 +17,14 @@ def run():
         print("[REA-Neural] Error: No program loaded in Ghidra.")
         return
 
-    rea_root = os.environ.get("REA_NEURAL_ROOT", r"D:\rea-neural")
+    rea_root = os.environ.get("REA_NEURAL_ROOT")
+    if not rea_root:
+        script_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in locals() else "."
+        candidate = os.path.dirname(script_dir)
+        if os.path.exists(os.path.join(candidate, "src", "cli.py")):
+            rea_root = candidate
+        else:
+            rea_root = "."
     cli_py = os.path.join(rea_root, "src", "cli.py")
     if not os.path.exists(cli_py):
         print("[REA-Neural] Error: Could not locate REA CLI at: " + cli_py)
@@ -61,6 +68,7 @@ def run():
         funcs_data.append({
             "name": func.getName(),
             "entry_point": "0x" + func.getEntryPoint().toString(),
+            "size": int(func.getBody().getNumAddresses()),
             "parameter_count": func.getParameterCount(),
             "return_type": func.getReturnType().getName(),
             "pcode_ops": pcode_ops

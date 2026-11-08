@@ -69,7 +69,15 @@ class CommandExecutor:
         # 3. Strict Argument Whitelisting Check
         validated_extra = []
         if extra_flags:
+            # Flatten any space-separated flag arguments (e.g. "state= all" -> ["state=", "all"])
+            flat_flags = []
             for flag in extra_flags:
+                if " " in flag:
+                    flat_flags.extend(flag.split())
+                else:
+                    flat_flags.append(flag)
+
+            for flag in flat_flags:
                 if flag not in spec.allowed_flags:
                     return {
                         "status": "error",
@@ -113,8 +121,10 @@ class CommandExecutor:
             # 6. Parse Output into Typed Schema (with 5MB output guard)
             stdout_text = res.stdout
             MAX_OUTPUT_BYTES = 5 * 1024 * 1024  # 5 MB
+            is_truncated = False
             if len(stdout_text.encode('utf-8', errors='ignore')) > MAX_OUTPUT_BYTES:
                 stdout_text = stdout_text[:MAX_OUTPUT_BYTES] + "\n... [OUTPUT TRUNCATED AT 5MB SAFETY LIMIT]"
+                is_truncated = True
 
             parsed_data = OutputParsers.dispatch_parser(spec.parser_name, stdout_text)
 
@@ -127,6 +137,7 @@ class CommandExecutor:
                 "exit_code": res.returncode,
                 "duration_ms": elapsed_ms,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "is_truncated": is_truncated,
                 "data": parsed_data
             }
 

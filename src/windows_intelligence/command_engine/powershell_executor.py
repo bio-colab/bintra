@@ -28,6 +28,11 @@ class PowerShellExecutor:
     }
 
     @classmethod
+    def build_command(cls, cmdlet: str) -> str:
+        """Constructs safe PowerShell command string formatting with depth guard."""
+        return f"{cmdlet} | ConvertTo-Json -Depth 4 -Compress"
+
+    @classmethod
     def query(cls, query_id: str, timeout_seconds: int = 15) -> Dict[str, Any]:
         """
         Executes an approved CIM cmdlet, capturing compressed JSON output.
@@ -47,7 +52,7 @@ class PowerShellExecutor:
         if not os.path.isfile(ps_exe):
             ps_exe = "powershell.exe"
 
-        command_str = f"{cmdlet} | ConvertTo-Json -Depth 4 -Compress"
+        command_str = cls.build_command(cmdlet)
         cmd_vector = [
             ps_exe,
             "-NoProfile",

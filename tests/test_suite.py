@@ -2197,5 +2197,28 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("driver_packages_cataloged", audit_res)
         self.assertIn("device_reports", audit_res)
 
+    @unittest.skipUnless(sys.platform == 'win32', "CLI Windows Intelligence subcommands require Windows host")
+    def test_cli_parallel_tracks_subcommands(self):
+        """Verifies that file-locks, proc-modules, and dev-match CLI subcommands execute cleanly."""
+        cli_path = os.path.join(SRC_DIR, "cli.py")
+
+        # Test help outputs
+        for subcmd in ("file-locks", "proc-modules", "dev-match"):
+            p = subprocess.run([sys.executable, cli_path, subcmd, "--help"], capture_output=True, text=True, check=True)
+            self.assertEqual(p.returncode, 0)
+            self.assertIn(subcmd, p.stdout)
+
+        # Test dev-match live output
+        p_match = subprocess.run(
+            [sys.executable, cli_path, "dev-match", "--query", "Intel"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True
+        )
+        data = json.loads(p_match.stdout)
+        self.assertEqual(data["status"], "success")
+        self.assertIn("device_reports", data)
+
 if __name__ == "__main__":
     unittest.main()

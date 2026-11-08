@@ -2,12 +2,18 @@
 """
 Windows Safe DLL Search Order & Dependency Resolver.
 Emulates Windows loader DLL resolution, WOW64 filesystem redirection,
-API-Set virtual routing, and cross-checks imports against disk DLL export tables.
+KnownDLLs registry evaluation, API-Set virtual routing, and cross-checks imports
+against disk DLL export tables.
 """
 
 import os
 import sys
 from typing import Dict, Any, List, Optional, Set
+
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 # Import PE inspector from parent binary engine
 sys_path_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -19,8 +25,9 @@ from binary_neural_engine import BinaryFormatInspector
 
 class WindowsDependencyResolver:
     """
-    Simulates the Windows OS loader dynamic linking mechanism to diagnose
-    missing DLLs, architecture mismatches (x86 vs x64), and unexported APIs.
+    Simulates the Windows OS loader dynamic linking mechanism (SafeDllSearchMode)
+    to diagnose missing DLLs, architecture mismatches (x86 vs x64), unexported APIs,
+    and KnownDLLs priority.
     """
 
     KNOWN_API_SET_FORWARDERS = {
@@ -32,6 +39,32 @@ class WindowsDependencyResolver:
         "ext-ms-win-gdi-": "gdi32.dll",
         "ext-ms-win-ntuser-": "user32.dll"
     }
+
+    @classmethod
+    def get_known_dlls(cls) -> Set[str]:
+        """
+        Retrieves the Windows KnownDLLs list from the registry:
+        HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\KnownDLLs
+        Windows loader always loads KnownDLLs from System32/SysWOW64, bypassing the application directory.
+        """
+        if not winreg:
+            return set()
+        known = set()
+        path = r"SYSTEM\CurrentControlSet\Control\Session Manager\KnownDLLs"
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_READ) as k:
+                idx = 0
+                while True:
+                    try:
+                        _, val_data, _ = winreg.EnumValue(k, idx)
+                        idx += 1
+                        if isinstance(val_data, str) and val_data.lower().endswith(".dll"):
+                            known.add(val_data.lower())
+                    except OSError:
+                        break
+        except Exception:
+            pass
+        return known
 
     @classmethod
     def get_search_directories(cls, binary_path: str, is_32bit_on_64bit: bool = False) -> List[str]:
@@ -46,7 +79,6 @@ class WindowsDependencyResolver:
         # Handle WOW64 Redirection for 32-bit binaries running on 64-bit Windows
         if is_32bit_on_64bit:
             sys_dir = os.path.join(system_root, "SysWOW64")
-            # If SysWOW64 doesn't exist (e.g. running on pure 32-bit OS), fallback to System32
             if not os.path.exists(sys_dir):
                 sys_dir = os.path.join(system_root, "System32")
         else:
@@ -109,11 +141,12 @@ class WindowsDependencyResolver:
         custom_imports: Optional[Dict[str, List[str]]] = None
     ) -> Dict[str, Any]:
         """
-        Performs deep verification of an executable's imports against host Windows DLLs.
+        Performs static heuristic verification of an executable's imports against host Windows DLLs.
         Detects:
         - Missing libraries (DLL_NOT_FOUND / 0xC0000135).
         - Architecture mismatch (attempting to load x64 DLL in x86 binary or vice-versa).
         - Missing exported procedures (PROCEDURE_NOT_FOUND / 0xC0000139).
+        - KnownDLLs priority enforcement.
         """
         if custom_imports is None and not os.path.isfile(binary_path):
             return {
@@ -135,6 +168,7 @@ class WindowsDependencyResolver:
 
         search_dirs = cls.get_search_directories(binary_path, is_32bit_on_64bit=is_32bit_on_64bit)
         imports = custom_imports if custom_imports is not None else pe_info.get("imports", {}).get("modules", {})
+        known_dlls = cls.get_known_dlls()
 
         resolved_modules = []
         missing_modules = []
@@ -143,14 +177,19 @@ class WindowsDependencyResolver:
 
         for dll_name, imported_funcs in imports.items():
             is_virtual_api_set = cls.is_api_set(dll_name)
+            is_known = dll_name.lower() in known_dlls
             search_name = cls.resolve_api_set_target(dll_name) if is_virtual_api_set else dll_name
-            located_path = cls.locate_dll(search_name, search_dirs)
+
+            # KnownDLLs are loaded directly from system directory
+            effective_search_dirs = search_dirs[1:] if is_known else search_dirs
+            located_path = cls.locate_dll(search_name, effective_search_dirs)
 
             if not located_path:
                 missing_modules.append({
                     "imported_name": dll_name,
                     "resolved_as": search_name,
                     "is_api_set": is_virtual_api_set,
+                    "is_known_dll": is_known,
                     "functions_count": len(imported_funcs),
                     "functions_preview": imported_funcs[:5]
                 })
@@ -200,6 +239,7 @@ class WindowsDependencyResolver:
             resolved_modules.append({
                 "imported_name": dll_name,
                 "is_api_set": is_virtual_api_set,
+                "is_known_dll": is_known,
                 "located_path": located_path,
                 "imported_functions_count": len(imported_funcs)
             })
@@ -209,9 +249,11 @@ class WindowsDependencyResolver:
 
         return {
             "status": "success",
+            "audit_scope": "STATIC_HEURISTIC_AUDIT",
             "binary_path": binary_path,
             "binary_architecture": "PE32+ (64-bit)" if is_binary_64 else "PE32 (32-bit)",
             "loader_mode": "WOW64 (32-on-64)" if is_32bit_on_64bit else "Native",
+            "known_dlls_enforced": len(known_dlls),
             "verdict": verdict,
             "total_imported_dlls": len(imports),
             "resolved_dlls_count": len(resolved_modules),

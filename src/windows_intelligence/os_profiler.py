@@ -98,7 +98,6 @@ class WindowsOSProfiler:
             build = osvi.dwBuildNumber
             prod_type = cls.PRODUCT_TYPE_MAP.get(osvi.wProductType, f"Type_{osvi.wProductType}")
 
-            # Recognize Windows 11 vs 10 by build number threshold
             friendly_name = "Windows"
             if major == 10 and minor == 0:
                 if build >= 22000:
@@ -151,6 +150,29 @@ class WindowsOSProfiler:
             }
         except Exception as e:
             return {"native_architecture": platform.machine(), "error": str(e)}
+
+    @classmethod
+    def get_process_wow64_status(cls) -> Dict[str, Any]:
+        """
+        Directly checks whether the active process is executing under WOW64
+        (Windows 32-bit on Windows 64-bit emulation) via kernel32.IsWow64Process.
+        """
+        if os.name != "nt":
+            return {"is_wow64": False, "reason": "non_windows"}
+
+        try:
+            is_wow64 = ctypes.c_int(0)
+            cur_proc = ctypes.windll.kernel32.GetCurrentProcess()
+            if hasattr(ctypes.windll.kernel32, "IsWow64Process"):
+                if ctypes.windll.kernel32.IsWow64Process(cur_proc, ctypes.byref(is_wow64)):
+                    return {
+                        "is_wow64": bool(is_wow64.value),
+                        "emulation_mode": "WOW64 (32-bit process on 64-bit OS)" if is_wow64.value else "Native"
+                    }
+        except Exception as e:
+            return {"is_wow64": False, "error": str(e)}
+
+        return {"is_wow64": False, "emulation_mode": "Native"}
 
     @classmethod
     def get_registry_os_details(cls) -> Dict[str, Any]:
@@ -217,6 +239,7 @@ class WindowsOSProfiler:
         """Generates comprehensive OS environmental profile."""
         kernel = cls.get_real_kernel_version()
         arch = cls.get_system_architecture()
+        process_wow64 = cls.get_process_wow64_status()
         reg_info = cls.get_registry_os_details()
         compat = cls.check_app_compatibility_flags(binary_path) if binary_path else None
 
@@ -224,6 +247,7 @@ class WindowsOSProfiler:
             "status": "success",
             "kernel": kernel,
             "architecture": arch,
+            "process_wow64": process_wow64,
             "registry_info": reg_info
         }
         if compat:

@@ -1092,18 +1092,19 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
 
     def test_windows_os_profiler(self):
-        """Verifies Windows OS Profiler retrieves kernel build, arch, and registry details."""
+        """Verifies Windows OS Profiler retrieves kernel build, arch, and WOW64 emulation status."""
         from windows_intelligence import WindowsOSProfiler
         profile = WindowsOSProfiler.profile()
         self.assertEqual(profile.get("status"), "success")
         self.assertIn("kernel", profile)
         self.assertIn("architecture", profile)
+        self.assertIn("process_wow64", profile)
         self.assertIn("registry_info", profile)
         self.assertTrue(profile["kernel"].get("is_windows"))
         self.assertIn("major_version", profile["kernel"])
 
     def test_windows_dependency_resolver_synthetic(self):
-        """Verifies Windows Dependency Resolver simulates Safe DLL Search, API Sets, and missing DLLs."""
+        """Verifies Windows Dependency Resolver simulates Safe DLL Search, API Sets, and KnownDLLs."""
         from windows_intelligence import WindowsDependencyResolver
         synthetic_imports = {
             "KERNEL32.dll": ["ExitProcess", "CreateFileW"],
@@ -1111,10 +1112,12 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         }
         res = WindowsDependencyResolver.audit_dependencies("dummy_target.exe", custom_imports=synthetic_imports)
         self.assertEqual(res.get("status"), "success")
+        self.assertEqual(res.get("audit_scope"), "STATIC_HEURISTIC_AUDIT")
+        self.assertIn("known_dlls_enforced", res)
         self.assertEqual(res["total_imported_dlls"], 2)
         self.assertEqual(res["resolved_dlls_count"], 1)
-        self.assertEqual(res["resolved_dlls"][0]["imported_name"], "KERNEL32.dll")
         self.assertEqual(res["missing_dlls_count"], 1)
+        self.assertEqual(res["resolved_dlls"][0]["imported_name"], "KERNEL32.dll")
         self.assertEqual(res["missing_dlls"][0]["imported_name"], "NON_EXISTENT_FAKE_MODULE_9999.dll")
 
     def test_windows_device_inspector(self):
@@ -1145,8 +1148,9 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_windows_crash_analyzer_synthetic_wer_and_minidump(self):
-        """Verifies Windows Crash Analyzer parses WER reports and minidump headers."""
+        """Verifies Windows Crash Analyzer parses WER reports, Event 1000 XML, and correlated minidumps."""
         import tempfile
+        import struct
         from windows_intelligence import WindowsCrashAnalyzer
 
         mock_wer = (
@@ -1184,21 +1188,41 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             if os.path.exists(wer_file):
                 os.remove(wer_file)
 
-        # Minidump header signature check
-        mdmp_header = b"MDMP" + (42).to_bytes(4, 'little') + (0).to_bytes(4, 'little') + (0x20).to_bytes(4, 'little') + (0).to_bytes(4, 'little') + (123456).to_bytes(4, 'little') + (0).to_bytes(8, 'little')
+        # Minidump with Stream 6 (Exception) and Stream 4 (ModuleList)
+        hdr = struct.pack('<4sIIIIII', b'MDMP', 42, 2, 0x20, 0, 123456, 0) + bytes([0]*4)
+        dir_entries = struct.pack('<III', 6, 168, 0x40) + struct.pack('<III', 4, 112, 0xF0)
+        pad0 = bytes([0] * (0x40 - 0x38))
+
+        exc_data = struct.pack('<IIIIQQ', 1, 0, 0xC0000005, 0, 0, 0x140001050) + bytes([0] * 136)
+        pad1 = bytes([0] * (0xF0 - 0xE8))
+
+        mod_name_bytes = "my_target.exe".encode("utf-16-le")
+        mod_str_rva = 0x180
+        mod_record = struct.pack('<QIIII', 0x140000000, 0x10000, 0, 0, mod_str_rva) + bytes([0] * 84)
+        mod_stream = struct.pack('<I', 1) + mod_record
+        pad2 = bytes([0] * (0x180 - 0x160))
+
+        str_data = struct.pack('<I', len(mod_name_bytes)) + mod_name_bytes
+
+        full_dmp = hdr + dir_entries + pad0 + exc_data + pad1 + mod_stream + pad2 + str_data
+
         with tempfile.NamedTemporaryFile(delete=False, suffix='.dmp', mode='wb') as f:
-            f.write(mdmp_header)
+            f.write(full_dmp)
             dmp_file = f.name
         try:
             mdmp_info = WindowsCrashAnalyzer.parse_minidump(dmp_file)
             self.assertEqual(mdmp_info["status"], "success")
             self.assertEqual(mdmp_info["format"], "MINIDUMP")
+            self.assertEqual(mdmp_info["module_count"], 1)
+            self.assertIsNotNone(mdmp_info["exception_info"])
+            self.assertEqual(mdmp_info["exception_info"]["fault_module"], "my_target.exe")
+            self.assertEqual(mdmp_info["exception_info"]["fault_offset"], "0x1050")
         finally:
             if os.path.exists(dmp_file):
                 os.remove(dmp_file)
 
     def test_windows_evidence_correlator_end_to_end(self):
-        """Verifies cross-correlation of crash telemetry, PE sections, and Ghidra disassembly."""
+        """Verifies cross-correlation of crash telemetry with strict RVA semantics and module attribution."""
         import tempfile
         from windows_intelligence import DiagnosticEvidenceCorrelator
 
@@ -1207,19 +1231,22 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         dos_hdr[0:2] = b"MZ"
         dos_hdr[0x3C:0x40] = (0x40).to_bytes(4, "little")
         pe_hdr = b"PE\x00\x00" + b"\x4c\x01" + (1).to_bytes(2, "little") + b"\x00"*12 + (0xe0).to_bytes(2, "little") + (0x102).to_bytes(2, "little")
-        opt_hdr = b"\x0b\x01" + b"\x00"*222
+        opt_hdr = bytearray(224)
+        opt_hdr[0:2] = b"\x0b\x01"
+        opt_hdr[28:32] = (0x00400000).to_bytes(4, "little") # ImageBase = 0x400000
         sec_hdr = b".text\x00\x00\x00" + (0x1000).to_bytes(4, "little") + (0x1000).to_bytes(4, "little") + (0x200).to_bytes(4, "little") + (0x200).to_bytes(4, "little") + b"\x00"*12 + (0x60000020).to_bytes(4, "little")
         padding = b"\x90" * 0x300
-        full_pe = bytes(dos_hdr[:0x40] + pe_hdr + opt_hdr + sec_hdr + padding)
+        full_pe = bytes(dos_hdr[:0x40] + pe_hdr + bytes(opt_hdr) + sec_hdr + padding)
 
         with tempfile.NamedTemporaryFile(delete=False, suffix='.exe') as f:
             f.write(full_pe)
             pe_path = f.name
 
         try:
-            crash_record = {
+            # Case 1: Internal fault matching the binary name
+            crash_internal = {
                 "source": "WER_REPORT",
-                "fault_offset": "0x250",
+                "fault_offset": "0x1050",  # FaultingOffset is the RVA!
                 "exception_code": "0xc0000005",
                 "exception_name": "STATUS_ACCESS_VIOLATION",
                 "fault_module": os.path.basename(pe_path)
@@ -1234,20 +1261,45 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
                 ]
             }
 
-            dossier = DiagnosticEvidenceCorrelator.correlate(
+            dossier1 = DiagnosticEvidenceCorrelator.correlate(
                 binary_path=pe_path,
-                crash_record=crash_record,
+                crash_record=crash_internal,
                 ghidra_export=ghidra_export
             )
-            self.assertEqual(dossier["status"], "success")
-            self.assertIn("CRASH_TELEMETRY_RECORDED", dossier["verdict"])
-            self.assertIsNotNone(dossier.get("binary_mapping"))
-            self.assertEqual(dossier["binary_mapping"]["fault_section"], ".text")
-            self.assertTrue(dossier["binary_mapping"]["is_executable_section"])
+            self.assertEqual(dossier1["status"], "success")
+            self.assertIn("CRASH_TELEMETRY_RECORDED", dossier1["verdict"])
+            self.assertTrue(dossier1["binary_mapping"]["is_internal_fault"])
+            self.assertEqual(dossier1["binary_mapping"]["fault_rva"], "0x1050")
+            self.assertEqual(dossier1["binary_mapping"]["fault_section"], ".text")
+            self.assertEqual(dossier1["binary_mapping"]["fault_virtual_address"], "0x401050")
+            self.assertEqual(dossier1["binary_mapping"]["ghidra_function_name"], "FUN_00401050")
 
-            md = DiagnosticEvidenceCorrelator.format_markdown(dossier)
-            self.assertIn("# REA-Neural Failure Evidence Dossier", md)
-            self.assertIn("0xc0000005", md)
+            md1 = DiagnosticEvidenceCorrelator.format_markdown(dossier1)
+            self.assertIn("# REA-Neural Failure Evidence Dossier", md1)
+            self.assertIn("0xc0000005", md1)
+
+            # Case 2: External runtime fault (e.g. crash in d3d9.dll)
+            crash_external = {
+                "source": "EVENT_LOG_1000",
+                "fault_offset": "0x25000",
+                "exception_code": "0xc0000005",
+                "exception_name": "STATUS_ACCESS_VIOLATION",
+                "fault_module": "d3d9.dll"
+            }
+            dossier2 = DiagnosticEvidenceCorrelator.correlate(
+                binary_path=pe_path,
+                crash_record=crash_external
+            )
+            self.assertEqual(dossier2["status"], "success")
+            self.assertIn("EXTERNAL_MODULE_CRASH", dossier2["verdict"])
+            self.assertFalse(dossier2["binary_mapping"]["is_internal_fault"])
+            self.assertEqual(dossier2["binary_mapping"]["external_fault_module"], "d3d9.dll")
+            self.assertEqual(dossier2["binary_mapping"]["attribution"], "EXTERNAL_DEPENDENCY_OR_SYSTEM_MODULE")
+
+            md2 = DiagnosticEvidenceCorrelator.format_markdown(dossier2)
+            self.assertIn("External Dependency / System Runtime", md2)
+            self.assertIn("d3d9.dll", md2)
+
         finally:
             if os.path.exists(pe_path):
                 os.remove(pe_path)
@@ -1261,7 +1313,6 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("devices", audit_res)
         self.assertIn("security", audit_res)
         self.assertEqual(audit_res["os"]["status"], "success")
-
 
 if __name__ == "__main__":
     unittest.main()

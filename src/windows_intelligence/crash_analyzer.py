@@ -119,6 +119,10 @@ class WindowsCrashAnalyzer:
             except ValueError:
                 pass
 
+        clean_offset = fault_offset_str.strip() if fault_offset_str else ""
+        if clean_offset and not clean_offset.startswith("0x"):
+            clean_offset = f"0x{clean_offset}"
+
         return {
             "source": "WER_REPORT",
             "file_path": wer_path,
@@ -128,19 +132,21 @@ class WindowsCrashAnalyzer:
             "fault_module": fault_module,
             "exception_code": hex(exc_code_int) if exc_code_int is not None else exc_code_str,
             "exception_name": cls.COMMON_EXCEPTION_CODES.get(exc_code_int, "UNKNOWN_EXCEPTION"),
-            "fault_offset": fault_offset_str if fault_offset_str.startswith("0x") else f"0x{fault_offset_str}"
+            "fault_offset": clean_offset or "0x0"
         }
 
     @classmethod
-    def query_event_log(cls, app_name_filter: Optional[str] = None, max_events: int = 5) -> List[Dict[str, Any]]:
+    def query_event_log(cls, app_name_filter: Optional[str] = None, max_events: int = 10) -> List[Dict[str, Any]]:
         """
         Interrogates Windows Application Event Log for Event ID 1000 (Application Error)
         using wevtutil query utility with defensive timeouts.
+        Handles both named Data elements and standard positional EventData structures.
         """
         if os.name != "nt":
             return []
 
-        xpath = "*[System[(EventID=1000)]]"
+        # Target Application Error Event 1000 specifically to avoid unrelated events
+        xpath = "*[System[Provider[@Name='Application Error'] and (EventID=1000)]]"
         cmd = [
             "wevtutil", "qe", "Application",
             f"/q:{xpath}",
@@ -161,37 +167,117 @@ class WindowsCrashAnalyzer:
         try:
             root = ET.fromstring(raw_xml)
             for event_elem in root.findall(".//{*}Event"):
-                data_map = {}
-                for data_elem in event_elem.findall(".//{*}Data"):
-                    name = data_elem.get("Name", "")
-                    val = data_elem.text or ""
-                    if name:
-                        data_map[name] = val
+                data_elements = event_elem.findall(".//{*}Data")
+                if not data_elements:
+                    continue
 
-                app_name = data_map.get("AppName", "")
+                named_map: Dict[str, str] = {}
+                positional_list: List[str] = []
+                for data_elem in data_elements:
+                    name = data_elem.get("Name", "")
+                    val = (data_elem.text or "").strip()
+                    positional_list.append(val)
+                    if name:
+                        named_map[name.lower()] = val
+
+                # Standard Windows Event 1000 schema:
+                # Positional indices when Name attribute is omitted:
+                # [0]: Faulting application name
+                # [1]: Faulting application version
+                # [2]: Faulting application timestamp
+                # [3]: Faulting module name
+                # [4]: Faulting module version
+                # [5]: Faulting module timestamp
+                # [6]: Exception code
+                # [7]: Faulting offset (RVA)
+                # [8]: Faulting process ID
+                # [9]: Faulting application start time
+                # [10]: Faulting application path
+                # [11]: Faulting module path
+                # [12]: Report ID
+
+                app_name = (
+                    named_map.get("faultingapplicationname") or
+                    named_map.get("appname") or
+                    (positional_list[0] if len(positional_list) > 0 else "")
+                )
+
                 if app_name_filter:
                     filter_lower = os.path.basename(app_name_filter).lower()
                     if filter_lower not in app_name.lower():
                         continue
 
-                exc_hex = data_map.get("ExceptionCode", "")
+                app_ver = (
+                    named_map.get("faultingapplicationversion") or
+                    named_map.get("appversion") or
+                    (positional_list[1] if len(positional_list) > 1 else None)
+                )
+
+                fault_mod = (
+                    named_map.get("faultingmodulename") or
+                    named_map.get("modulename") or
+                    (positional_list[3] if len(positional_list) > 3 else None)
+                )
+
+                fault_mod_ver = (
+                    named_map.get("faultingmoduleversion") or
+                    named_map.get("moduleversion") or
+                    (positional_list[4] if len(positional_list) > 4 else None)
+                )
+
+                exc_raw = (
+                    named_map.get("exceptioncode") or
+                    (positional_list[6] if len(positional_list) > 6 else "")
+                )
+
+                raw_offset = (
+                    named_map.get("faultingoffset") or
+                    named_map.get("faultoffset") or
+                    named_map.get("offset") or
+                    (positional_list[7] if len(positional_list) > 7 else "")
+                )
+
+                pid = (
+                    named_map.get("faultingprocessid") or
+                    named_map.get("processid") or
+                    (positional_list[8] if len(positional_list) > 8 else None)
+                )
+
+                app_path = (
+                    named_map.get("faultingapplicationpath") or
+                    named_map.get("applicationpath") or
+                    (positional_list[10] if len(positional_list) > 10 else None)
+                )
+
+                mod_path = (
+                    named_map.get("faultingmodulepath") or
+                    named_map.get("modulepath") or
+                    (positional_list[11] if len(positional_list) > 11 else None)
+                )
+
                 exc_int = None
-                if exc_hex:
+                if exc_raw:
                     try:
-                        exc_int = int(exc_hex, 16)
+                        exc_int = int(exc_raw, 16)
                     except ValueError:
                         pass
+
+                clean_offset = raw_offset.strip()
+                if clean_offset and not clean_offset.startswith("0x"):
+                    clean_offset = f"0x{clean_offset}"
 
                 events.append({
                     "source": "EVENT_LOG_1000",
                     "app_name": app_name,
-                    "app_version": data_map.get("AppVersion"),
-                    "fault_module": data_map.get("ModuleName"),
-                    "fault_module_version": data_map.get("ModuleVersion"),
-                    "exception_code": exc_hex,
+                    "app_version": app_ver,
+                    "app_path": app_path,
+                    "fault_module": fault_mod,
+                    "fault_module_version": fault_mod_ver,
+                    "fault_module_path": mod_path,
+                    "exception_code": hex(exc_int) if exc_int is not None else exc_raw,
                     "exception_name": cls.COMMON_EXCEPTION_CODES.get(exc_int, "UNKNOWN_EXCEPTION"),
-                    "fault_offset": f"0x{data_map.get('Offset', '')}",
-                    "process_id": data_map.get("ProcessId")
+                    "fault_offset": clean_offset or "0x0",
+                    "process_id": pid
                 })
         except Exception:
             pass
@@ -199,10 +285,23 @@ class WindowsCrashAnalyzer:
         return events
 
     @classmethod
+    def _read_minidump_string(cls, f, rva: int) -> str:
+        """Reads a UTF-16 LE MINIDUMP_STRING at the specified RVA."""
+        try:
+            f.seek(rva)
+            (length,) = struct.unpack("<I", f.read(4))
+            raw_str = f.read(length)
+            return raw_str.decode("utf-16-le", errors="replace").rstrip("\x00")
+        except Exception:
+            return ""
+
+    @classmethod
     def parse_minidump(cls, dmp_path: str) -> Dict[str, Any]:
         """
         Pure-Python MiniDump parser (reads Signature 'MDMP' and Directory Streams).
         Extracts ExceptionRecord (Stream 6) and Loaded Modules (Stream 4) without WinDbg.
+        Correlates faulting exception address against loaded modules to identify the
+        faulting module and relative virtual address (FaultingOffset/RVA).
         """
         if not os.path.isfile(dmp_path):
             return {"status": "error", "error": f"Dump file not found: {dmp_path}"}
@@ -218,15 +317,15 @@ class WindowsCrashAnalyzer:
             dir_bytes = f.read(num_streams * 12)
 
             exception_info = None
-            module_count = 0
+            modules: List[Dict[str, Any]] = []
 
+            # Pass 1: Parse ExceptionStream (Stream 6)
             for i in range(num_streams):
                 entry = dir_bytes[i * 12 : (i + 1) * 12]
                 if len(entry) < 12:
                     break
                 st_type, data_size, rva = struct.unpack("<III", entry)
 
-                # Stream 6: ExceptionStream
                 if st_type == 6 and data_size >= 168:
                     f.seek(rva)
                     exc_bytes = f.read(data_size)
@@ -235,34 +334,104 @@ class WindowsCrashAnalyzer:
                         "thread_id": thread_id,
                         "exception_code": hex(exc_code),
                         "exception_name": cls.COMMON_EXCEPTION_CODES.get(exc_code, "UNKNOWN_EXCEPTION"),
-                        "exception_address": hex(exc_addr)
+                        "exception_address": hex(exc_addr),
+                        "exception_address_int": exc_addr
                     }
-                # Stream 4: ModuleListStream
-                elif st_type == 4 and data_size >= 4:
+
+            # Pass 2: Parse ModuleListStream (Stream 4)
+            for i in range(num_streams):
+                entry = dir_bytes[i * 12 : (i + 1) * 12]
+                if len(entry) < 12:
+                    break
+                st_type, data_size, rva = struct.unpack("<III", entry)
+
+                if st_type == 4 and data_size >= 4:
                     f.seek(rva)
                     (mod_num,) = struct.unpack("<I", f.read(4))
-                    module_count = mod_num
+                    for m_idx in range(min(mod_num, 256)):
+                        mod_record = f.read(108)
+                        if len(mod_record) < 108:
+                            break
+                        base_img, size_img, chksum, timestamp, name_rva = struct.unpack("<QIIII", mod_record[:24])
+                        cur_pos = f.tell()
+                        mod_name_str = cls._read_minidump_string(f, name_rva)
+                        f.seek(cur_pos)
+
+                        modules.append({
+                            "name": os.path.basename(mod_name_str),
+                            "path": mod_name_str,
+                            "base_address": hex(base_img),
+                            "base_int": base_img,
+                            "size": size_img,
+                            "end_address": hex(base_img + size_img)
+                        })
+
+            # Correlate exception address with modules to determine fault module & RVA
+            fault_module = None
+            fault_offset = None
+            if exception_info and "exception_address_int" in exception_info:
+                exc_addr = exception_info["exception_address_int"]
+                for mod in modules:
+                    base = mod["base_int"]
+                    size = mod["size"]
+                    if base <= exc_addr < base + size:
+                        fault_module = mod["name"]
+                        fault_offset = hex(exc_addr - base)
+                        break
+
+                if fault_module:
+                    exception_info["fault_module"] = fault_module
+                    exception_info["fault_offset"] = fault_offset
+                del exception_info["exception_address_int"]
 
         return {
             "status": "success",
             "file": dmp_path,
             "format": "MINIDUMP",
             "stream_count": num_streams,
-            "module_count": module_count,
-            "exception_info": exception_info
+            "module_count": len(modules),
+            "exception_info": exception_info,
+            "modules_preview": [m["name"] for m in modules[:10]]
         }
 
     @classmethod
     def collect_crash_evidence(cls, binary_path: Optional[str] = None) -> Dict[str, Any]:
-        """Gathers all available crash evidence from WER archives and Event Logs."""
+        """Gathers all available crash evidence from WER archives, Event Logs, and MiniDump files."""
         wer_reports = cls.scan_wer_report_archive(binary_path)
         event_logs = cls.query_event_log(binary_path)
+
+        # Scan for minidump files in WER directories and local crash dump paths
+        dmp_reports = []
+        dmp_candidates = []
+        search_dirs = [
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "CrashDumps"),
+            os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), r"Microsoft\Windows\WER\ReportArchive"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), r"Microsoft\Windows\WER\ReportArchive")
+        ]
+        for d in search_dirs:
+            if os.path.isdir(d):
+                for dmp_file in glob.glob(os.path.join(d, "**", "*.dmp"), recursive=True):
+                    if binary_path:
+                        b_name = os.path.basename(binary_path).lower()
+                        if b_name not in os.path.basename(dmp_file).lower():
+                            continue
+                    dmp_candidates.append(dmp_file)
+
+        for dmp_path in dmp_candidates[:3]:
+            try:
+                parsed_dmp = cls.parse_minidump(dmp_path)
+                if parsed_dmp.get("status") == "success":
+                    dmp_reports.append(parsed_dmp)
+            except Exception:
+                pass
 
         return {
             "status": "success",
             "query_target": binary_path,
             "wer_reports_found": len(wer_reports),
             "event_log_errors_found": len(event_logs),
+            "minidumps_found": len(dmp_reports),
             "wer_reports": wer_reports,
-            "event_log_errors": event_logs
+            "event_log_errors": event_logs,
+            "minidumps": dmp_reports
         }

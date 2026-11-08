@@ -360,6 +360,21 @@ class CausalitySynthesizer:
         hw_data = WindowsDeviceInspector.audit()
         sec_data = WindowsSecurityInspector.audit(norm_path)
 
+        # Safety Kernel & Target Integrity Baseline
+        safety_kernel_report: Dict[str, Any] = {}
+        try:
+            from security import ExecutionGuard, AuditLogger
+            scope = ExecutionGuard.get_current_scope()
+            scope.register_target(norm_path)
+            integrity = scope.verify_target_integrity(norm_path)
+            safety_kernel_report = {
+                "enforcement_mode": "REFERENCE_MONITOR",
+                "target_integrity": integrity,
+                "audit_summary": AuditLogger.summarize()
+            }
+        except Exception as _sec_exc:
+            safety_kernel_report = {"status": "uninitialized", "error": str(_sec_exc)}
+
         # Process & Resource Intelligence Telemetry
         resource_data: Dict[str, Any] = {}
         try:
@@ -542,6 +557,10 @@ class CausalitySynthesizer:
             exc_code = crash_record.get("exception_code", "UNKNOWN")
             exc_name = crash_record.get("exception_name", "UNKNOWN")
             facts.append(f"Recorded crash exception code: {exc_code} ({exc_name}) at offset {hex(fault_offset)}.")
+            if safety_kernel_report.get("target_integrity", {}).get("is_intact"):
+                b_hash = safety_kernel_report["target_integrity"].get("baseline_sha256", "")[:16]
+                facts.append(f"Target binary integrity verified by Safety Kernel: zero mutation (SHA-256: {b_hash}...).")
+
             if is_internal_fault and binary_mapping:
                 facts.append(
                     f"Fault offset {hex(fault_offset)} is confirmed internal RVA within '{bin_name}' section '{binary_mapping.get('fault_section')}' "
@@ -687,6 +706,8 @@ class CausalitySynthesizer:
             "dependency_health": dep_data,
             "graphics_and_hardware": hw_data,
             "security_and_privileges": sec_data,
+            "safety_kernel_audit": safety_kernel_report,
+            "security_kernel_audit": safety_kernel_report,
             "resource_and_process_intelligence": resource_data,
             "crash_telemetry": crash_record,
             "binary_mapping": binary_mapping,

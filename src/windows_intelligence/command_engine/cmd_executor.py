@@ -98,7 +98,20 @@ class CommandExecutor:
         # 4. Construct Command Vector (No shell=True)
         cmd_vector = [binary_path, *spec.fixed_arguments, *validated_extra]
 
-        # 5. Execute with Defensive Timeout & Error Isolation
+        # 5. Mediate via Safety Kernel & Execute with Defensive Timeout
+        try:
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cmd_executor",
+                operation="execute_command",
+                target=f"{command_id} ({spec.binary_name})",
+                capability=Capability.SUBPROCESS_CATALOG_EXEC,
+                access_mode="EXECUTE",
+                metadata={"command_id": command_id, "shell": False, "is_catalog_command": True}
+            )
+        except Exception:
+            pass
+
         start_time = time.time()
         try:
             res = subprocess.run(

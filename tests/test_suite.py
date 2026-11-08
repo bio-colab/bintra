@@ -2220,5 +2220,214 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertEqual(data["status"], "success")
         self.assertIn("device_reports", data)
 
+
+    # --- Safety Kernel & Non-Destructive Execution Tests ---
+
+    def test_safety_kernel_path_identity_and_anti_traversal(self):
+        """Verifies PathIdentity rejects Alternate Data Streams, null bytes, and raw device paths."""
+        from security import PathIdentity
+
+        with self.assertRaises(ValueError):
+            PathIdentity.canonicalize(r"C:\test\target.exe:stream")
+
+        with self.assertRaises(ValueError):
+            PathIdentity.canonicalize(r"\\.\PhysicalDrive0")
+
+        with self.assertRaises(ValueError):
+            PathIdentity.canonicalize("test\x00file.exe")
+
+    def test_safety_kernel_target_scope_baseline_and_tamper_detection(self):
+        """Verifies TargetScope computes baseline SHA-256 and detects any single-byte mutation."""
+        from security import TargetScope
+
+        target_dir = tempfile.mkdtemp(prefix="rea_tgt_")
+        target_path = os.path.join(target_dir, "test_binary.exe")
+        with open(target_path, "wb") as f:
+            f.write(b"immutable_pe_bytes_version_1")
+
+        try:
+            scope = TargetScope(target_binary_path=target_path)
+            self.assertTrue(scope.is_target_file(target_path))
+            self.assertTrue(scope.is_target_directory(target_dir))
+
+            # Initial integrity verification
+            check1 = scope.verify_target_integrity(target_path)
+            self.assertTrue(check1["is_intact"])
+            self.assertFalse(check1["tamper_detected"])
+
+            # Mutate target by 1 byte
+            with open(target_path, "wb") as f:
+                f.write(b"immutable_pe_bytes_version_2")
+
+            check2 = scope.verify_target_integrity(target_path)
+            self.assertFalse(check2["is_intact"])
+            self.assertTrue(check2["tamper_detected"])
+        finally:
+            if os.path.exists(target_path):
+                os.remove(target_path)
+            if os.path.exists(target_dir):
+                os.rmdir(target_dir)
+
+    def test_safety_kernel_execution_guard_target_immutability(self):
+        """Verifies ExecutionGuard blocks writes to target files and shields target directories."""
+        from security import (
+            ExecutionGuard, SafeFileAccess, TargetMutationError,
+            SecurityViolationError, OutOfScopeError
+        )
+
+        target_dir = tempfile.mkdtemp(prefix="rea_tgt_")
+        target_path = os.path.join(target_dir, "protected.exe")
+        with open(target_path, "wb") as f:
+            f.write(b"protected_pe_content_safe")
+
+        ws_dir = tempfile.mkdtemp(prefix="rea_ws_")
+
+        try:
+            with ExecutionGuard.scoped_session(target_binary_path=target_path, workspace_dir=ws_dir):
+                # 1. Attempting to write directly to target file must raise TargetMutationError
+                with self.assertRaises(TargetMutationError):
+                    SafeFileAccess.write_workspace_file(target_path, b"destructive_patch")
+
+                # Verify target was untouched
+                with open(target_path, "rb") as f:
+                    self.assertEqual(f.read(), b"protected_pe_content_safe")
+
+                # 2. Attempting to write in target directory must raise TargetMutationError
+                sibling_file = os.path.join(target_dir, "sibling_leak.txt")
+                with self.assertRaises(TargetMutationError):
+                    SafeFileAccess.write_workspace_file(sibling_file, "forbidden sibling write")
+
+                # 3. Attempting to write outside workspace must raise OutOfScopeError
+                with self.assertRaises(OutOfScopeError):
+                    SafeFileAccess.write_workspace_file(r"C:\Windows\temp_exploit.txt", "exploit")
+
+                # 4. Writing inside designated workspace must succeed
+                ws_file = os.path.join(ws_dir, "dossier.json")
+                out_path = SafeFileAccess.write_workspace_file(ws_file, '{"dossier": "healthy"}')
+                self.assertTrue(os.path.exists(out_path))
+
+                # 5. Deleting session-created workspace file must succeed
+                self.assertTrue(SafeFileAccess.delete_workspace_file(ws_file))
+
+                # 6. Deleting target file must be blocked
+                with self.assertRaises(SecurityViolationError):
+                    SafeFileAccess.delete_workspace_file(target_path)
+        finally:
+            if os.path.exists(target_path):
+                os.remove(target_path)
+            if os.path.exists(target_dir):
+                os.rmdir(target_dir)
+            if os.path.exists(ws_dir):
+                os.rmdir(ws_dir)
+
+    def test_safety_kernel_prohibited_hazards_rejection(self):
+        """Verifies that all hazardous mutation capabilities are unconditionally rejected by PolicyEngine."""
+        from security import PolicyEngine, AccessRequest, Capability, TargetScope
+
+        scope = TargetScope()
+        prohibited = [
+            Capability.TARGET_MUTATE,
+            Capability.REGISTRY_MUTATE,
+            Capability.PROCESS_MUTATE,
+            Capability.SERVICE_MUTATE,
+            Capability.DRIVER_MUTATE,
+            Capability.SHELL_FREE_EXEC,
+            Capability.PRIVILEGE_ELEVATE,
+        ]
+
+        for hazard in prohibited:
+            req = AccessRequest(
+                component="malicious_tool",
+                operation="mutate_system",
+                target="system_resource",
+                requested_capability=hazard,
+                access_mode="WRITE"
+            )
+            decision = PolicyEngine.evaluate(req, scope)
+            self.assertFalse(decision.is_allowed)
+            self.assertEqual(decision.verdict, "DENY")
+            self.assertIn("forbidden by REA Safety Policy", decision.reason)
+
+    def test_safety_kernel_audit_logger_complete_mediation_and_redaction(self):
+        """Verifies AuditLogger captures decisions, redacts secrets, and computes summary statistics."""
+        from security import AuditLogger
+
+        AuditLogger.clear()
+        AuditLogger.log_decision(
+            component="sec_test",
+            operation="auth_probe",
+            target="svc --password UserSecretPassword123 --token API_KEY_9999",
+            decision="ALLOW",
+            reason="testing",
+            requested_capability="cap.test"
+        )
+        trail = AuditLogger.get_audit_trail()
+        self.assertEqual(len(trail), 1)
+        logged_str = trail[0]["target"]
+        self.assertNotIn("UserSecretPassword123", logged_str)
+        self.assertNotIn("API_KEY_9999", logged_str)
+        self.assertIn("***REDACTED***", logged_str)
+
+        summary = AuditLogger.summarize()
+        self.assertEqual(summary["total_mediated_operations"], 1)
+        self.assertEqual(summary["allowed_count"], 1)
+        self.assertEqual(summary["denied_count"], 0)
+
+    @unittest.skipUnless(sys.platform == 'win32', "Safe Subprocess Broker requires Windows host")
+    def test_safety_kernel_safe_subprocess_broker(self):
+        """Verifies SafeSubprocessBroker executes cataloged commands safely without shell=True."""
+        from security import SafeSubprocessBroker, SecurityViolationError
+
+        # Rejection of uncataloged command
+        with self.assertRaises(SecurityViolationError):
+            SafeSubprocessBroker.execute_catalog_command("dangerous_tool")
+
+        # Rejection of unpermitted argument
+        with self.assertRaises(SecurityViolationError):
+            SafeSubprocessBroker.execute_catalog_command("os_ver", extra_flags=["/dangerous_flag"])
+
+        # Legitimate execution of catalog command
+        res = SafeSubprocessBroker.execute_catalog_command("os_ver")
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["exit_code"], 0)
+
+    def test_safety_kernel_target_binary_zero_mutation_post_analysis(self):
+        """Verifies that full end-to-end binary and diagnostic analysis causes ZERO mutations to target PE."""
+        from binary_neural_engine import BinaryFormatInspector
+        from windows_intelligence.evidence_engine import CausalitySynthesizer
+        from security import TargetScope
+
+        pe_bytes = _create_synthetic_pe64()
+        target_dir = tempfile.mkdtemp(prefix="rea_audit_")
+        target_path = os.path.join(target_dir, "clean_target.exe")
+        with open(target_path, "wb") as f:
+            f.write(pe_bytes)
+
+        try:
+            scope = TargetScope(target_binary_path=target_path)
+            pre_hash = scope.compute_sha256(target_path)
+
+            # Execute full binary inspection
+            pe_info = BinaryFormatInspector.inspect(target_path)
+            self.assertEqual(pe_info["format"], "PE")
+
+            # Execute full evidence synthesis dossier
+            dossier = CausalitySynthesizer.synthesize_dossier(target_path)
+            self.assertEqual(dossier["status"], "success")
+            self.assertIn("security_kernel_audit", dossier)
+
+            # Verify target hash post-analysis is 100% IDENTICAL
+            post_hash = scope.compute_sha256(target_path)
+            self.assertEqual(pre_hash, post_hash, "Target executable MUST NOT be modified by analysis!")
+
+            integrity = scope.verify_target_integrity(target_path)
+            self.assertTrue(integrity["is_intact"])
+            self.assertFalse(integrity["tamper_detected"])
+        finally:
+            if os.path.exists(target_path):
+                os.remove(target_path)
+            if os.path.exists(target_dir):
+                os.rmdir(target_dir)
+
 if __name__ == "__main__":
     unittest.main()

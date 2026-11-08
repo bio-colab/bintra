@@ -768,7 +768,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
         tools_res = server.handle_tools_list({})
         self.assertIn("tools", tools_res)
-        self.assertEqual(len(tools_res["tools"]), 17)
+        self.assertEqual(len(tools_res["tools"]), 19)
         tool_names = [t["name"] for t in tools_res["tools"]]
         self.assertIn("rea_dump_bytes", tool_names)
         self.assertIn("rea_inspect_binary", tool_names)
@@ -778,6 +778,8 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("rea_resolve_dependencies", tool_names)
         self.assertIn("rea_inspect_crash_reports", tool_names)
         self.assertIn("rea_correlate_failure_evidence", tool_names)
+        self.assertIn("rea_win_catalog_cmd", tool_names)
+        self.assertIn("rea_registry_audit", tool_names)
 
     def test_mcp_server_dispatch_tool_call(self):
         """Verifies dispatching tools directly through MCP server protocol."""
@@ -1313,6 +1315,137 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("devices", audit_res)
         self.assertIn("security", audit_res)
         self.assertEqual(audit_res["os"]["status"], "success")
+
+    def test_command_catalog_specs_and_validation(self):
+        """Verifies immutable CommandCatalog contracts, whitelisting, and query methods."""
+        from windows_intelligence import CommandCatalog
+        self.assertIn("os_ver", CommandCatalog.CATALOG)
+        self.assertIn("driver_list", CommandCatalog.CATALOG)
+        self.assertIn("pnp_devices_problem", CommandCatalog.CATALOG)
+
+        spec = CommandCatalog.get_spec("os_ver")
+        self.assertIsNotNone(spec)
+        self.assertEqual(spec.binary_name, "cmd.exe")
+        self.assertEqual(spec.output_schema, "windows.ver.v1")
+
+        # Non-existent command returns None
+        self.assertIsNone(CommandCatalog.get_spec("non_existent_cmd_12345"))
+
+        # List commands
+        cmds = CommandCatalog.list_available_commands(current_build=19045)
+        self.assertGreaterEqual(len(cmds), 10)
+        os_ver_entry = next((c for c in cmds if c["command_id"] == "os_ver"), None)
+        self.assertIsNotNone(os_ver_entry)
+        self.assertTrue(os_ver_entry["supported"])
+
+    def test_command_executor_safe_execution(self):
+        """Verifies safe command execution without shell=True, timeout enforcement, and argument gating."""
+        from windows_intelligence import CommandExecutor
+
+        # Execute legitimate safe command
+        res = CommandExecutor.execute("os_ver")
+        self.assertEqual(res["status"], "success")
+        self.assertEqual(res["exit_code"], 0)
+        self.assertEqual(res["schema"], "windows.ver.v1")
+        self.assertIn("version", res["data"])
+
+        # Rejection of unregistered command
+        err_res = CommandExecutor.execute("malicious_rmdir_command")
+        self.assertEqual(err_res["status"], "error")
+        self.assertIn("not registered", err_res["error"])
+
+        # Rejection of unwhitelisted argument
+        flag_err = CommandExecutor.execute("os_ver", extra_flags=("/dangerous_arbitrary_flag",))
+        self.assertEqual(flag_err["status"], "error")
+        self.assertIn("not permitted", flag_err["error"])
+
+    def test_output_parsers_csv_and_sc_query(self):
+        """Verifies structured output parsing for CSV, sc query, pnputil, and whoami formats."""
+        from windows_intelligence import OutputParsers
+
+        # CSV Parsing
+        mock_csv = '"Image Name","PID","Session Name","Session#","Mem Usage"\n"explorer.exe","1234","Console","1","50,000 K"\n'
+        parsed_csv = OutputParsers.parse_csv_records(mock_csv)
+        self.assertEqual(len(parsed_csv), 1)
+        self.assertEqual(parsed_csv[0]["image_name"], "explorer.exe")
+        self.assertEqual(parsed_csv[0]["pid"], "1234")
+
+        # SC Query Parsing
+        mock_sc = (
+            "SERVICE_NAME: Spooler\n"
+            "        TYPE               : 110  WIN32_OWN_PROCESS (interactive)\n"
+            "        STATE              : 4  RUNNING\n"
+            "        WIN32_EXIT_CODE    : 0  (0x0)\n"
+            "        DISPLAY_NAME       : Print Spooler\n"
+        )
+        parsed_sc = OutputParsers.parse_sc_query(mock_sc)
+        self.assertEqual(len(parsed_sc), 1)
+        self.assertEqual(parsed_sc[0]["service_name"], "Spooler")
+        self.assertEqual(parsed_sc[0]["display_name"], "Print Spooler")
+        self.assertEqual(parsed_sc[0]["win32_exit_code"], "0  (0x0)")
+
+        # PnPUtil Drivers Parsing
+        mock_pnp = (
+            "Published Name:     oem12.inf\n"
+            "Original Name:      nvlddmkm.inf\n"
+            "Provider Name:      NVIDIA\n"
+            "Class Name:         Display\n"
+            "Driver Version:     31.0.15.5222\n"
+        )
+        parsed_pnp = OutputParsers.parse_pnputil_drivers(mock_pnp)
+        self.assertEqual(len(parsed_pnp), 1)
+        self.assertEqual(parsed_pnp[0]["published_name"], "oem12.inf")
+        self.assertEqual(parsed_pnp[0]["provider_name"], "NVIDIA")
+
+    def test_registry_catalog_and_dual_view_reader(self):
+        """Verifies 11-domain RegistryCatalog and dual-view (32/64-bit) reader."""
+        from windows_intelligence import RegistryCatalog, WindowsRegistryReader
+
+        self.assertEqual(len(RegistryCatalog.DOMAINS), 11)
+        self.assertIn("OPERATING_SYSTEM", RegistryCatalog.DOMAINS)
+        self.assertIn("SECURITY_POLICIES", RegistryCatalog.DOMAINS)
+        self.assertIn("DLL_SEARCH_CONFIGURATION", RegistryCatalog.DOMAINS)
+
+        # Query key under dual view
+        res = WindowsRegistryReader.query_key_dual_view(
+            "HKLM",
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+            target_values=("CurrentBuild", "ProductName")
+        )
+        self.assertEqual(res["status"], "success")
+        self.assertTrue(res["view_64"]["exists"])
+        self.assertTrue(res["view_32"]["exists"])
+        self.assertIn("CurrentBuild", res["view_64"]["values"])
+
+    def test_registry_analyzer_critical_policies(self):
+        """Verifies rule-based evaluation of SafeDllSearchMode, UAC, and KnownDLLs."""
+        from windows_intelligence import WindowsRegistryAnalyzer
+
+        policies = WindowsRegistryAnalyzer.evaluate_critical_policies()
+        self.assertEqual(policies["status"], "success")
+        self.assertIn("safedllsearch_mode", policies)
+        self.assertIn("uac_enabled", policies)
+        self.assertIn("known_dlls_count", policies)
+        self.assertGreater(policies["findings_count"], 0)
+
+        domain_res = WindowsRegistryAnalyzer.audit_domain("OPERATING_SYSTEM")
+        self.assertEqual(domain_res["status"], "success")
+        self.assertEqual(domain_res["domain"], "OPERATING_SYSTEM")
+        self.assertGreater(domain_res["keys_inspected"], 0)
+
+    def test_mcp_server_catalog_and_registry_dispatch(self):
+        """Verifies MCP server protocol dispatch for win_catalog_cmd and registry_audit."""
+        from mcp_server import ReaMcpServer
+        server = ReaMcpServer()
+
+        cmd_res = server.dispatch_tool("rea_win_catalog_cmd", {"command_id": "os_ver"})
+        self.assertEqual(cmd_res["status"], "success")
+        self.assertEqual(cmd_res["schema"], "windows.ver.v1")
+
+        reg_res = server.dispatch_tool("rea_registry_audit", {"domain": "OPERATING_SYSTEM"})
+        self.assertEqual(reg_res["status"], "success")
+        self.assertEqual(reg_res["domain"], "OPERATING_SYSTEM")
+
 
 if __name__ == "__main__":
     unittest.main()

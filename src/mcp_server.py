@@ -325,6 +325,42 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
+        "name": "rea_win_catalog_cmd",
+        "description": "Safely executes a registered read-only Windows diagnostic command from the immutable Command Catalog (e.g. 'os_ver', 'sys_info', 'whoami_privs', 'proc_list', 'service_list', 'driver_list', 'pnp_devices_problem', 'power_cfg') with argument whitelisting and typed JSON output.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "command_id": {
+                    "type": "string",
+                    "description": "Catalog command ID to execute (e.g. 'driver_list', 'proc_list', 'sys_info', 'whoami_privs')"
+                },
+                "extra_flags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional whitelisted arguments"
+                }
+            },
+            "required": ["command_id"]
+        }
+    },
+    {
+        "name": "rea_registry_audit",
+        "description": "Performs dual-view (64-bit and 32-bit WOW64) inspection across 11 Windows Registry functional domains, detecting redirection divergence and security/loader policy anomalies.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "description": "Optional functional domain (e.g. 'OPERATING_SYSTEM', 'SECURITY_POLICIES', 'DLL_SEARCH_CONFIGURATION', 'KNOWN_DLLS')"
+                },
+                "target_binary": {
+                    "type": "string",
+                    "description": "Optional target executable path to check for compatibility shims"
+                }
+            }
+        }
+    },
+    {
         "name": "rea_wsp_audit",
         "description": "Audits neural weights embedded inside Windows executables without execution: computes Roy-Vetterli spectral effective rank, cross-layer induction composition, amenability diagnostic, and scans for dormant backdoor/trojan neurons (>4.5σ).",
         "inputSchema": {
@@ -557,6 +593,20 @@ class ReaMcpServer:
             c = args.get("crash_record")
             g = args.get("ghidra_export")
             return DiagnosticEvidenceCorrelator.correlate(b, crash_record=c, ghidra_export=g)
+
+        elif name == "rea_win_catalog_cmd":
+            from windows_intelligence import CommandExecutor
+            cmd_id = args.get("command_id", "")
+            flags = tuple(args.get("extra_flags", [])) if args.get("extra_flags") else None
+            return CommandExecutor.execute(cmd_id, extra_flags=flags)
+
+        elif name == "rea_registry_audit":
+            from windows_intelligence import WindowsRegistryAnalyzer
+            domain = args.get("domain")
+            target_b = args.get("target_binary")
+            if domain:
+                return WindowsRegistryAnalyzer.audit_domain(domain)
+            return WindowsRegistryAnalyzer.audit_all()
 
         elif name == "rea_wsp_audit":
             path = args["model_path"]

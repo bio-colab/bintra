@@ -40,7 +40,7 @@ WEIGHT_COMMANDS = {
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless"}
-WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose"}
+WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit"}
 
 
 def print_help():
@@ -82,6 +82,8 @@ Windows System Intelligence & Failure Diagnostic Commands:
   resolve-deps      Audit DLL search order, API-Sets, and verify required exported symbols
   wer-inspect       Scan Windows Error Reporting (WER) archives and Application Event Log
   diagnose          Correlate host OS environment, crash records, and PE structure into Evidence Dossier
+  win-cmd           Safely execute pre-registered read-only Windows catalog commands (or 'list')
+  reg-audit         Dual-view (32/64-bit) audit across 11 Windows Registry functional domains
 
 Agent-Native MCP (Model Context Protocol):
   mcp               Launch native JSON-RPC 2.0 stdio MCP server for AI models (Claude, Antigravity, Cursor)
@@ -108,7 +110,9 @@ def main():
     if cmd in WIN_INTEL_COMMANDS:
         from windows_intelligence import (
             WindowsOSProfiler, WindowsDependencyResolver, WindowsDeviceInspector,
-            WindowsSecurityInspector, WindowsCrashAnalyzer, DiagnosticEvidenceCorrelator
+            WindowsSecurityInspector, WindowsCrashAnalyzer, DiagnosticEvidenceCorrelator,
+            CommandCatalog, CommandExecutor, PowerShellExecutor,
+            RegistryCatalog, WindowsRegistryReader, WindowsRegistryAnalyzer
         )
         if cmd == "win-audit":
             parser = argparse.ArgumentParser(description="Profile host Windows OS, devices, and security context")
@@ -213,6 +217,73 @@ def main():
                 print(DiagnosticEvidenceCorrelator.format_markdown(dossier))
             else:
                 print(json.dumps(dossier, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "win-cmd":
+            parser = argparse.ArgumentParser(description="Safely execute pre-registered read-only Windows catalog commands")
+            parser.add_argument("command")
+            parser.add_argument("cmd_id", nargs="?", default="list", help="Command ID to execute (or 'list')")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args()
+
+            if args.cmd_id == "list":
+                catalog_list = CommandCatalog.list_available_commands()
+                if args.format == "md":
+                    lines = [
+                        "# Available Safe Windows Catalog Commands",
+                        "",
+                        "| Command ID | Binary | Min Build | Admin Req | Output Schema |",
+                        "|:---|:---|:---|:---|:---|"
+                    ]
+                    for c in catalog_list:
+                        lines.append(f"| `{c['command_id']}` | `{c['binary']}` | {c['min_build']} | {c['requires_admin']} | `{c['output_schema']}` |")
+                    print("\n".join(lines))
+                else:
+                    print(json.dumps(catalog_list, indent=2, ensure_ascii=False))
+                return
+
+            res = CommandExecutor.execute(args.cmd_id)
+            if args.format == "md":
+                lines = [
+                    f"# Execution: `{args.cmd_id}` ({res.get('status')})",
+                    f"- **Schema:** `{res.get('schema')}`",
+                    f"- **Duration:** {res.get('duration_ms')} ms",
+                    f"- **Exit Code:** {res.get('exit_code')}",
+                    ""
+                ]
+                print("\n".join(lines))
+                print(json.dumps(res.get("data"), indent=2, ensure_ascii=False))
+            else:
+                print(json.dumps(res, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "reg-audit":
+            parser = argparse.ArgumentParser(description="Dual-view (32/64-bit) 11-domain Windows Registry intelligence audit")
+            parser.add_argument("command")
+            parser.add_argument("--domain", default=None, help="Specific domain to audit (e.g. OPERATING_SYSTEM, SECURITY_POLICIES)")
+            parser.add_argument("--binary", default=None, help="Optional binary path to check for AppCompatFlags shims")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args()
+
+            if args.domain:
+                report = WindowsRegistryAnalyzer.audit_domain(args.domain)
+            else:
+                report = WindowsRegistryAnalyzer.audit_all()
+
+            if args.format == "md":
+                lines = [
+                    "# Windows Registry Intelligence Audit",
+                    f"- **Domains Inspected:** {report.get('total_domains_audited', 1)}",
+                    f"- **Keys Inspected:** {report.get('total_keys_inspected', report.get('keys_inspected', 0))}",
+                    f"- **Architecture Discrepancies:** {report.get('total_discrepancies_detected', report.get('discrepancies_count', 0))}"
+                ]
+                if "critical_policies" in report:
+                    lines.append("\n## Critical Security & Loader Policies:")
+                    for f in report["critical_policies"].get("findings", []):
+                        lines.append(f"- {f}")
+                print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
             return
 
     if cmd in SENSORY_COMMANDS:

@@ -29,4 +29,8 @@ rea-mcp = "mcp_server:main"
 [tool.setuptools]
 package-dir = {"" = "src"}
 py-modules = ["cli", "binary_neural_engine", "rea_neural_engine", "sensory_cortex", "ghidra_pcode_vectorizer", "mcp_server"]
-packages = ["windows_intelligence"]
+packages = [
+    "windows_intelligence",
+    "windows_intelligence.command_engine",
+    "windows_intelligence.registry_intelligence"
+]

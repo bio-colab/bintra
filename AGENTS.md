@@ -21,7 +21,7 @@ Launch the native zero-dependency MCP server via stdio:
   }
 }
 ```
-Exposes 17 type-safe tools: core binary analysis (`rea_inspect_binary`, `rea_dump_bytes`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_scan_hybrid`, `rea_sensory_audit`), Ghidra P-Code integration (`rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`), Windows intelligence & diagnostics (`rea_windows_env_audit`, `rea_resolve_dependencies`, `rea_inspect_crash_reports`, `rea_correlate_failure_evidence`), and embedded weights security (`rea_wsp_audit`, `rea_patch_weights`).
+Exposes 19 type-safe tools: core binary analysis (`rea_inspect_binary`, `rea_dump_bytes`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_scan_hybrid`, `rea_sensory_audit`), Ghidra P-Code integration (`rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`), Windows intelligence & diagnostics (`rea_windows_env_audit`, `rea_resolve_dependencies`, `rea_inspect_crash_reports`, `rea_correlate_failure_evidence`, `rea_win_catalog_cmd`, `rea_registry_audit`), and embedded weights security (`rea_wsp_audit`, `rea_patch_weights`).
 
 ### Modality 2: Unified CLI (`src/cli.py`) -- Recommended for Terminal / Bash / PowerShell
 ```powershell
@@ -78,6 +78,8 @@ from windows_intelligence import (
 | `resolve-deps` | Safe DLL search order & exports audit | `--binary <path> [--format json|md]` | `verdict`, `loader_mode`, `resolved_dlls`, `missing_dlls` |
 | `wer-inspect` | Scan WER archives & Event Log 1000 | `[--binary <name>] [--format json|md]` | `wer_reports`, `event_log_errors`, `counts` |
 | `diagnose` | Correlate OS, crash & PE into Dossier | `--binary <path> [--crash <f>] [--ghidra <f>]` | `verdict`, `root_cause_summary`, `binary_mapping` |
+| `win-cmd` | Execute read-only command from catalog | `[command_id] [--format json|md]` | `status`, `schema`, `duration_ms`, `data` |
+| `reg-audit` | Dual-view 11-domain registry audit | `[--domain <name>] [--format json|md]` | `domains`, `keys`, `discrepancies`, `critical_policies` |
 
 ---
 

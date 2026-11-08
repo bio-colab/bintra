@@ -21,7 +21,7 @@ Launch the native zero-dependency MCP server via stdio:
   }
 }
 ```
-Exposes 19 type-safe tools: core binary analysis (`rea_inspect_binary`, `rea_dump_bytes`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_scan_hybrid`, `rea_sensory_audit`), Ghidra P-Code integration (`rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`), Windows intelligence & diagnostics (`rea_windows_env_audit`, `rea_resolve_dependencies`, `rea_inspect_crash_reports`, `rea_correlate_failure_evidence`, `rea_win_catalog_cmd`, `rea_registry_audit`), and embedded weights security (`rea_wsp_audit`, `rea_patch_weights`).
+Exposes 22 type-safe tools: core binary analysis (`rea_inspect_binary`, `rea_dump_bytes`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_scan_hybrid`, `rea_sensory_audit`), Ghidra P-Code integration (`rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`), Windows intelligence & diagnostics (`rea_windows_env_audit`, `rea_resolve_dependencies`, `rea_inspect_crash_reports`, `rea_correlate_failure_evidence`, `rea_win_catalog_cmd`, `rea_registry_audit`), Native hardware and system introspection (`rea_hardware_audit`, `rea_driver_audit`, `rea_service_audit`), and embedded weights security (`rea_wsp_audit`, `rea_patch_weights`).
 
 ### Modality 2: Unified CLI (`src/cli.py`) -- Recommended for Terminal / Bash / PowerShell
 ```powershell
@@ -37,7 +37,10 @@ from binary_neural_engine import BinaryFormatInspector, ContinuousDeobfuscator, 
 from ghidra_pcode_vectorizer import GhidraAnnotationPlanner, PcodeDeobfuscator
 from windows_intelligence import (
     WindowsOSProfiler, WindowsDependencyResolver, WindowsDeviceInspector,
-    WindowsSecurityInspector, WindowsCrashAnalyzer, DiagnosticEvidenceCorrelator
+    WindowsSecurityInspector, WindowsCrashAnalyzer, DiagnosticEvidenceCorrelator,
+    CommandCatalog, CommandExecutor, PowerShellExecutor,
+    RegistryCatalog, WindowsRegistryReader, WindowsRegistryAnalyzer,
+    NativeDeviceInspector, KernelDriverInspector, ServiceManagerInspector, ProcessMitigationInspector
 )
 ```
 
@@ -80,6 +83,9 @@ from windows_intelligence import (
 | `diagnose` | Correlate OS, crash & PE into Dossier | `--binary <path> [--crash <f>] [--ghidra <f>]` | `verdict`, `root_cause_summary`, `binary_mapping` |
 | `win-cmd` | Execute read-only command from catalog | `[command_id] [--format json|md]` | `status`, `schema`, `duration_ms`, `data` |
 | `reg-audit` | Dual-view 11-domain registry audit | `[--domain <name>] [--format json|md]` | `domains`, `keys`, `discrepancies`, `critical_policies` |
+| `hw-audit` | Inspect PnP hardware & CM_PROB_* codes | `[--problems-only] [--format json|md]` | `status`, `is_hardware_healthy`, `display_adapters`, `problem_devices` |
+| `driver-audit` | Kernel drivers & image base introspection | `[--format json|md]` | `total_drivers_loaded`, `graphics_drivers`, `audio_drivers` |
+| `service-audit` | Interrogate SCM service states | `[--format json|md]` | `total_services_enumerated`, `running_services_count` |
 
 ---
 
@@ -130,3 +136,22 @@ When an executable crashes, fails to launch, or encounters runtime access violat
    python src/cli.py diagnose --binary "path/to/target.exe" --format md
    ```
    Cross-references runtime crash offset (`FaultOffset`), PE section layout, RVAs, and Ghidra decompilation into an actionable engineering dossier with root cause diagnosis and mitigation guidance.
+
+
+5. **Live Hardware & PnP Subsystem Health Check:**
+   ```powershell
+   python src/cli.py hw-audit --format md
+   ```
+   Interrogates live PnP devices via `SetupAPI` and `CfgMgr32`, flagging device problem codes (`CM_PROB_FAILED_START`, `CM_PROB_FAILED_ADD`, Code 10, Code 43).
+
+6. **Kernel Driver & Graphics Base Introspection:**
+   ```powershell
+   python src/cli.py driver-audit --format md
+   ```
+   Enumerates loaded kernel drivers via `PSAPI`, resolving 64-bit kernel virtual base addresses and highlighting graphics and audio drivers.
+
+7. **Service Control Manager (SCM) Audit:**
+   ```powershell
+   python src/cli.py service-audit --format md
+   ```
+   Audits active and stopped Windows services via `Advapi32`.

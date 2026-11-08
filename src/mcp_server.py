@@ -361,6 +361,49 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
+        "name": "rea_hardware_audit",
+        "description": "Inspects live Plug and Play (PnP) hardware devices, display adapters, audio endpoints, and queries CM_Get_DevNode_Status for hardware problem codes (CM_PROB_*) via SetupAPI and CfgMgr32.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "problems_only": {
+                    "type": "boolean",
+                    "description": "If true, only returns devices that report non-zero CM_PROB_* error codes"
+                }
+            }
+        }
+    },
+    {
+        "name": "rea_driver_audit",
+        "description": "Enumerates all currently loaded Windows kernel drivers, their kernel virtual base addresses, image filenames, and highlights display and audio drivers via PSAPI.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "driver_name_filter": {
+                    "type": "string",
+                    "description": "Optional substring filter for driver file or base name"
+                }
+            }
+        }
+    },
+    {
+        "name": "rea_service_audit",
+        "description": "Interrogates the Windows Service Control Manager (SCM) via Advapi32 to audit active, stopped, or win32 services, their binary paths, and startup configurations.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "service_name_filter": {
+                    "type": "string",
+                    "description": "Optional substring filter for service name or display name"
+                },
+                "active_only": {
+                    "type": "boolean",
+                    "description": "If true, only returns currently running services"
+                }
+            }
+        }
+    },
+    {
         "name": "rea_wsp_audit",
         "description": "Audits neural weights embedded inside Windows executables without execution: computes Roy-Vetterli spectral effective rank, cross-layer induction composition, amenability diagnostic, and scans for dormant backdoor/trojan neurons (>4.5σ).",
         "inputSchema": {
@@ -607,6 +650,48 @@ class ReaMcpServer:
             if domain:
                 return WindowsRegistryAnalyzer.audit_domain(domain)
             return WindowsRegistryAnalyzer.audit_all()
+
+        elif name == "rea_hardware_audit":
+            from windows_intelligence import NativeDeviceInspector
+            report = NativeDeviceInspector.audit_hardware_health()
+            if args.get("problems_only", False):
+                return {
+                    "is_hardware_healthy": report["is_hardware_healthy"],
+                    "problem_devices_count": report["problem_devices_count"],
+                    "problem_devices": report["problem_devices"]
+                }
+            return report
+
+        elif name == "rea_driver_audit":
+            from windows_intelligence import KernelDriverInspector
+            flt = args.get("driver_name_filter")
+            if flt:
+                matched = KernelDriverInspector.filter_drivers(flt)
+                return {
+                    "status": "success",
+                    "filter": flt,
+                    "matched_count": len(matched),
+                    "drivers": matched
+                }
+            return KernelDriverInspector.audit_drivers()
+
+        elif name == "rea_service_audit":
+            from windows_intelligence import ServiceManagerInspector
+            flt = args.get("service_name_filter")
+            active_only = args.get("active_only", False)
+            if flt or active_only:
+                all_svcs = ServiceManagerInspector.enumerate_services()
+                if active_only:
+                    all_svcs = [s for s in all_svcs if s.get("state") in ("RUNNING", "SERVICE_RUNNING")]
+                if flt:
+                    flt_lower = flt.lower()
+                    all_svcs = [s for s in all_svcs if flt_lower in s.get("service_name", "").lower() or flt_lower in s.get("display_name", "").lower()]
+                return {
+                    "status": "success",
+                    "total_matching_services": len(all_svcs),
+                    "services": all_svcs
+                }
+            return ServiceManagerInspector.audit_services()
 
         elif name == "rea_wsp_audit":
             path = args["model_path"]

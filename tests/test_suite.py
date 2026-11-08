@@ -768,8 +768,11 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
         tools_res = server.handle_tools_list({})
         self.assertIn("tools", tools_res)
-        self.assertEqual(len(tools_res["tools"]), 19)
+        self.assertEqual(len(tools_res["tools"]), 22)
         tool_names = [t["name"] for t in tools_res["tools"]]
+        self.assertIn("rea_hardware_audit", tool_names)
+        self.assertIn("rea_driver_audit", tool_names)
+        self.assertIn("rea_service_audit", tool_names)
         self.assertIn("rea_dump_bytes", tool_names)
         self.assertIn("rea_inspect_binary", tool_names)
         self.assertIn("rea_sensory_audit", tool_names)
@@ -1445,6 +1448,89 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         reg_res = server.dispatch_tool("rea_registry_audit", {"domain": "OPERATING_SYSTEM"})
         self.assertEqual(reg_res["status"], "success")
         self.assertEqual(reg_res["domain"], "OPERATING_SYSTEM")
+
+    def test_native_device_inspector_live(self):
+        """Verifies NativeDeviceInspector SetupAPI & CfgMgr32 device enumeration and health audit."""
+        from windows_intelligence import NativeDeviceInspector
+        report = NativeDeviceInspector.audit_hardware_health()
+        self.assertEqual(report.get("status"), "success")
+        self.assertIn("is_hardware_healthy", report)
+        self.assertIn("total_pnp_devices_enumerated", report)
+        self.assertGreater(report["total_pnp_devices_enumerated"], 0)
+        self.assertIn("display_adapters_count", report)
+        self.assertIn("problem_devices", report)
+        desc = NativeDeviceInspector.get_problem_description(1)
+        self.assertIn("CM_PROB_NOT_CONFIGURED", desc)
+
+    def test_kernel_driver_inspector_psapi(self):
+        """Verifies KernelDriverInspector PSAPI driver enumeration and base mapping."""
+        from windows_intelligence import KernelDriverInspector
+        report = KernelDriverInspector.audit_drivers()
+        self.assertEqual(report.get("status"), "success")
+        self.assertIn("total_drivers_loaded", report)
+        self.assertGreater(report["total_drivers_loaded"], 0)
+        self.assertIn("drivers_sample", report)
+        self.assertIn("graphics_drivers", report)
+        all_drivers = KernelDriverInspector.enumerate_loaded_drivers()
+        self.assertGreater(len(all_drivers), 0)
+        first = all_drivers[0]
+        self.assertIn("driver_name", first)
+        self.assertIn("kernel_image_base", first)
+        self.assertTrue(first["kernel_image_base"].startswith("0x"))
+
+    def test_service_manager_inspector_advapi32(self):
+        """Verifies ServiceManagerInspector SCM service interrogation via Advapi32."""
+        from windows_intelligence import ServiceManagerInspector
+        report = ServiceManagerInspector.audit_services()
+        self.assertEqual(report.get("status"), "success")
+        self.assertIn("total_services_enumerated", report)
+        self.assertGreater(report["total_services_enumerated"], 0)
+        self.assertIn("running_services_count", report)
+        self.assertIn("services_sample", report)
+        all_svcs = ServiceManagerInspector.enumerate_services()
+        self.assertGreater(len(all_svcs), 0)
+        svc = all_svcs[0]
+        self.assertIn("service_name", svc)
+        self.assertIn("display_name", svc)
+        self.assertIn("state", svc)
+
+    def test_process_mitigation_inspector_live(self):
+        """Verifies ProcessMitigationInspector DEP, ASLR, token integrity, and memory counters."""
+        from windows_intelligence import ProcessMitigationInspector
+        proc = ProcessMitigationInspector.inspect_process()
+        self.assertEqual(proc.get("status"), "success")
+        self.assertTrue(proc.get("is_current_process"))
+        self.assertEqual(proc.get("pid"), os.getpid())
+        self.assertIn("mitigations", proc)
+        self.assertIn("dep", proc["mitigations"])
+        self.assertTrue(proc["mitigations"]["dep"]["enabled"])
+        self.assertIn("aslr", proc["mitigations"])
+        self.assertIn("security_token", proc)
+        self.assertIn("integrity_level", proc["security_token"])
+        self.assertIn("memory", proc)
+        self.assertIn("working_set_bytes", proc["memory"])
+        self.assertGreater(proc["memory"]["working_set_bytes"], 0)
+
+    def test_mcp_server_system_introspection_dispatch(self):
+        """Verifies MCP server dispatch for hardware_audit, driver_audit, and service_audit."""
+        from mcp_server import ReaMcpServer
+        server = ReaMcpServer()
+
+        hw_res = server.dispatch_tool("rea_hardware_audit", {"problems_only": True})
+        self.assertIn("is_hardware_healthy", hw_res)
+        self.assertIn("problem_devices_count", hw_res)
+
+        drv_res = server.dispatch_tool("rea_driver_audit", {"driver_name_filter": "dxg"})
+        self.assertEqual(drv_res.get("status"), "success")
+        self.assertIn("drivers", drv_res)
+        self.assertGreater(drv_res.get("matched_count", 0), 0)
+
+        svc_res = server.dispatch_tool("rea_service_audit", {"active_only": True})
+        self.assertEqual(svc_res.get("status"), "success")
+        self.assertIn("services", svc_res)
+        self.assertGreater(len(svc_res["services"]), 0)
+        for s in svc_res["services"]:
+            self.assertIn(s["state"], ("RUNNING", "SERVICE_RUNNING"))
 
 
 if __name__ == "__main__":

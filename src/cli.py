@@ -40,7 +40,7 @@ WEIGHT_COMMANDS = {
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless"}
-WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit"}
+WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "driver-audit", "service-audit"}
 
 
 def print_help():
@@ -84,6 +84,9 @@ Windows System Intelligence & Failure Diagnostic Commands:
   diagnose          Correlate host OS environment, crash records, and PE structure into Evidence Dossier
   win-cmd           Safely execute pre-registered read-only Windows catalog commands (or 'list')
   reg-audit         Dual-view (32/64-bit) audit across 11 Windows Registry functional domains
+  hw-audit          Inspect live PnP devices and problem codes (CM_PROB_*) via SetupAPI & CfgMgr32
+  driver-audit      Enumerate loaded kernel drivers and execution image bases via PSAPI
+  service-audit     Inspect Windows Service Control Manager (SCM) service states via Advapi32
 
 Agent-Native MCP (Model Context Protocol):
   mcp               Launch native JSON-RPC 2.0 stdio MCP server for AI models (Claude, Antigravity, Cursor)
@@ -112,7 +115,8 @@ def main():
             WindowsOSProfiler, WindowsDependencyResolver, WindowsDeviceInspector,
             WindowsSecurityInspector, WindowsCrashAnalyzer, DiagnosticEvidenceCorrelator,
             CommandCatalog, CommandExecutor, PowerShellExecutor,
-            RegistryCatalog, WindowsRegistryReader, WindowsRegistryAnalyzer
+            RegistryCatalog, WindowsRegistryReader, WindowsRegistryAnalyzer,
+            NativeDeviceInspector, KernelDriverInspector, ServiceManagerInspector, ProcessMitigationInspector
         )
         if cmd == "win-audit":
             parser = argparse.ArgumentParser(description="Profile host Windows OS, devices, and security context")
@@ -281,6 +285,74 @@ def main():
                     lines.append("\n## Critical Security & Loader Policies:")
                     for f in report["critical_policies"].get("findings", []):
                         lines.append(f"- {f}")
+                print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "hw-audit":
+            parser = argparse.ArgumentParser(description="Live hardware and PnP device audit via SetupAPI and CfgMgr32")
+            parser.add_argument("command")
+            parser.add_argument("--problems-only", action="store_true", help="Filter for devices with non-zero problem codes")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args()
+
+            report = NativeDeviceInspector.audit_hardware_health()
+            if args.format == "md":
+                lines = [
+                    "# Native Hardware Subsystem Audit (SetupAPI / CfgMgr32)",
+                    f"- **Hardware Status:** {'HEALTHY' if report['is_hardware_healthy'] else 'DEGRADED_OR_PROBLEMS'}",
+                    f"- **Live PnP Devices:** {report['total_pnp_devices_enumerated']}",
+                    f"- **Display Adapters:** {report['display_adapters_count']}",
+                    f"- **Audio Devices:** {report['audio_devices_count']}",
+                    f"- **Problem Devices:** {report['problem_devices_count']}"
+                ]
+                if report['problem_devices']:
+                    lines.append("\n## Faulting Devices (CM_PROB_*):")
+                    for p in report['problem_devices']:
+                        lines.append(f"- **{p['name']}**: `{p['problem_name']}` (Service: `{p.get('service')}`)")
+                print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "driver-audit":
+            parser = argparse.ArgumentParser(description="Kernel driver introspection via PSAPI")
+            parser.add_argument("command")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args()
+
+            report = KernelDriverInspector.audit_drivers()
+            if args.format == "md":
+                lines = [
+                    "# Kernel Drivers Introspection (PSAPI)",
+                    f"- **Total Drivers Loaded:** {report['total_drivers_loaded']}",
+                    f"- **Graphics Drivers:** {len(report['graphics_drivers'])}",
+                    f"- **Audio Drivers:** {len(report['audio_drivers'])}",
+                    "",
+                    "## Critical Graphics & Display Driver Bases:"
+                ]
+                for g in report['graphics_drivers']:
+                    lines.append(f"- **`{g['driver_name']}`**: Base `{g['kernel_image_base']}` (Path: `{g['file_path']}`)")
+                print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "service-audit":
+            parser = argparse.ArgumentParser(description="Windows Service Control Manager audit via Advapi32")
+            parser.add_argument("command")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args()
+
+            report = ServiceManagerInspector.audit_services()
+            if args.format == "md":
+                lines = [
+                    "# Service Control Manager Audit (Advapi32)",
+                    f"- **Total Services Enumerated:** {report['total_services_enumerated']}",
+                    f"- **Running Services:** {report['running_services_count']}",
+                    f"- **Stopped Services:** {report['stopped_services_count']}"
+                ]
                 print("\n".join(lines))
             else:
                 print(json.dumps(report, indent=2, ensure_ascii=False))

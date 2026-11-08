@@ -32,5 +32,6 @@ py-modules = ["cli", "binary_neural_engine", "rea_neural_engine", "sensory_corte
 packages = [
     "windows_intelligence",
     "windows_intelligence.command_engine",
-    "windows_intelligence.registry_intelligence"
+    "windows_intelligence.registry_intelligence",
+    "windows_intelligence.system_introspection"
 ]

@@ -768,11 +768,13 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
         tools_res = server.handle_tools_list({})
         self.assertIn("tools", tools_res)
-        self.assertEqual(len(tools_res["tools"]), 22)
+        self.assertEqual(len(tools_res["tools"]), 24)
         tool_names = [t["name"] for t in tools_res["tools"]]
         self.assertIn("rea_hardware_audit", tool_names)
         self.assertIn("rea_driver_audit", tool_names)
         self.assertIn("rea_service_audit", tool_names)
+        self.assertIn("rea_dmp_inspect", tool_names)
+        self.assertIn("rea_etw_audit", tool_names)
         self.assertIn("rea_dump_bytes", tool_names)
         self.assertIn("rea_inspect_binary", tool_names)
         self.assertIn("rea_sensory_audit", tool_names)
@@ -1531,6 +1533,128 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertGreater(len(svc_res["services"]), 0)
         for s in svc_res["services"]:
             self.assertIn(s["state"], ("RUNNING", "SERVICE_RUNNING"))
+
+    def test_minidump_parser_multistream_synthetic(self):
+        """Verifies MiniDumpParser multi-stream parsing (Streams 3, 4, 6, 7, 10) & AV diagnostics."""
+        from windows_intelligence import MiniDumpParser
+
+        fmt_sys = '<HHHBBIIIIIHH16s'
+        sys_data = struct.pack(fmt_sys, 9, 6, 0x1234, 4, 1, 10, 0, 19045, 2, 0, 0x100, 0, bytes([0]*16))
+
+        fmt_misc = '<IIIIII'
+        misc_data = struct.pack(fmt_misc, 24, 0x3, 9999, 1000, 200, 150)
+
+        fmt_thread = '<IIIIQQIIII'
+        t1 = struct.pack(fmt_thread, 1001, 0, 32, 8, 0x7ff00000, 0x12ff00, 0x1000, 0, 0, 0)
+        t2 = struct.pack(fmt_thread, 1002, 0, 32, 8, 0x7ff10000, 0x13ff00, 0x1000, 0, 0, 0)
+        thread_data = struct.pack('<I', 2) + t1 + t2
+
+        mod_name_utf16 = 'target_app.exe\x00'.encode('utf-16-le')
+        mod_str_data = struct.pack('<I', len(mod_name_utf16)) + mod_name_utf16
+
+        hdr_size = 32
+        dir_size = 5 * 12
+        sys_rva = hdr_size + dir_size
+        misc_rva = sys_rva + len(sys_data)
+        thread_rva = misc_rva + len(misc_data)
+        mod_str_rva = thread_rva + len(thread_data)
+        mod_list_rva = mod_str_rva + len(mod_str_data)
+
+        mod_record = struct.pack('<QIIII', 0x400000, 0x20000, 0, 0, mod_str_rva) + bytes([0] * (108 - 24))
+        mod_list_data = struct.pack('<I', 1) + mod_record
+        exc_rva = mod_list_rva + len(mod_list_data)
+
+        fmt_exc = '<IIIIQQII15QII'
+        exc_data = struct.pack(fmt_exc, 1001, 0, 0xC0000005, 0, 0, 0x401050, 2, 0, *( [1, 0x0] + [0]*13 ), 0, 0)
+
+        dir_entries = [
+            struct.pack('<III', 7, len(sys_data), sys_rva),
+            struct.pack('<III', 10, len(misc_data), misc_rva),
+            struct.pack('<III', 3, len(thread_data), thread_rva),
+            struct.pack('<III', 4, len(mod_list_data), mod_list_rva),
+            struct.pack('<III', 6, len(exc_data), exc_rva),
+        ]
+        dir_bytes = b''.join(dir_entries)
+        hdr = struct.pack('<IIIIII', 0x504D444D, 0xA793, 5, 32, 0, 0x65000000) + bytes([0] * 8)
+        payload = hdr + dir_bytes + sys_data + misc_data + thread_data + mod_str_data + mod_list_data + exc_data
+
+        with tempfile.NamedTemporaryFile(suffix='.dmp', delete=False) as tf:
+            tf.write(payload)
+            tpath = tf.name
+
+        try:
+            parsed = MiniDumpParser.parse_minidump(tpath)
+            self.assertEqual(parsed['status'], 'success')
+            self.assertEqual(parsed['stream_count'], 5)
+            self.assertEqual(parsed['thread_count'], 2)
+            self.assertEqual(parsed['module_count'], 1)
+            # System info
+            self.assertIn('system_info', parsed)
+            self.assertEqual(parsed['system_info']['build_number'], 19045)
+            self.assertEqual(parsed['system_info']['processor_architecture'], 'AMD64 (x64 64-bit)')
+            # Misc info
+            self.assertIn('misc_info', parsed)
+            self.assertEqual(parsed['misc_info']['process_id'], 9999)
+            # Exception info & correlation
+            exc = parsed['exception_info']
+            self.assertEqual(exc['exception_code'], '0xc0000005')
+            self.assertEqual(exc['fault_module'], 'target_app.exe')
+            self.assertEqual(exc['fault_offset'], '0x1050')
+            self.assertIn('access_violation_details', exc)
+            self.assertEqual(exc['access_violation_details']['operation'], 'WRITE')
+            self.assertTrue(exc['access_violation_details']['is_null_pointer_dereference'])
+        finally:
+            if os.path.exists(tpath):
+                os.unlink(tpath)
+
+    def test_event_log_collector_live(self):
+        """Verifies EventLogCollector queries Application Event Log for failure events."""
+        from windows_intelligence import EventLogCollector
+        telemetry = EventLogCollector.collect_all_telemetry()
+        self.assertEqual(telemetry['status'], 'success')
+        self.assertIn('counts', telemetry)
+        self.assertIn('application_crashes_1000', telemetry['counts'])
+        self.assertIn('wer_events_1001', telemetry['counts'])
+        self.assertIn('application_hangs_1002', telemetry['counts'])
+        self.assertIn('system_crashes', telemetry['counts'])
+
+    def test_etw_controller_live_and_providers(self):
+        """Verifies EtwController providers catalog and session query capabilities."""
+        from windows_intelligence import EtwController
+        provs = EtwController.audit_etw_providers()
+        self.assertEqual(provs['status'], 'success')
+        self.assertGreater(provs['total_providers'], 5)
+        self.assertIn('Microsoft-Windows-Kernel-Process', provs['providers'])
+        self.assertIn('Microsoft-Windows-Direct3D11', provs['providers'])
+        self.assertIn('Microsoft-Windows-DXGI', provs['providers'])
+
+        # Probe standard sessions
+        audit = EtwController.audit_telemetry_system()
+        self.assertEqual(audit['status'], 'success')
+        self.assertTrue(audit.get('is_windows'))
+        self.assertGreater(audit['standard_sessions_probed'], 0)
+        self.assertIn('active_sessions', audit)
+
+        # Query standard application event log trace session
+        sess = EtwController.query_trace_session('Eventlog-Application')
+        self.assertEqual(sess['session_name'], 'Eventlog-Application')
+        self.assertTrue(sess['is_active'])
+
+    def test_mcp_server_telemetry_dispatch(self):
+        """Verifies MCP server protocol dispatch for rea_dmp_inspect and rea_etw_audit."""
+        from mcp_server import ReaMcpServer
+        server = ReaMcpServer()
+
+        # Audit dumps without explicit path
+        dmp_res = server.dispatch_tool("rea_dmp_inspect", {})
+        self.assertEqual(dmp_res["status"], "success")
+        self.assertIn("total_dumps_discovered", dmp_res)
+
+        # ETW audit
+        etw_res = server.dispatch_tool("rea_etw_audit", {})
+        self.assertEqual(etw_res["status"], "success")
+        self.assertIn("registered_providers_count", etw_res)
+        self.assertIn("active_sessions", etw_res)
 
 
 if __name__ == "__main__":

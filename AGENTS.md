@@ -21,7 +21,7 @@ Launch the native zero-dependency MCP server via stdio:
   }
 }
 ```
-Exposes 22 type-safe tools: core binary analysis (`rea_inspect_binary`, `rea_dump_bytes`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_scan_hybrid`, `rea_sensory_audit`), Ghidra P-Code integration (`rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`), Windows intelligence & diagnostics (`rea_windows_env_audit`, `rea_resolve_dependencies`, `rea_inspect_crash_reports`, `rea_correlate_failure_evidence`, `rea_win_catalog_cmd`, `rea_registry_audit`), Native hardware and system introspection (`rea_hardware_audit`, `rea_driver_audit`, `rea_service_audit`), and embedded weights security (`rea_wsp_audit`, `rea_patch_weights`).
+Exposes 24 type-safe tools: core binary analysis (`rea_inspect_binary`, `rea_dump_bytes`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_scan_hybrid`, `rea_sensory_audit`), Ghidra P-Code integration (`rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`), Windows intelligence & diagnostics (`rea_windows_env_audit`, `rea_resolve_dependencies`, `rea_inspect_crash_reports`, `rea_correlate_failure_evidence`, `rea_win_catalog_cmd`, `rea_registry_audit`), Native hardware and system introspection (`rea_hardware_audit`, `rea_driver_audit`, `rea_service_audit`), Runtime telemetry & crash intelligence (`rea_dmp_inspect`, `rea_etw_audit`), and embedded weights security (`rea_wsp_audit`, `rea_patch_weights`).
 
 ### Modality 2: Unified CLI (`src/cli.py`) -- Recommended for Terminal / Bash / PowerShell
 ```powershell
@@ -40,7 +40,8 @@ from windows_intelligence import (
     WindowsSecurityInspector, WindowsCrashAnalyzer, DiagnosticEvidenceCorrelator,
     CommandCatalog, CommandExecutor, PowerShellExecutor,
     RegistryCatalog, WindowsRegistryReader, WindowsRegistryAnalyzer,
-    NativeDeviceInspector, KernelDriverInspector, ServiceManagerInspector, ProcessMitigationInspector
+    NativeDeviceInspector, KernelDriverInspector, ServiceManagerInspector, ProcessMitigationInspector,
+    MiniDumpParser, EventLogCollector, EtwController
 )
 ```
 
@@ -86,6 +87,8 @@ from windows_intelligence import (
 | `hw-audit` | Inspect PnP hardware & CM_PROB_* codes | `[--problems-only] [--format json|md]` | `status`, `is_hardware_healthy`, `display_adapters`, `problem_devices` |
 | `driver-audit` | Kernel drivers & image base introspection | `[--format json|md]` | `total_drivers_loaded`, `graphics_drivers`, `audio_drivers` |
 | `service-audit` | Interrogate SCM service states | `[--format json|md]` | `total_services_enumerated`, `running_services_count` |
+| `dmp-inspect` | Multi-stream MiniDump & AV analysis | `[--file <f>] [--scan] [--format json|md]` | `status`, `system_info`, `exception_info`, `access_violation_details` |
+| `etw-audit` | Audit ETW sessions & providers | `[--session <s>] [--format json|md]` | `standard_sessions_probed`, `active_sessions`, `providers` |
 
 ---
 
@@ -155,3 +158,15 @@ When an executable crashes, fails to launch, or encounters runtime access violat
    python src/cli.py service-audit --format md
    ```
    Audits active and stopped Windows services via `Advapi32`.
+
+8. **Crash Dump Multi-Stream Inspection & Root Cause Analysis:**
+   ```powershell
+   python src/cli.py dmp-inspect --scan --format md
+   ```
+   Parses `MDMP` files across all streams (SystemInfo, ThreadList, ModuleList, ExceptionRecord), resolves faulting module/RVA, and performs access violation parameter diagnostics (read/write/DEP, NULL pointer dereferences).
+
+9. **ETW Trace Sessions & Graphics Providers Audit:**
+   ```powershell
+   python src/cli.py etw-audit --format md
+   ```
+   Interrogates active kernel and application trace sessions and checks provider registration (Kernel-Process, Direct3D11, DXGI, DxgKrnl).

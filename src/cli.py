@@ -40,7 +40,7 @@ WEIGHT_COMMANDS = {
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless"}
-WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "driver-audit", "service-audit"}
+WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "driver-audit", "service-audit", "dmp-inspect", "etw-audit"}
 
 
 def print_help():
@@ -87,6 +87,8 @@ Windows System Intelligence & Failure Diagnostic Commands:
   hw-audit          Inspect live PnP devices and problem codes (CM_PROB_*) via SetupAPI & CfgMgr32
   driver-audit      Enumerate loaded kernel drivers and execution image bases via PSAPI
   service-audit     Inspect Windows Service Control Manager (SCM) service states via Advapi32
+  dmp-inspect       Multi-stream MiniDump (.dmp) inspection and access violation root-cause analysis
+  etw-audit         Inspect active ETW trace sessions and diagnostic providers (Process, D3D11, DXGI)
 
 Agent-Native MCP (Model Context Protocol):
   mcp               Launch native JSON-RPC 2.0 stdio MCP server for AI models (Claude, Antigravity, Cursor)
@@ -116,7 +118,8 @@ def main():
             WindowsSecurityInspector, WindowsCrashAnalyzer, DiagnosticEvidenceCorrelator,
             CommandCatalog, CommandExecutor, PowerShellExecutor,
             RegistryCatalog, WindowsRegistryReader, WindowsRegistryAnalyzer,
-            NativeDeviceInspector, KernelDriverInspector, ServiceManagerInspector, ProcessMitigationInspector
+            NativeDeviceInspector, KernelDriverInspector, ServiceManagerInspector, ProcessMitigationInspector,
+            MiniDumpParser, EventLogCollector, EtwController
         )
         if cmd == "win-audit":
             parser = argparse.ArgumentParser(description="Profile host Windows OS, devices, and security context")
@@ -354,6 +357,104 @@ def main():
                     f"- **Stopped Services:** {report['stopped_services_count']}"
                 ]
                 print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "dmp-inspect":
+            parser = argparse.ArgumentParser(description="Multi-stream MiniDump crash inspection and root cause analysis")
+            parser.add_argument("command")
+            parser.add_argument("--file", "--dmp", dest="file", default=None, help="Path to .dmp file (if omitted, scans standard dump paths)")
+            parser.add_argument("--scan", action="store_true", help="Scan system for recent crash dumps")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args()
+
+            if args.file:
+                report = MiniDumpParser.parse_minidump(args.file)
+            else:
+                report = MiniDumpParser.audit_dumps()
+
+            if args.format == "md":
+                if "crash_reports" in report:
+                    lines = [
+                        "# System Crash Dump Audit Summary",
+                        f"- **Total Dumps Discovered:** {report.get('total_dumps_discovered', 0)}",
+                        f"- **Dumps Analyzed:** {report.get('dumps_analyzed', 0)}",
+                        ""
+                    ]
+                    for cr in report.get("crash_reports", []):
+                        lines.append(f"### Dump: `{cr.get('file_path')}`")
+                        exc = cr.get("exception_info") or {}
+                        lines.append(f"- **Exception:** `{exc.get('exception_code')}` ({exc.get('exception_name')})")
+                        lines.append(f"- **Faulting Module:** `{exc.get('fault_module')}` (Offset: `{exc.get('fault_offset')}`)")
+                        if "access_violation_details" in exc:
+                            av = exc["access_violation_details"]
+                            lines.append(f"- **Access Violation:** `{av.get('operation')}` at `{av.get('target_virtual_address')}`")
+                            lines.append(f"- **Cause:** {av.get('probable_cause')}")
+                        lines.append("")
+                    print("\n".join(lines))
+                else:
+                    exc = report.get("exception_info") or {}
+                    sys_info = report.get("system_info") or {}
+                    lines = [
+                        f"# MiniDump Crash Inspection: `{os.path.basename(report.get('file_path', 'dump.dmp'))}`",
+                        f"- **Status:** {report.get('status')}",
+                        f"- **OS Version:** {sys_info.get('os_version', 'Unknown')} ({sys_info.get('processor_architecture', 'Unknown')})",
+                        f"- **Stream Count:** {report.get('stream_count', 0)}",
+                        f"- **Loaded Modules:** {report.get('module_count', 0)}",
+                        f"- **Active Threads:** {report.get('thread_count', 0)}",
+                        "",
+                        "## Exception Telemetry:",
+                        f"- **Exception Code:** `{exc.get('exception_code')}` ({exc.get('exception_name')})",
+                        f"- **Fault Address:** `{exc.get('exception_address')}`",
+                        f"- **Fault Module:** `{exc.get('fault_module')}` (Offset: `{exc.get('fault_offset')}`)"
+                    ]
+                    if "access_violation_details" in exc:
+                        av = exc["access_violation_details"]
+                        lines.append("\n## Access Violation Diagnostic:")
+                        lines.append(f"- **Operation:** `{av.get('operation')}`")
+                        lines.append(f"- **Target Address:** `{av.get('target_virtual_address')}`")
+                        lines.append(f"- **NULL Pointer Dereference:** `{av.get('is_null_pointer_dereference')}`")
+                        lines.append(f"- **Diagnostic Explanation:** {av.get('probable_cause')}")
+                    print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "etw-audit":
+            parser = argparse.ArgumentParser(description="Audit ETW trace sessions and diagnostic providers")
+            parser.add_argument("command")
+            parser.add_argument("--session", default=None, help="Query specific session name")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args()
+
+            if args.session:
+                report = EtwController.query_trace_session(args.session)
+            else:
+                report = EtwController.audit_telemetry_system()
+
+            if args.format == "md":
+                if "providers" in report:
+                    lines = [
+                        "# ETW Telemetry Infrastructure Audit",
+                        f"- **Probed Sessions:** {report.get('standard_sessions_probed', 0)}",
+                        f"- **Active Sessions:** {report.get('active_sessions_count', 0)} ({', '.join(report.get('active_sessions', []))})",
+                        f"- **Registered Diagnostic Providers:** {report.get('registered_providers_count', 0)}",
+                        "",
+                        "## High-Value Diagnostic Providers:"
+                    ]
+                    for pname, pdata in report.get("providers", {}).items():
+                        lines.append(f"- **`{pname}`** ({pdata.get('category')}): `{pdata.get('guid')}`")
+                        lines.append(f"  *{pdata.get('diagnostic_value')}*")
+                    print("\n".join(lines))
+                else:
+                    lines = [
+                        f"# ETW Session Query: `{report.get('session_name')}`",
+                        f"- **Active:** {report.get('is_active')}",
+                        f"- **Status Code:** {report.get('status_code')}",
+                        f"- **Description:** {report.get('status_description')}"
+                    ]
+                    print("\n".join(lines))
             else:
                 print(json.dumps(report, indent=2, ensure_ascii=False))
             return

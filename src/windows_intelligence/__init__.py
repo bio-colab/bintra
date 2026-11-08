@@ -40,6 +40,13 @@ from .system_introspection import (
     ProcessMitigationInspector
 )
 
+# Runtime Telemetry & Crash Intelligence Submodule (Phase 3)
+from .runtime_telemetry import (
+    MiniDumpParser,
+    EventLogCollector,
+    EtwController
+)
+
 __all__ = [
     # Core Diagnostics
     "WindowsOSProfiler",
@@ -64,5 +71,9 @@ __all__ = [
     "NativeDeviceInspector",
     "KernelDriverInspector",
     "ServiceManagerInspector",
-    "ProcessMitigationInspector"
+    "ProcessMitigationInspector",
+    # Runtime Telemetry & Crash Intelligence (Phase 3)
+    "MiniDumpParser",
+    "EventLogCollector",
+    "EtwController"
 ]

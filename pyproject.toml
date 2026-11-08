@@ -33,5 +33,6 @@ packages = [
     "windows_intelligence",
     "windows_intelligence.command_engine",
     "windows_intelligence.registry_intelligence",
-    "windows_intelligence.system_introspection"
+    "windows_intelligence.system_introspection",
+    "windows_intelligence.runtime_telemetry"
 ]

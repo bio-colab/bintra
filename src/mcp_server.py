@@ -404,6 +404,36 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
+        "name": "rea_dmp_inspect",
+        "description": "Multi-stream MiniDump (.dmp) inspection and crash telemetry extraction: parses ExceptionRecord, SystemInfo, Loaded Modules, ThreadList, and performs Access Violation parameter analysis (NULL-pointer dereference detection, DEP violation).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "dmp_path": {
+                    "type": "string",
+                    "description": "Path to .dmp file (if omitted, audits recent crash dumps in standard dump locations)"
+                },
+                "app_name_filter": {
+                    "type": "string",
+                    "description": "Optional filter for target application name when scanning dumps"
+                }
+            }
+        }
+    },
+    {
+        "name": "rea_etw_audit",
+        "description": "Inspects host Event Tracing for Windows (ETW) trace sessions and critical kernel/graphics diagnostic providers (Kernel-Process, Direct3D11, DXGI, DxgKrnl, Kernel-File).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_name": {
+                    "type": "string",
+                    "description": "Optional trace session name to query specifically (e.g. 'Eventlog-Application', 'DiagLog')"
+                }
+            }
+        }
+    },
+    {
         "name": "rea_wsp_audit",
         "description": "Audits neural weights embedded inside Windows executables without execution: computes Roy-Vetterli spectral effective rank, cross-layer induction composition, amenability diagnostic, and scans for dormant backdoor/trojan neurons (>4.5σ).",
         "inputSchema": {
@@ -692,6 +722,21 @@ class ReaMcpServer:
                     "services": all_svcs
                 }
             return ServiceManagerInspector.audit_services()
+
+        elif name == "rea_dmp_inspect":
+            from windows_intelligence import MiniDumpParser
+            dmp_p = args.get("dmp_path")
+            app_flt = args.get("app_name_filter")
+            if dmp_p:
+                return MiniDumpParser.parse_minidump(dmp_p)
+            return MiniDumpParser.audit_dumps(app_name_filter=app_flt)
+
+        elif name == "rea_etw_audit":
+            from windows_intelligence import EtwController
+            sname = args.get("session_name")
+            if sname:
+                return EtwController.query_trace_session(sname)
+            return EtwController.audit_telemetry_system()
 
         elif name == "rea_wsp_audit":
             path = args["model_path"]

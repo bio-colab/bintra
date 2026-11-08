@@ -627,11 +627,23 @@ def main():
                 if alt in sys.argv and "--source" not in sys.argv:
                     idx = sys.argv.index(alt)
                     sys.argv[idx] = "--source"
-            # If no --output, default to in-place patch
+            # Guard: in-place source modification is strictly forbidden
             if "--source" in sys.argv and "--output" not in sys.argv:
                 s_idx = sys.argv.index("--source")
                 if s_idx + 1 < len(sys.argv):
-                    sys.argv.extend(["--output", sys.argv[s_idx + 1]])
+                    src_file = sys.argv[s_idx + 1]
+                    from security import ExecutionGuard
+                    scope = ExecutionGuard.get_current_scope()
+                    safe_out = os.path.join(scope.workspace_dir, "patched_" + os.path.basename(src_file))
+                    sys.argv.extend(["--output", safe_out])
+            elif "--source" in sys.argv and "--output" in sys.argv:
+                s_idx = sys.argv.index("--source")
+                o_idx = sys.argv.index("--output")
+                if s_idx + 1 < len(sys.argv) and o_idx + 1 < len(sys.argv):
+                    from security import PathIdentity
+                    if PathIdentity.is_same_file(sys.argv[s_idx + 1], sys.argv[o_idx + 1]):
+                        print("Error: TARGET_WRITE_FORBIDDEN: Direct in-place modification of target binaries is strictly forbidden by REA Safety Policy. Specify a distinct --output file in the workspace.", file=sys.stderr)
+                        sys.exit(1)
             # Normalize --patch to --patch-hex
             if "--patch" in sys.argv and "--patch-hex" not in sys.argv:
                 p_idx = sys.argv.index("--patch")

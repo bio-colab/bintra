@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 REA-Neural Policy Engine.
-Evaluates system access requests against the 5 Inviolable Rules and Default Deny matrix.
+Evaluates system access requests against the 5 Inviolable Rules,
+CapabilityRegistry grants, and Default Deny matrix.
 """
 
 from dataclasses import dataclass, field
@@ -49,12 +50,13 @@ class PolicyEngine:
         cap = request.requested_capability
         mode = request.access_mode.upper()
         target = request.target
+        comp = request.component
 
         # Rule 1: Prohibited hazards are unconditionally denied
         if cap in PROHIBITED_HAZARDS:
             return AccessDecision(
                 verdict="DENY",
-                reason=f"Hazardous capability '{cap.value}' is unconditionally forbidden by REA Safety Policy.",
+                reason=f"Hazardous capability '{cap.value if hasattr(cap, 'value') else cap}' is unconditionally forbidden by REA Safety Policy.",
                 capability=cap
             )
 
@@ -73,8 +75,30 @@ class PolicyEngine:
                     capability=cap
                 )
 
-        # Rule 3: Target binary and target directory write protection
+        # Rule 3: Component Capability Verification (No Ambient Authority)
+        if not CapabilityRegistry.has_capability(comp, cap):
+            return AccessDecision(
+                verdict="DENY",
+                reason=f"CAPABILITY_NOT_GRANTED: Component '{comp}' lacks declared capability '{cap.value if hasattr(cap, 'value') else cap}'.",
+                capability=cap
+            )
+
+        # Rule 4: Target binary and target directory write protection
         if mode in ("WRITE", "DELETE", "MODIFY"):
+            # Enforce capability matching
+            if mode in ("WRITE", "MODIFY") and cap != Capability.WORKSPACE_WRITE:
+                return AccessDecision(
+                    verdict="DENY",
+                    reason=f"CAPABILITY_MISMATCH: Mode '{mode}' requires Capability.WORKSPACE_WRITE, got '{cap.value if hasattr(cap, 'value') else cap}'.",
+                    capability=cap
+                )
+            if mode == "DELETE" and cap != Capability.WORKSPACE_TEMP_CLEAN:
+                return AccessDecision(
+                    verdict="DENY",
+                    reason=f"CAPABILITY_MISMATCH: Mode 'DELETE' requires Capability.WORKSPACE_TEMP_CLEAN, got '{cap.value if hasattr(cap, 'value') else cap}'.",
+                    capability=cap
+                )
+
             if scope and scope.is_target_file(target):
                 return AccessDecision(
                     verdict="DENY",
@@ -89,7 +113,7 @@ class PolicyEngine:
                     capability=cap
                 )
 
-            # Rule 4: Workspace confinement for all writes
+            # Rule 5: Workspace confinement for all writes
             if scope:
                 if not scope.is_inside_workspace(target):
                     return AccessDecision(
@@ -98,7 +122,7 @@ class PolicyEngine:
                         capability=cap
                     )
 
-            # Rule 5: Deletion restricted to REA session files within workspace
+            # Rule 6: Deletion restricted to REA session files within workspace
             if mode == "DELETE" and scope:
                 if not scope.is_session_file(target):
                     return AccessDecision(
@@ -115,7 +139,7 @@ class PolicyEngine:
                 side_effects=["workspace_mutation"]
             )
 
-        # Rule 6: Read-only operations within authorized capabilities
+        # Rule 7: Read-only operations within authorized capabilities
         if mode in ("READ", "QUERY"):
             if cap in (
                 Capability.FILE_READ, Capability.FILE_HASH, Capability.REGISTRY_READ,
@@ -124,12 +148,12 @@ class PolicyEngine:
             ):
                 return AccessDecision(
                     verdict="ALLOW",
-                    reason=f"Authorized read-only query for {cap.value}.",
+                    reason=f"Authorized read-only query for {cap.value if hasattr(cap, 'value') else cap}.",
                     capability=cap,
                     side_effects=[]
                 )
 
-        # Rule 7: Pre-approved catalog subprocess execution
+        # Rule 8: Pre-approved catalog subprocess execution
         if mode == "EXECUTE":
             if cap == Capability.SUBPROCESS_CATALOG_EXEC and request.metadata.get("is_catalog_command"):
                 return AccessDecision(

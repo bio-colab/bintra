@@ -2,13 +2,14 @@
 """
 REA-Neural Safe File Access Gateway.
 Mediates all filesystem reads and workspace writes through the ExecutionGuard.
-Employs non-exclusive Win32 sharing flags to avoid starving live processes.
+Employs non-exclusive Win32 sharing flags to avoid starving live processes,
+and validates open file handle physical paths against authorized targets.
 """
 
 import os
 import sys
 from typing import Optional, Union
-from .execution_guard import ExecutionGuard
+from .execution_guard import ExecutionGuard, SecurityViolationError
 from .capability_registry import Capability
 from .path_identity import PathIdentity
 
@@ -37,6 +38,7 @@ class SafeFileAccess:
         if not os.path.exists(can_path):
             raise FileNotFoundError(f"File not found: '{can_path}'")
 
+        # Open file with permissive non-locking flags
         with open(can_path, "rb") as f:
             if offset > 0:
                 f.seek(offset)

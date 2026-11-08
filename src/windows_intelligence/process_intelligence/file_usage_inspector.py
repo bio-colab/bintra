@@ -177,11 +177,13 @@ class FileUsageInspector:
         finally:
             rm.RmEndSession(session_handle)
 
-        is_locked = len(locking_processes) > 0
+        is_in_use = len(locking_processes) > 0
         return {
             "status": "success",
             "file_path": norm_path,
-            "is_locked": is_locked,
+            "resource_state": "RESOURCE_IN_USE" if is_in_use else "RESOURCE_AVAILABLE",
+            "is_locked": is_in_use,
+            "handle_exclusivity": "POTENTIALLY_SHARED_OR_LOCKED",
             "locking_processes_count": len(locking_processes),
             "locking_processes": locking_processes,
             "audit_method": "WINDOWS_RESTART_MANAGER_RM_GET_LIST",

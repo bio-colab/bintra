@@ -57,7 +57,10 @@ class DriverPackageInventory:
                 "driver_date": d_date,
                 "driver_version": d_ver,
                 "signer_name": signer,
-                "is_whql_signed": bool(signer and "microsoft" in signer.lower())
+                "is_whql_signed": bool(signer and "microsoft" in signer.lower()),
+                "declared_signer_name": signer,
+                "declared_microsoft_signer": bool(signer and "microsoft" in signer.lower()),
+                "is_cryptographically_verified_whql": False
             })
 
         return packages

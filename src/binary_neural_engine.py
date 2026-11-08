@@ -1270,6 +1270,17 @@ class SurgicalBinaryPatcher:
     ) -> Dict[str, Any]:
         src_abs = os.path.abspath(source_path)
         out_abs = os.path.abspath(output_path)
+
+        try:
+            from security import ExecutionGuard, PathIdentity, TargetMutationError
+            scope = ExecutionGuard.get_current_scope()
+            if scope and (scope.is_target_file(out_abs) or scope.is_target_directory(out_abs)):
+                raise TargetMutationError(
+                    f"TARGET_WRITE_FORBIDDEN: Output path '{out_abs}' is a protected target path. Direct mutation is forbidden by Safety Policy."
+                )
+        except ImportError:
+            pass
+
         patch_bytes = bytes.fromhex(patch_hex.replace(" ", ""))
         with open(src_abs, "rb") as f:
             data = bytearray(f.read())

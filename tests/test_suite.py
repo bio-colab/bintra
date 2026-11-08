@@ -2429,5 +2429,217 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             if os.path.exists(target_dir):
                 os.rmdir(target_dir)
 
+    def test_safety_kernel_cmd_executor_fails_closed_on_denial(self):
+        """Verifies that CommandExecutor fails closed with DENY decision when Safety Kernel denies execution."""
+        from windows_intelligence.command_engine import CommandExecutor
+        from security import CapabilityRegistry, Capability, SecurityViolationError
+
+        # 1. Unregistered command fails
+        res_unreg = CommandExecutor.execute("unknown_malicious_command")
+        self.assertEqual(res_unreg["status"], "error")
+        self.assertIn("not registered", res_unreg["error"])
+
+        # 2. Unwhitelisted flag fails
+        res_flag = CommandExecutor.execute("os_ver", extra_flags=("/evil_flag_99",))
+        self.assertEqual(res_flag["status"], "error")
+        self.assertIn("not permitted", res_flag["error"])
+
+        # 3. Safety Kernel fail-closed mediation test
+        orig_caps = set(CapabilityRegistry.get_capabilities("cmd_executor"))
+        try:
+            CapabilityRegistry.COMPONENT_CAPABILITIES["cmd_executor"] = set()
+            res_denied = CommandExecutor.execute("os_ver")
+            self.assertEqual(res_denied["status"], "error")
+            self.assertEqual(res_denied.get("decision"), "DENY")
+            self.assertIn("Execution blocked by Safety Kernel", res_denied["error"])
+        finally:
+            CapabilityRegistry.COMPONENT_CAPABILITIES["cmd_executor"] = orig_caps
+
+    def test_safety_kernel_mcp_patch_binary_blocks_in_place_overwrite(self):
+        """Verifies that MCP rea_patch_binary strictly forbids in-place modification of target binaries."""
+        from mcp_server import ReaMcpServer
+        from security import TargetMutationError, ExecutionGuard
+
+        pe_bytes = _create_synthetic_pe64()
+        target_dir = tempfile.mkdtemp(prefix="rea_target_")
+        target_path = os.path.join(target_dir, "victim_binary.exe")
+        with open(target_path, "wb") as f:
+            f.write(pe_bytes)
+
+        server = ReaMcpServer()
+        try:
+            # 1. dispatch_tool: Omitting output_path raises TargetMutationError
+            with self.assertRaises(TargetMutationError):
+                server.dispatch_tool("rea_patch_binary", {
+                    "file_path": target_path,
+                    "offset": 0,
+                    "patch_hex": "90"
+                })
+
+            # 2. dispatch_tool: Same output_path as target_path raises TargetMutationError
+            with self.assertRaises(TargetMutationError):
+                server.dispatch_tool("rea_patch_binary", {
+                    "file_path": target_path,
+                    "output_path": target_path,
+                    "offset": 0,
+                    "patch_hex": "90"
+                })
+
+            # 3. handle_tools_call: Same output_path returns isError=True with TARGET_WRITE_FORBIDDEN
+            call_res = server.handle_tools_call({
+                "name": "rea_patch_binary",
+                "arguments": {
+                    "file_path": target_path,
+                    "output_path": target_path,
+                    "offset": 0,
+                    "patch_hex": "90"
+                }
+            })
+            self.assertTrue(call_res["isError"])
+            err_json = json.loads(call_res["content"][0]["text"])
+            self.assertIn("TARGET_WRITE_FORBIDDEN", err_json["error"])
+
+            # 4. Engine level: when target_path is registered in active scope, SurgicalBinaryPatcher.patch_file blocks mutation
+            from binary_neural_engine import SurgicalBinaryPatcher
+            with ExecutionGuard.scoped_session(target_binary_path=target_path):
+                with self.assertRaises(TargetMutationError):
+                    SurgicalBinaryPatcher.patch_file(target_path, target_path, 0, "90")
+
+            # 5. Legitimate out-of-place patch to workspace succeeds and preserves original target intact
+            workspace_dir = tempfile.mkdtemp(prefix="rea_work_")
+            out_path = os.path.join(workspace_dir, "patched_target.exe")
+            try:
+                with ExecutionGuard.scoped_session(target_binary_path=target_path, workspace_dir=workspace_dir):
+                    patch_res = server.dispatch_tool("rea_patch_binary", {
+                        "file_path": target_path,
+                        "output_path": out_path,
+                        "offset": 0,
+                        "patch_hex": "4D5A",
+                        "force": True
+                    })
+                    self.assertEqual(patch_res["output_file"], out_path)
+                    self.assertTrue(os.path.exists(out_path))
+                    # Original target is completely untouched
+                    with open(target_path, "rb") as f:
+                        self.assertEqual(f.read(), pe_bytes)
+            finally:
+                if os.path.exists(out_path):
+                    os.remove(out_path)
+                if os.path.exists(workspace_dir):
+                    os.rmdir(workspace_dir)
+        finally:
+            if os.path.exists(target_path):
+                os.remove(target_path)
+            if os.path.exists(target_dir):
+                os.rmdir(target_dir)
+
+    def test_safety_kernel_capability_registry_enforcement_in_policy_engine(self):
+        """Verifies that PolicyEngine enforces CapabilityRegistry grants and mode matching."""
+        from security.policy_engine import PolicyEngine, AccessRequest
+        from security import CapabilityRegistry, Capability, TargetScope
+
+        scope = TargetScope(target_binary_path="C:\\dummy\\target.exe")
+
+        # 1. Component with no granted capability is DENIED
+        req1 = AccessRequest(
+            component="unauthorized_subsystem",
+            operation="read_file",
+            target="C:\\dummy\\target.exe",
+            requested_capability=Capability.FILE_READ,
+            access_mode="READ"
+        )
+        dec1 = PolicyEngine.evaluate(req1, scope=scope)
+        self.assertEqual(dec1.verdict, "DENY")
+        self.assertIn("CAPABILITY_NOT_GRANTED", dec1.reason)
+
+        # 2. Mode mismatch: Requesting WRITE mode with FILE_READ capability is DENIED
+        req2 = AccessRequest(
+            component="safe_file_access",
+            operation="modify_file",
+            target="C:\\dummy\\target.exe",
+            requested_capability=Capability.FILE_READ,
+            access_mode="WRITE"
+        )
+        dec2 = PolicyEngine.evaluate(req2, scope=scope)
+        self.assertEqual(dec2.verdict, "DENY")
+        self.assertIn("CAPABILITY_MISMATCH", dec2.reason)
+
+        # 3. Mode mismatch: Requesting DELETE mode with FILE_READ capability is DENIED
+        req3 = AccessRequest(
+            component="safe_file_access",
+            operation="delete_file",
+            target="C:\\dummy\\target.exe",
+            requested_capability=Capability.FILE_READ,
+            access_mode="DELETE"
+        )
+        dec3 = PolicyEngine.evaluate(req3, scope=scope)
+        self.assertEqual(dec3.verdict, "DENY")
+        self.assertIn("CAPABILITY_MISMATCH", dec3.reason)
+
+        # 4. Legitimate granted capability with valid mode is ALLOWED
+        req4 = AccessRequest(
+            component="safe_file_access",
+            operation="read_target_binary",
+            target="C:\\dummy\\target.exe",
+            requested_capability=Capability.FILE_READ,
+            access_mode="READ"
+        )
+        dec4 = PolicyEngine.evaluate(req4, scope=scope)
+        self.assertEqual(dec4.verdict, "ALLOW")
+
+    def test_safety_kernel_audit_logger_hash_chain_tamper_verification(self):
+        """Verifies that AuditLogger creates a cryptographic SHA-256 hash chain and detects tampering."""
+        from security import AuditLogger
+
+        AuditLogger.clear()
+        AuditLogger.log_decision(
+            component="test_comp_1",
+            operation="op_read",
+            target="C:\\safe\\file1.txt",
+            decision="ALLOW",
+            reason="valid_read",
+            requested_capability="cap.read"
+        )
+        AuditLogger.log_decision(
+            component="test_comp_2",
+            operation="op_exec",
+            target="whoami",
+            decision="ALLOW",
+            reason="catalog_command",
+            requested_capability="cap.exec"
+        )
+        AuditLogger.log_decision(
+            component="test_comp_3",
+            operation="op_write",
+            target="C:\\target.exe",
+            decision="DENY",
+            reason="TARGET_WRITE_FORBIDDEN",
+            requested_capability="cap.write"
+        )
+
+        # Hash chain must be completely valid initially
+        chain_status = AuditLogger.verify_audit_chain()
+        self.assertTrue(chain_status["is_valid"])
+        self.assertEqual(chain_status["records_verified"], 3)
+
+        trail = AuditLogger.get_audit_trail()
+        self.assertEqual(len(trail), 3)
+        self.assertEqual(trail[0]["sequence"], 0)
+        self.assertEqual(trail[1]["sequence"], 1)
+        self.assertEqual(trail[2]["sequence"], 2)
+        # Sequence 0 has zero initial prev_hash
+        self.assertEqual(trail[0]["prev_hash"], "0" * 64)
+        # Sequence 1 prev_hash matches sequence 0 record_hash
+        self.assertEqual(trail[1]["prev_hash"], trail[0]["record_hash"])
+        # Sequence 2 prev_hash matches sequence 1 record_hash
+        self.assertEqual(trail[2]["prev_hash"], trail[1]["record_hash"])
+
+        # Tampering with record in-memory breaks cryptographic integrity
+        AuditLogger._journal[1]["target"] = "tampered_arbitrary_cmd"
+        tamper_status = AuditLogger.verify_audit_chain()
+        self.assertFalse(tamper_status["is_valid"])
+        self.assertIn("Tamper detected", tamper_status["error"])
+        self.assertEqual(tamper_status["failed_sequence"], 1)
+
 if __name__ == "__main__":
     unittest.main()

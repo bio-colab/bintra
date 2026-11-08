@@ -177,12 +177,17 @@ class ProcessInventory:
             exe_n = p.get("executable_name", "").lower()
 
             matched = False
+            confidence = "UNVERIFIED"
             if img_p and os.path.normpath(img_p).lower() == norm_target:
                 matched = True
+                confidence = "EXACT_PATH_MATCH"
             elif exe_n == target_basename:
                 matched = True
+                confidence = "BASENAME_FALLBACK_UNVERIFIED_PATH"
 
             if matched:
-                matches.append(p)
+                item = dict(p)
+                item["match_confidence"] = confidence
+                matches.append(item)
 
         return matches

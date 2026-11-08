@@ -23,12 +23,10 @@ class TargetScope:
         self._target_hashes: Dict[str, str] = {}
         self._session_created_files: Set[str] = set()
 
-        # Configure workspace directory
         if workspace_dir:
             self._workspace_dir = PathIdentity.canonicalize(workspace_dir)
         else:
-            # Default to a designated 'reports' or 'artifacts' subdirectory in cwd
-            default_ws = os.path.join(os.getcwd(), ".rea_workspace")
+            default_ws = os.path.join(os.path.expanduser("~"), ".rea_neural", "workspace")
             os.makedirs(default_ws, exist_ok=True)
             self._workspace_dir = PathIdentity.canonicalize(default_ws)
 
@@ -51,8 +49,8 @@ class TargetScope:
         target_dir = PathIdentity.canonicalize(os.path.dirname(can_path))
         self._target_dirs.add(target_dir)
 
-        # Disallow workspace from being the exact target directory
-        if PathIdentity.is_same_file(self._workspace_dir, target_dir):
+        # Disallow workspace from being identical to or contained inside the target directory
+        if PathIdentity.is_same_file(self._workspace_dir, target_dir) or PathIdentity.is_within_directory(self._workspace_dir, target_dir):
             safe_ws = os.path.join(os.path.expanduser("~"), ".rea_neural", "workspace")
             os.makedirs(safe_ws, exist_ok=True)
             self._workspace_dir = PathIdentity.canonicalize(safe_ws)
@@ -114,13 +112,10 @@ class TargetScope:
 
     def is_target_directory(self, dir_path: str) -> bool:
         """
-        Checks if a path is located inside the directory of a target binary,
-        excluding designated workspace subdirectories.
+        Checks if a path is or is inside any target binary directory.
         """
         try:
             can = PathIdentity.canonicalize(dir_path)
-            if self.is_inside_workspace(can):
-                return False
             return any(
                 PathIdentity.is_same_file(can, td) or PathIdentity.is_within_directory(can, td)
                 for td in self._target_dirs

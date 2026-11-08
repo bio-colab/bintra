@@ -20,6 +20,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=1.24.0",
+    "capstone>=5.0.0",
 ]
 
 [project.scripts]
@@ -32,8 +33,11 @@ py-modules = ["cli", "binary_neural_engine", "rea_neural_engine", "sensory_corte
 packages = [
     "windows_intelligence",
     "windows_intelligence.command_engine",
+    "windows_intelligence.device_intelligence",
+    "windows_intelligence.process_intelligence",
     "windows_intelligence.registry_intelligence",
     "windows_intelligence.system_introspection",
     "windows_intelligence.runtime_telemetry",
-    "windows_intelligence.evidence_engine"
+    "windows_intelligence.evidence_engine",
+    "security"
 ]

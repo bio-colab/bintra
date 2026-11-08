@@ -57,8 +57,18 @@ class CapabilityRegistry:
     Prevents ambient privilege inheritance.
     """
 
-    # Default capability profiles for REA-Neural components
     COMPONENT_CAPABILITIES: Dict[str, Set[Capability]] = {
+        # Safe Gateways
+        "safe_file_access": {
+            Capability.FILE_READ,
+            Capability.WORKSPACE_WRITE,
+            Capability.WORKSPACE_TEMP_CLEAN
+        },
+        "safe_registry_access": {Capability.REGISTRY_READ},
+        "safe_process_access": {Capability.PROCESS_QUERY},
+        "safe_subprocess": {Capability.SUBPROCESS_CATALOG_EXEC},
+
+        # System Introspection Providers
         "binary_inspector": {Capability.FILE_READ, Capability.FILE_HASH},
         "deobfuscator": {Capability.FILE_READ},
         "function_matcher": {Capability.FILE_READ},
@@ -70,8 +80,39 @@ class CapabilityRegistry:
         "event_collector": {Capability.EVENT_LOG_READ},
         "minidump_parser": {Capability.MINIDUMP_READ, Capability.FILE_READ},
         "command_executor": {Capability.SUBPROCESS_CATALOG_EXEC},
+        "cmd_executor": {Capability.SUBPROCESS_CATALOG_EXEC},
+
+        # Intelligence Engines
         "evidence_engine": {Capability.FILE_READ, Capability.WORKSPACE_WRITE},
         "dossier_generator": {Capability.WORKSPACE_WRITE},
+        "causality_synthesizer": {Capability.FILE_READ, Capability.WORKSPACE_WRITE},
+        "device_intelligence": {Capability.DEVICE_QUERY, Capability.DRIVER_QUERY},
+        "process_intelligence": {Capability.PROCESS_QUERY, Capability.FILE_READ},
+
+        # High-Level Invocation Interfaces
+        "mcp_server": {
+            Capability.FILE_READ, Capability.FILE_HASH, Capability.WORKSPACE_WRITE,
+            Capability.REGISTRY_READ, Capability.PROCESS_QUERY, Capability.SERVICE_QUERY,
+            Capability.DEVICE_QUERY, Capability.DRIVER_QUERY, Capability.EVENT_LOG_READ,
+            Capability.MINIDUMP_READ, Capability.SUBPROCESS_CATALOG_EXEC
+        },
+        "cli": {
+            Capability.FILE_READ, Capability.FILE_HASH, Capability.WORKSPACE_WRITE,
+            Capability.REGISTRY_READ, Capability.PROCESS_QUERY, Capability.SERVICE_QUERY,
+            Capability.DEVICE_QUERY, Capability.DRIVER_QUERY, Capability.EVENT_LOG_READ,
+            Capability.MINIDUMP_READ, Capability.SUBPROCESS_CATALOG_EXEC
+        },
+
+        # Test Fixtures & Internal Testing
+        "test_suite": {
+            Capability.FILE_READ, Capability.FILE_HASH, Capability.WORKSPACE_WRITE,
+            Capability.WORKSPACE_TEMP_CLEAN, Capability.REGISTRY_READ, Capability.PROCESS_QUERY,
+            Capability.SUBPROCESS_CATALOG_EXEC
+        },
+        "sec_test": {
+            Capability.FILE_READ, Capability.WORKSPACE_WRITE, Capability.WORKSPACE_TEMP_CLEAN,
+            Capability.SUBPROCESS_CATALOG_EXEC
+        }
     }
 
     @classmethod
@@ -83,3 +124,10 @@ class CapabilityRegistry:
     def has_capability(cls, component_name: str, capability: Capability) -> bool:
         """Verifies if a component explicitly possesses a declared capability."""
         return capability in cls.COMPONENT_CAPABILITIES.get(component_name, set())
+
+    @classmethod
+    def register_component_capability(cls, component_name: str, capability: Capability) -> None:
+        """Registers a capability grant for a component."""
+        if component_name not in cls.COMPONENT_CAPABILITIES:
+            cls.COMPONENT_CAPABILITIES[component_name] = set()
+        cls.COMPONENT_CAPABILITIES[component_name].add(capability)

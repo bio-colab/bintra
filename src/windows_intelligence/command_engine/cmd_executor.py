@@ -98,9 +98,9 @@ class CommandExecutor:
         # 4. Construct Command Vector (No shell=True)
         cmd_vector = [binary_path, *spec.fixed_arguments, *validated_extra]
 
-        # 5. Mediate via Safety Kernel & Execute with Defensive Timeout
+        # 5. Mandatory Mediation via Safety Kernel (Fail-Closed)
+        from security import ExecutionGuard, Capability, SecurityViolationError
         try:
-            from security import ExecutionGuard, Capability
             ExecutionGuard.request_access(
                 component="cmd_executor",
                 operation="execute_command",
@@ -109,8 +109,13 @@ class CommandExecutor:
                 access_mode="EXECUTE",
                 metadata={"command_id": command_id, "shell": False, "is_catalog_command": True}
             )
-        except Exception:
-            pass
+        except SecurityViolationError as sec_exc:
+            return {
+                "status": "error",
+                "command_id": command_id,
+                "error": f"Execution blocked by Safety Kernel: {str(sec_exc)}",
+                "decision": "DENY"
+            }
 
         start_time = time.time()
         try:

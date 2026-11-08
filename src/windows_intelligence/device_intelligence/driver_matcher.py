@@ -106,6 +106,8 @@ class DriverMatcher:
                     "match_status": match_status,
                     "estimated_driver_rank": estimated_rank,
                     "rank_description": cls.RANK_DESCRIPTIONS.get(estimated_rank, "UNKNOWN_RANK"),
+                    "rank_basis": "HEURISTIC_ESTIMATION_NOT_NATIVE_SETUPAPI_RANK",
+                    "candidates_matching_rule": "MATCHED_BY_DEVICE_CLASS_AND_SERVICE",
                     "is_generic_fallback": is_generic_fallback,
                     "provider_type": provider_type,
                     "has_problem": has_prob,

@@ -152,12 +152,16 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                     "type": "string",
                     "description": "Hexadecimal byte sequence to write (e.g. '90 90 90')"
                 },
+                "output_path": {
+                    "type": "string",
+                    "description": "Required destination path in workspace. In-place source modification is strictly forbidden."
+                },
                 "force": {
                     "type": "boolean",
                     "description": "Force overwrite even if stack-altering opcodes or DEP violations are flagged"
                 }
             },
-            "required": ["file_path", "offset", "patch_hex"]
+            "required": ["file_path", "output_path", "offset", "patch_hex"]
         }
     },
     {
@@ -658,7 +662,22 @@ class ReaMcpServer:
 
         elif name == "rea_patch_binary":
             path = args["file_path"]
-            out_path = args.get("output_path", path)
+            out_path = args.get("output_path")
+            from security import PathIdentity, ExecutionGuard, Capability, TargetMutationError
+            if not out_path or PathIdentity.is_same_file(path, out_path):
+                raise TargetMutationError(
+                    "TARGET_WRITE_FORBIDDEN: 'output_path' is required and cannot overwrite the source target binary. Analysis tools must write patched copies to an isolated workspace destination."
+                )
+
+            # Enforce that output_path is within authorized workspace
+            ExecutionGuard.request_access(
+                component="mcp_server",
+                operation="patch_binary",
+                target=out_path,
+                capability=Capability.WORKSPACE_WRITE,
+                access_mode="WRITE"
+            )
+
             offset = int(args["offset"])
             patch_hex = args["patch_hex"]
             force = bool(args.get("force", False))

@@ -250,6 +250,17 @@ class DiagnosticEvidenceCorrelator:
             "binary_mapping": binary_mapping
         }
 
+        from .evidence_engine import CausalitySynthesizer
+        try:
+            ev_graph = CausalitySynthesizer.build_evidence_graph(norm_path, crash_record=crash_record, ghidra_export=ghidra_export)
+            dossier["evidence_graph"] = ev_graph.to_dict()
+            dossier["mermaid_diagram"] = ev_graph.to_mermaid()
+            target_node_id = f"TARGET:{os.path.basename(norm_path)}"
+            if "AV_ROOT_CAUSE" in ev_graph.nodes and target_node_id in ev_graph.nodes:
+                dossier["causal_chain"] = ev_graph.find_causal_path(target_node_id, "AV_ROOT_CAUSE")
+        except Exception:
+            pass
+
         return dossier
 
     @classmethod
@@ -332,5 +343,15 @@ class DiagnosticEvidenceCorrelator:
             f"- **Architecture:** {os_env.get('architecture', {}).get('native_architecture', 'Unknown')}",
             f"- **Elevation:** Admin={dossier.get('security_and_privileges', {}).get('is_elevated_admin')}"
         ])
+
+        mermaid = dossier.get("mermaid_diagram")
+        if mermaid:
+            lines.extend([
+                "",
+                "## 7. Evidence Causality Graph",
+                "```mermaid",
+                mermaid,
+                "```"
+            ])
 
         return "\n".join(lines)

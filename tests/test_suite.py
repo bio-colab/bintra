@@ -768,13 +768,14 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
         tools_res = server.handle_tools_list({})
         self.assertIn("tools", tools_res)
-        self.assertEqual(len(tools_res["tools"]), 24)
+        self.assertEqual(len(tools_res["tools"]), 25)
         tool_names = [t["name"] for t in tools_res["tools"]]
         self.assertIn("rea_hardware_audit", tool_names)
         self.assertIn("rea_driver_audit", tool_names)
         self.assertIn("rea_service_audit", tool_names)
         self.assertIn("rea_dmp_inspect", tool_names)
         self.assertIn("rea_etw_audit", tool_names)
+        self.assertIn("rea_evidence_graph", tool_names)
         self.assertIn("rea_dump_bytes", tool_names)
         self.assertIn("rea_inspect_binary", tool_names)
         self.assertIn("rea_sensory_audit", tool_names)
@@ -1655,6 +1656,95 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertEqual(etw_res["status"], "success")
         self.assertIn("registered_providers_count", etw_res)
         self.assertIn("active_sessions", etw_res)
+
+    def test_evidence_graph_data_structures(self):
+        """Verifies EvidenceGraph nodes, edges, BFS causal path, and Mermaid rendering."""
+        from windows_intelligence.evidence_engine import EvidenceGraph
+
+        g = EvidenceGraph()
+        g.add_node("TARGET:app.exe", "BINARY_TARGET", "app.exe")
+        g.add_node("SEC:.text", "PE_SECTION", ".text")
+        g.add_node("CRASH", "CRASH_TELEMETRY", "STATUS_ACCESS_VIOLATION")
+        g.add_node("ROOT", "ACCESS_VIOLATION_ROOT", "WRITE @ 0x0")
+
+        g.add_edge("TARGET:app.exe", "SEC:.text", "HAS_SECTION")
+        g.add_edge("TARGET:app.exe", "CRASH", "REPORTED_CRASH")
+        g.add_edge("CRASH", "ROOT", "CAUSED_BY_VIOLATION")
+
+        self.assertEqual(len(g.nodes), 4)
+        self.assertEqual(len(g.edges), 3)
+
+        # Causal path BFS
+        path = g.find_causal_path("TARGET:app.exe", "ROOT")
+        self.assertEqual(path, ["TARGET:app.exe", "CRASH", "ROOT"])
+
+        # Dict and Mermaid serialization
+        g_dict = g.to_dict()
+        self.assertEqual(g_dict["total_nodes"], 4)
+        self.assertEqual(g_dict["total_edges"], 3)
+
+        mermaid = g.to_mermaid()
+        self.assertTrue(mermaid.startswith("flowchart TD"))
+        self.assertIn("CRASH: STATUS_ACCESS_VIOLATION", mermaid)
+        self.assertIn("ROOT: WRITE @ 0x0", mermaid)
+
+    def test_causality_synthesizer_end_to_end(self):
+        """Verifies CausalitySynthesizer builds complete graph and synthesizes dossier."""
+        from windows_intelligence.evidence_engine import CausalitySynthesizer
+
+        cmd_path = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "System32", "cmd.exe")
+        crash_rec = {
+            "source": "MINIDUMP",
+            "exception_code": "0xc0000005",
+            "exception_name": "STATUS_ACCESS_VIOLATION",
+            "fault_module": "cmd.exe",
+            "fault_offset": "0x1050",
+            "access_violation_details": {
+                "operation": "WRITE",
+                "target_virtual_address": "0x0",
+                "is_null_pointer_dereference": True,
+                "probable_cause": "NULL Pointer Dereference"
+            }
+        }
+        ghidra_export = {
+            "functions": [
+                {
+                    "name": "MainEntry",
+                    "entry_point": "0x140001000",
+                    "size": 100,
+                    "basic_blocks": [{"start": "0x140001000", "end": "0x140001064"}]
+                }
+            ]
+        }
+
+        dossier = CausalitySynthesizer.synthesize_dossier(
+            cmd_path,
+            crash_record=crash_rec,
+            ghidra_export=ghidra_export
+        )
+
+        self.assertEqual(dossier["status"], "success")
+        self.assertIn("INTERNAL_BINARY_CRASH", dossier["verdict"])
+        self.assertEqual(dossier["severity"], "CRITICAL")
+        self.assertGreater(len(dossier["root_cause_summary"]), 0)
+        self.assertIn("causal_chain", dossier)
+        self.assertEqual(dossier["causal_chain"], ["TARGET:cmd.exe", "CRASH_TELEMETRY", "AV_ROOT_CAUSE"])
+        self.assertIn("evidence_graph", dossier)
+        self.assertGreater(dossier["evidence_graph"]["total_nodes"], 10)
+        self.assertTrue(dossier["mermaid_diagram"].startswith("flowchart TD"))
+
+    def test_mcp_server_evidence_graph_dispatch(self):
+        """Verifies MCP server protocol dispatch for rea_evidence_graph."""
+        from mcp_server import ReaMcpServer
+        server = ReaMcpServer()
+
+        cmd_path = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "System32", "cmd.exe")
+        res = server.dispatch_tool("rea_evidence_graph", {"binary_path": cmd_path})
+        self.assertEqual(res["status"], "success")
+        self.assertGreater(res["total_nodes"], 10)
+        self.assertGreater(res["total_edges"], 10)
+        self.assertIn("graph", res)
+        self.assertIn("mermaid_diagram", res)
 
 
 if __name__ == "__main__":

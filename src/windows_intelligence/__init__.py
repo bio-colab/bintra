@@ -47,6 +47,14 @@ from .runtime_telemetry import (
     EtwController
 )
 
+# Evidence Graph & Causality Engine Submodule (Phase 4)
+from .evidence_engine import (
+    EvidenceGraph,
+    EvidenceNode,
+    EvidenceEdge,
+    CausalitySynthesizer
+)
+
 __all__ = [
     # Core Diagnostics
     "WindowsOSProfiler",
@@ -75,5 +83,10 @@ __all__ = [
     # Runtime Telemetry & Crash Intelligence (Phase 3)
     "MiniDumpParser",
     "EventLogCollector",
-    "EtwController"
+    "EtwController",
+    # Evidence Graph & Causality (Phase 4)
+    "EvidenceGraph",
+    "EvidenceNode",
+    "EvidenceEdge",
+    "CausalitySynthesizer"
 ]

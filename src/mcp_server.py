@@ -434,6 +434,28 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
+        "name": "rea_evidence_graph",
+        "description": "Generates a formal directed Evidence Graph G = (V, E) and Mermaid flowchart connecting target binary PE sections, imported DLLs, Ghidra AST functions/blocks, host OS build, PnP hardware devices, kernel drivers, and empirical crash telemetry.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "binary_path": {
+                    "type": "string",
+                    "description": "Path to target PE executable on disk"
+                },
+                "crash_dmp_path": {
+                    "type": "string",
+                    "description": "Optional path to MiniDump (.dmp) file"
+                },
+                "ghidra_export": {
+                    "type": "object",
+                    "description": "Optional exported Ghidra JSON payload with functions and basic blocks"
+                }
+            },
+            "required": ["binary_path"]
+        }
+    },
+    {
         "name": "rea_wsp_audit",
         "description": "Audits neural weights embedded inside Windows executables without execution: computes Roy-Vetterli spectral effective rank, cross-layer induction composition, amenability diagnostic, and scans for dormant backdoor/trojan neurons (>4.5σ).",
         "inputSchema": {
@@ -737,6 +759,35 @@ class ReaMcpServer:
             if sname:
                 return EtwController.query_trace_session(sname)
             return EtwController.audit_telemetry_system()
+
+        elif name == "rea_evidence_graph":
+            from windows_intelligence import CausalitySynthesizer, MiniDumpParser
+            b = args.get("binary_path") or args.get("file_path")
+            dmp_p = args.get("crash_dmp_path")
+            g = args.get("ghidra_export")
+            c_rec = None
+            if dmp_p:
+                parsed_dmp = MiniDumpParser.parse_minidump(dmp_p)
+                if parsed_dmp.get("status") == "success":
+                    exc = parsed_dmp.get("exception_info") or {}
+                    c_rec = {
+                        "source": "MINIDUMP",
+                        "file_path": dmp_p,
+                        "exception_code": exc.get("exception_code"),
+                        "exception_name": exc.get("exception_name"),
+                        "fault_module": exc.get("fault_module"),
+                        "fault_offset": exc.get("fault_offset", "0x0"),
+                        "access_violation_details": exc.get("access_violation_details")
+                    }
+            graph = CausalitySynthesizer.build_evidence_graph(b, crash_record=c_rec, ghidra_export=g)
+            return {
+                "status": "success",
+                "binary_path": b,
+                "total_nodes": len(graph.nodes),
+                "total_edges": len(graph.edges),
+                "graph": graph.to_dict(),
+                "mermaid_diagram": graph.to_mermaid()
+            }
 
         elif name == "rea_wsp_audit":
             path = args["model_path"]

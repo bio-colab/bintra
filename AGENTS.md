@@ -21,7 +21,7 @@ Launch the native zero-dependency MCP server via stdio:
   }
 }
 ```
-Exposes 24 type-safe tools: core binary analysis (`rea_inspect_binary`, `rea_dump_bytes`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_scan_hybrid`, `rea_sensory_audit`), Ghidra P-Code integration (`rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`), Windows intelligence & diagnostics (`rea_windows_env_audit`, `rea_resolve_dependencies`, `rea_inspect_crash_reports`, `rea_correlate_failure_evidence`, `rea_win_catalog_cmd`, `rea_registry_audit`), Native hardware and system introspection (`rea_hardware_audit`, `rea_driver_audit`, `rea_service_audit`), Runtime telemetry & crash intelligence (`rea_dmp_inspect`, `rea_etw_audit`), and embedded weights security (`rea_wsp_audit`, `rea_patch_weights`).
+Exposes 25 type-safe tools: core binary analysis (`rea_inspect_binary`, `rea_dump_bytes`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_scan_hybrid`, `rea_sensory_audit`), Ghidra P-Code integration (`rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`), Windows intelligence & diagnostics (`rea_windows_env_audit`, `rea_resolve_dependencies`, `rea_inspect_crash_reports`, `rea_correlate_failure_evidence`, `rea_win_catalog_cmd`, `rea_registry_audit`), Native hardware and system introspection (`rea_hardware_audit`, `rea_driver_audit`, `rea_service_audit`), Runtime telemetry & crash intelligence (`rea_dmp_inspect`, `rea_etw_audit`), Evidence graph & causality synthesis (`rea_evidence_graph`), and embedded weights security (`rea_wsp_audit`, `rea_patch_weights`).
 
 ### Modality 2: Unified CLI (`src/cli.py`) -- Recommended for Terminal / Bash / PowerShell
 ```powershell
@@ -41,7 +41,8 @@ from windows_intelligence import (
     CommandCatalog, CommandExecutor, PowerShellExecutor,
     RegistryCatalog, WindowsRegistryReader, WindowsRegistryAnalyzer,
     NativeDeviceInspector, KernelDriverInspector, ServiceManagerInspector, ProcessMitigationInspector,
-    MiniDumpParser, EventLogCollector, EtwController
+    MiniDumpParser, EventLogCollector, EtwController,
+    EvidenceGraph, EvidenceNode, EvidenceEdge, CausalitySynthesizer
 )
 ```
 
@@ -170,3 +171,9 @@ When an executable crashes, fails to launch, or encounters runtime access violat
    python src/cli.py etw-audit --format md
    ```
    Interrogates active kernel and application trace sessions and checks provider registration (Kernel-Process, Direct3D11, DXGI, DxgKrnl).
+
+10. **Evidence Graph & Causal Chain Synthesis:**
+    ```powershell
+    python src/cli.py diagnose --binary "path/to/target.exe" --format md
+    ```
+    Synthesizes the complete directed Evidence Graph G = (V, E), traces the primary causal path from low-level memory access violations (e.g. NULL pointer write/read, DEP execution) through Ghidra functions and PE sections to host environment and drivers, rendering an executive Failure Evidence Dossier with embedded Mermaid flowchart diagrams.

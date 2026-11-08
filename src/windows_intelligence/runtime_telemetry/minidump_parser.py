@@ -125,9 +125,12 @@ class MiniDumpParser:
                     sz, rva = stream_map[7]
                     system_info = cls._parse_system_info_stream(f, rva, sz)
 
-                # 2. Misc Info Stream (Stream 10)
+                # 2. Misc Info Stream (Stream 15)
                 misc_info = None
-                if 10 in stream_map:
+                if 15 in stream_map:
+                    sz, rva = stream_map[15]
+                    misc_info = cls._parse_misc_info_stream(f, rva, sz)
+                elif 10 in stream_map and stream_map[10][0] == 24:
                     sz, rva = stream_map[10]
                     misc_info = cls._parse_misc_info_stream(f, rva, sz)
 
@@ -307,9 +310,55 @@ class MiniDumpParser:
                 "operation": access_type_name,
                 "target_virtual_address": hex(target_addr),
                 "is_null_pointer_dereference": is_null_ptr,
-                "probable_cause": "NULL Pointer Dereference (Struct/Object pointer was NULL)" if is_null_ptr
-                                 else f"Invalid Memory {access_type_name} at unmapped/protected address {hex(target_addr)}"
+                "probable_cause": "Hypothesis: Probable NULL Pointer Dereference (Access target < 0x10000)" if is_null_ptr
+                                 else f"Hypothesis: Invalid Memory {access_type_name} at unmapped/protected address {hex(target_addr)}"
             }
+
+        # Extract ThreadContext registers
+        ctx_size = vals[23]
+        ctx_rva = vals[24]
+        if ctx_size > 0 and ctx_rva > 0:
+            try:
+                cur_pos = f.tell()
+                f.seek(ctx_rva)
+                ctx_bytes = f.read(ctx_size)
+                f.seek(cur_pos)
+                if len(ctx_bytes) >= 1232:
+                    # x64 context
+                    (rip,) = struct.unpack("<Q", ctx_bytes[248:256])
+                    (rsp,) = struct.unpack("<Q", ctx_bytes[152:160])
+                    (rbp,) = struct.unpack("<Q", ctx_bytes[160:168])
+                    (rax,) = struct.unpack("<Q", ctx_bytes[120:128])
+                    (rcx,) = struct.unpack("<Q", ctx_bytes[128:136])
+                    (rdx,) = struct.unpack("<Q", ctx_bytes[136:144])
+                    info["thread_registers"] = {
+                        "arch": "x64",
+                        "rip": hex(rip),
+                        "rsp": hex(rsp),
+                        "rbp": hex(rbp),
+                        "rax": hex(rax),
+                        "rcx": hex(rcx),
+                        "rdx": hex(rdx)
+                    }
+                elif len(ctx_bytes) >= 716:
+                    # x86 context
+                    (eip,) = struct.unpack("<I", ctx_bytes[184:188])
+                    (esp,) = struct.unpack("<I", ctx_bytes[196:200])
+                    (ebp,) = struct.unpack("<I", ctx_bytes[180:184])
+                    (eax,) = struct.unpack("<I", ctx_bytes[176:180])
+                    (ecx,) = struct.unpack("<I", ctx_bytes[160:164])
+                    (edx,) = struct.unpack("<I", ctx_bytes[164:168])
+                    info["thread_registers"] = {
+                        "arch": "x86",
+                        "eip": hex(eip),
+                        "esp": hex(esp),
+                        "ebp": hex(ebp),
+                        "eax": hex(eax),
+                        "ecx": hex(ecx),
+                        "edx": hex(edx)
+                    }
+            except Exception:
+                pass
 
         return info
 

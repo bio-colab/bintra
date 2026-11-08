@@ -701,7 +701,7 @@ class ReaMcpServer:
             target_b = args.get("target_binary")
             if domain:
                 return WindowsRegistryAnalyzer.audit_domain(domain)
-            return WindowsRegistryAnalyzer.audit_all()
+            return WindowsRegistryAnalyzer.audit_all(target_binary_path=target_b)
 
         elif name == "rea_hardware_audit":
             from windows_intelligence import NativeDeviceInspector

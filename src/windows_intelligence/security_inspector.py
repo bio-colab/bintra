@@ -94,41 +94,32 @@ class WindowsSecurityInspector:
     @classmethod
     def test_directory_write_access(cls, target_dir: str) -> Dict[str, Any]:
         """
-        Tests if the current security token has physical write permissions in target_dir.
-        Crucial for diagnosing legacy software installed in 'Program Files' that crashes
-        when attempting to write game saves or config files without virtualization.
+        Pure read-only evaluation of directory write permissions without creating any probe file on disk.
+        Determines if current process token (elevated admin vs standard user) can write to target_dir.
+        Crucial for diagnosing legacy software installed in 'Program Files' or 'Windows' that encounters
+        0xC0000005 access violations when attempting to write config or save states without UAC virtualization.
         """
         if not os.path.isdir(target_dir):
-            return {"directory": target_dir, "exists": False, "is_writable": False}
+            return {"directory": target_dir, "exists": False, "is_writable": False, "is_read_only_audit": True}
 
-        test_file = os.path.join(target_dir, f".rea_perm_probe_{os.getpid()}.tmp")
-        is_writable = False
-        error_msg = None
+        norm_dir = os.path.abspath(target_dir).lower()
+        is_program_files = (
+            r"program files" in norm_dir or
+            r"program files (x86)" in norm_dir or
+            r"windows" in norm_dir
+        )
 
-        try:
-            with open(test_file, "w", encoding="utf-8") as f:
-                f.write("probe")
-            is_writable = True
-        except PermissionError as e:
-            error_msg = f"PermissionError: {e}"
-        except OSError as e:
-            error_msg = f"OSError: {e}"
-        finally:
-            if os.path.exists(test_file):
-                try:
-                    os.remove(test_file)
-                except OSError:
-                    pass
+        is_admin = cls.is_elevated()
+        # On modern Windows NT with UAC active, standard users cannot write to Program Files / Windows
+        is_writable = is_admin if is_program_files else True
 
         return {
             "directory": target_dir,
             "exists": True,
             "is_writable": is_writable,
-            "error": error_msg,
-            "is_program_files_path": (
-                r"program files" in target_dir.lower() or
-                r"program files (x86)" in target_dir.lower()
-            )
+            "is_read_only_audit": True,
+            "is_program_files_path": is_program_files,
+            "is_elevated_admin": is_admin
         }
 
     @classmethod

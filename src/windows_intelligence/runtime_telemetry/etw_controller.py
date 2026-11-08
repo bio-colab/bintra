@@ -52,7 +52,8 @@ class EtwController:
     Uses Win32 advapi32 ControlTraceW with EVENT_TRACE_CONTROL_QUERY.
     """
 
-    KNOWN_PROVIDERS = {
+    # Curated knowledge catalog of high-value diagnostic ETW providers
+    CATALOG_DIAGNOSTIC_PROVIDERS = {
         "Microsoft-Windows-Kernel-Process": {
             "guid": "{22FB2CD6-0E7B-422B-A0C7-2FAD1FD0E716}",
             "category": "Process & Thread Lifecycle",
@@ -96,6 +97,8 @@ class EtwController:
             "diagnostic_value": "Traces AppCompatFlags runtime emulation layers applied to binaries."
         }
     }
+    # Backward compatibility alias
+    KNOWN_PROVIDERS = CATALOG_DIAGNOSTIC_PROVIDERS
 
     STANDARD_SESSIONS = [
         "Eventlog-Application",
@@ -108,8 +111,8 @@ class EtwController:
     ]
 
     ERROR_CODES = {
-        0: "ACTIVE_RUNNING",
-        5: "ACTIVE_SYSTEM_PROTECTED (Access Denied / Elevated)",
+        0: "ACTIVE_ACCESSIBLE",
+        5: "SYSTEM_PROTECTED (Access Denied / Elevated Session)",
         4201: "INACTIVE (Not Running)",
         161: "INVALID_PATH",
         87: "INVALID_PARAMETER"
@@ -145,6 +148,8 @@ class EtwController:
             session_info: Dict[str, Any] = {
                 "session_name": session_name,
                 "is_active": is_active,
+                "is_accessible": status_code == 0,
+                "is_system_protected": status_code == 5,
                 "status_code": status_code,
                 "status_description": status_desc
             }
@@ -157,15 +162,15 @@ class EtwController:
 
             return session_info
         except Exception as e:
-            return {"session_name": session_name, "is_active": False, "error": str(e)}
+            return {"session_name": session_name, "is_active": False, "is_accessible": False, "is_system_protected": False, "error": str(e)}
 
     @classmethod
     def audit_etw_providers(cls) -> Dict[str, Any]:
-        """Returns catalog of known high-value Windows kernel and graphics ETW diagnostic providers."""
+        """Returns curated catalog of known high-value Windows kernel and graphics ETW diagnostic providers."""
         return {
             "status": "success",
-            "total_providers": len(cls.KNOWN_PROVIDERS),
-            "providers": cls.KNOWN_PROVIDERS
+            "total_providers": len(cls.CATALOG_DIAGNOSTIC_PROVIDERS),
+            "providers": cls.CATALOG_DIAGNOSTIC_PROVIDERS
         }
 
     @classmethod
@@ -177,14 +182,20 @@ class EtwController:
         """
         sessions = [cls.query_trace_session(s) for s in cls.STANDARD_SESSIONS]
         active_sessions = [s for s in sessions if s.get("is_active")]
+        accessible_sessions = [s for s in sessions if s.get("is_accessible")]
+        protected_sessions = [s for s in sessions if s.get("is_system_protected")]
 
         return {
             "status": "success",
             "is_windows": os.name == "nt",
             "standard_sessions_probed": len(sessions),
             "active_sessions_count": len(active_sessions),
+            "accessible_sessions_count": len(accessible_sessions),
+            "system_protected_sessions_count": len(protected_sessions),
             "active_sessions": [s["session_name"] for s in active_sessions],
+            "accessible_sessions": [s["session_name"] for s in accessible_sessions],
+            "system_protected_sessions": [s["session_name"] for s in protected_sessions],
             "sessions": sessions,
-            "registered_providers_count": len(cls.KNOWN_PROVIDERS),
-            "providers": cls.KNOWN_PROVIDERS
+            "registered_providers_count": len(cls.CATALOG_DIAGNOSTIC_PROVIDERS),
+            "providers": cls.CATALOG_DIAGNOSTIC_PROVIDERS
         }

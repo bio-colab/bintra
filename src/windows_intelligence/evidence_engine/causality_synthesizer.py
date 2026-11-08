@@ -4,6 +4,7 @@ Evidence Causality Synthesizer.
 Unifies static PE structures, Ghidra High P-Code AST / CFG nodes,
 host Windows OS policies, PnP device health, kernel drivers, and empirical crash telemetry
 into an interconnected Evidence Graph and authoritative Failure Evidence Dossier.
+Implements strict epistemic rigor: partitioning findings into FACTS, OBSERVATIONS, and HYPOTHESES.
 """
 
 import os
@@ -25,6 +26,8 @@ class CausalitySynthesizer:
     Synthesizes multi-source forensic evidence into a formal directed Evidence Graph G = (V, E).
     Derives causal paths from low-level memory faults (NULL pointer dereference, DEP violation)
     through Ghidra basic blocks and PE sections to driver and OS compatibility states.
+    Maintains strict separation between verified empirical Facts, environmental Observations,
+    and diagnostic Hypotheses.
     """
 
     @classmethod
@@ -120,8 +123,10 @@ class CausalitySynthesizer:
             )
             graph.add_edge(bin_id, m_id, relation="MISSING_DEPENDENCY")
 
-        # 5. Hardware Subsystems & Kernel Drivers
+        # 5. Hardware Subsystems & Kernel Drivers (strictly correlated, no blind mesh)
         hw_audit = NativeDeviceInspector.audit_hardware_health()
+        drv_audit = KernelDriverInspector.audit_drivers()
+
         for idx, disp in enumerate(hw_audit.get("display_adapters", [])[:2]):
             disp_id = f"HW:DISPLAY_{idx+1}"
             graph.add_node(
@@ -134,9 +139,9 @@ class CausalitySynthesizer:
                 problem_name=disp.get("problem_name", "HEALTHY")
             )
 
-        drv_audit = KernelDriverInspector.audit_drivers()
-        for gdrv in drv_audit.get("graphics_drivers", [])[:3]:
-            drv_id = f"DRV:{gdrv['driver_name'].lower()}"
+        for gdrv in drv_audit.get("graphics_drivers", [])[:4]:
+            drv_name = gdrv["driver_name"].lower()
+            drv_id = f"DRV:{drv_name}"
             graph.add_node(
                 drv_id,
                 node_type="KERNEL_DRIVER",
@@ -144,9 +149,18 @@ class CausalitySynthesizer:
                 image_base=gdrv.get("kernel_image_base"),
                 file_path=gdrv.get("file_path")
             )
-            # Link display devices to driver
-            for idx in range(min(len(hw_audit.get("display_adapters", [])), 2)):
-                graph.add_edge(f"HW:DISPLAY_{idx+1}", drv_id, relation="RESOLVES_TO_DRIVER")
+            # Strictly correlate display device with driver via service name or vendor matching
+            for idx, disp in enumerate(hw_audit.get("display_adapters", [])[:2]):
+                disp_id = f"HW:DISPLAY_{idx+1}"
+                disp_name = disp.get("name", "").lower()
+                disp_srv = disp.get("service_name", "").lower() if disp.get("service_name") else ""
+                correlated = False
+                if disp_srv and disp_srv in drv_name:
+                    correlated = True
+                elif any(v in disp_name and v in drv_name for v in ("nvidia", "intel", "amd", "ati", "vmware", "vbox")):
+                    correlated = True
+                if correlated:
+                    graph.add_edge(disp_id, drv_id, relation="RESOLVES_TO_DRIVER")
 
         # 6. Ghidra Decompiled AST & P-Code Basic Blocks
         func_entry_map = {}
@@ -174,22 +188,24 @@ class CausalitySynthesizer:
                         graph.add_edge(sec_id, f_id, relation="CONTAINS_FUNCTION")
                         break
 
-                # Basic blocks
+                # Basic blocks supporting start, end, stop, and size
                 for b in func.get("basic_blocks", []):
                     b_start = b.get("start", "0x0")
                     b_id = f"BLOCK:{fname}_{b_start}"
+                    b_end = b.get("end") or b.get("stop")
+                    b_size = b.get("size")
                     graph.add_node(
                         b_id,
                         node_type="GHIDRA_BASIC_BLOCK",
                         label=f"{fname}[{b_start}]",
                         start=b_start,
-                        end=b.get("end")
+                        end=b_end,
+                        size=b_size
                     )
                     graph.add_edge(f_id, b_id, relation="CONTAINS_BLOCK")
 
-        # 7. Empirical Crash Telemetry Integration
+        # 7. Empirical Crash Telemetry Integration (without presumptive fallback)
         if not crash_record:
-            # Auto-retrieve from MiniDumps or WER
             dumps = MiniDumpParser.audit_dumps(bin_name, max_dumps=1)
             if dumps.get("crash_reports"):
                 rep = dumps["crash_reports"][0]
@@ -201,16 +217,28 @@ class CausalitySynthesizer:
                     "exception_name": exc.get("exception_name"),
                     "fault_module": exc.get("fault_module"),
                     "fault_offset": exc.get("fault_offset", "0x0"),
-                    "access_violation_details": exc.get("access_violation_details")
+                    "access_violation_details": exc.get("access_violation_details"),
+                    "thread_context": exc.get("thread_context")
                 }
 
         if crash_record:
             crash_id = "CRASH_TELEMETRY"
             exc_code = crash_record.get("exception_code", "UNKNOWN")
             exc_name = crash_record.get("exception_name", "UNKNOWN")
-            fault_mod = crash_record.get("fault_module") or bin_name
+
+            raw_fault_mod = crash_record.get("fault_module")
+            if raw_fault_mod and str(raw_fault_mod).strip():
+                fault_mod = str(raw_fault_mod).strip()
+                is_internal = os.path.basename(fault_mod).lower() == bin_name.lower()
+            else:
+                fault_mod = "UNKNOWN_MODULE"
+                is_internal = False
+
             raw_offset = crash_record.get("fault_offset", "0x0")
-            offset_int = int(raw_offset, 16) if isinstance(raw_offset, str) else int(raw_offset)
+            try:
+                offset_int = int(raw_offset, 16) if isinstance(raw_offset, str) else int(raw_offset)
+            except ValueError:
+                offset_int = 0
 
             graph.add_node(
                 crash_id,
@@ -220,6 +248,7 @@ class CausalitySynthesizer:
                 exception_name=exc_name,
                 fault_module=fault_mod,
                 fault_offset=hex(offset_int),
+                is_internal_fault=is_internal,
                 source=crash_record.get("source", "TELEMETRY")
             )
             graph.add_edge(bin_id, crash_id, relation="REPORTED_CRASH")
@@ -228,19 +257,35 @@ class CausalitySynthesizer:
             av_details = crash_record.get("access_violation_details")
             if av_details:
                 root_id = "AV_ROOT_CAUSE"
+                target_addr = av_details.get("target_virtual_address", "0x0")
+                is_null = av_details.get("is_null_pointer_dereference", False)
+
+                # Check if near-zero address (< 0x10000)
+                try:
+                    t_int = int(target_addr, 16) if isinstance(target_addr, str) else int(target_addr)
+                    if t_int < 0x10000:
+                        is_null = True
+                except Exception:
+                    pass
+
+                cause_label = (
+                    "Probable Cause Hypothesis: High-probability NULL pointer dereference"
+                    if is_null else
+                    f"Memory Access Violation: Invalid {av_details.get('operation')} at unmapped address {target_addr}"
+                )
+
                 graph.add_node(
                     root_id,
                     node_type="ACCESS_VIOLATION_ROOT",
-                    label=f"{av_details.get('operation')} @ {av_details.get('target_virtual_address')}",
+                    label=f"{av_details.get('operation')} @ {target_addr}",
                     operation=av_details.get("operation"),
-                    target_virtual_address=av_details.get("target_virtual_address"),
-                    is_null_pointer_dereference=av_details.get("is_null_pointer_dereference", False),
-                    cause=av_details.get("probable_cause")
+                    target_virtual_address=target_addr,
+                    is_null_pointer_dereference=is_null,
+                    cause=cause_label
                 )
                 graph.add_edge(crash_id, root_id, relation="CAUSED_BY_VIOLATION")
 
-            # Map Fault Offset (RVA) to Section
-            is_internal = os.path.basename(fault_mod).lower() == bin_name.lower()
+            # Map Fault Offset (RVA) to Section if internal
             if is_internal:
                 for s_name, (va_start, va_size, sec_id) in section_nodes.items():
                     if va_start <= offset_int < va_start + va_size:
@@ -253,7 +298,7 @@ class CausalitySynthesizer:
                     if fsize > 0 and fentry_int <= crash_va < fentry_int + fsize:
                         graph.add_edge(crash_id, f_id, relation="FAULTS_INSIDE_FUNCTION")
                         break
-            else:
+            elif fault_mod != "UNKNOWN_MODULE":
                 ext_dll_id = f"DLL:{fault_mod.lower()}"
                 if ext_dll_id in graph.nodes:
                     graph.add_edge(crash_id, ext_dll_id, relation="FAULTS_INSIDE_EXTERNAL_DLL")
@@ -269,85 +314,420 @@ class CausalitySynthesizer:
     ) -> Dict[str, Any]:
         """
         Executes unified evidence synthesis:
-        Builds the formal Evidence Graph, extracts the primary causal path,
-        and generates an executive engineering failure dossier.
+        1. Gathers OS environment, dependencies, hardware, security, and crash telemetry.
+        2. Strictly partitions evidence into verified FACTS, environmental OBSERVATIONS, and HYPOTHESES.
+        3. Builds the formal Evidence Graph and extracts the primary causal path.
+        4. Generates an authoritative, single-source-of-truth Failure Evidence Dossier.
         """
         norm_path = os.path.abspath(binary_path)
         bin_name = os.path.basename(norm_path)
-        graph = cls.build_evidence_graph(norm_path, crash_record=crash_record, ghidra_export=ghidra_export)
 
-        # 1. Evaluate Findings
-        verdict = "HEALTHY_ENVIRONMENT"
-        severity = "INFO"
+        # 1. Environmental Telemetry
+        os_data = WindowsOSProfiler.profile(norm_path)
+        dep_data = WindowsDependencyResolver.audit_dependencies(norm_path)
+        hw_data = WindowsDeviceInspector.audit()
+        sec_data = WindowsSecurityInspector.audit(norm_path)
+
+        # 2. Crash Telemetry (if not provided, auto-discover)
+        if not crash_record:
+            dumps = MiniDumpParser.audit_dumps(bin_name, max_dumps=1)
+            if dumps.get("crash_reports"):
+                rep = dumps["crash_reports"][0]
+                exc = rep.get("exception_info") or {}
+                crash_record = {
+                    "source": "MINIDUMP",
+                    "file_path": rep.get("file_path"),
+                    "app_name": bin_name,
+                    "fault_module": exc.get("fault_module"),
+                    "exception_code": exc.get("exception_code"),
+                    "exception_name": exc.get("exception_name"),
+                    "fault_offset": exc.get("fault_offset", "0x0"),
+                    "access_violation_details": exc.get("access_violation_details"),
+                    "thread_context": exc.get("thread_context")
+                }
+            else:
+                events = EventLogCollector.query_application_errors(bin_name, max_events=1)
+                if events:
+                    ev = events[0]
+                    crash_record = {
+                        "source": "EVENT_LOG_1000",
+                        "app_name": bin_name,
+                        "fault_module": ev.get("fault_module"),
+                        "exception_code": ev.get("exception_code"),
+                        "exception_name": ev.get("exception_name"),
+                        "fault_offset": ev.get("fault_offset", "0x0")
+                    }
+
+        # 3. Static Binary Mapping with Strict Epistemic Module Attribution
+        pe_info = BinaryFormatInspector.inspect(norm_path)
+        binary_mapping = None
+        target_name = bin_name.lower()
+
+        is_internal_fault = False
+        raw_fault_module = "UNKNOWN_MODULE"
+        fault_offset = 0
+
+        if crash_record:
+            raw_mod = crash_record.get("fault_module")
+            if raw_mod and str(raw_mod).strip():
+                raw_fault_module = str(raw_mod).strip()
+                is_internal_fault = (target_name == os.path.basename(raw_fault_module).lower())
+            else:
+                raw_fault_module = "UNKNOWN_MODULE"
+                is_internal_fault = False
+
+            fault_offset_str = crash_record.get("fault_offset", "0x0")
+            try:
+                fault_offset = int(fault_offset_str, 16) if isinstance(fault_offset_str, str) else int(fault_offset_str)
+            except ValueError:
+                fault_offset = 0
+
+        if crash_record and pe_info.get("format") == "PE":
+            if is_internal_fault:
+                fault_rva = fault_offset
+                image_base = int(pe_info.get("image_base", "0x400000"), 16)
+                va = image_base + fault_rva
+                file_offset = BinaryFormatInspector.rva_to_offset(pe_info, fault_rva)
+
+                def _to_int(val):
+                    if isinstance(val, int):
+                        return val
+                    if isinstance(val, str):
+                        v = val.strip()
+                        if v.startswith("0x") or v.startswith("0X"):
+                            return int(v, 16)
+                        return int(v) if v.isdigit() else 0
+                    return 0
+
+                target_sec = None
+                for sec in pe_info.get("sections", []):
+                    va_start = _to_int(sec.get("virtual_address", 0))
+                    va_size = max(_to_int(sec.get("virtual_size", 0)), _to_int(sec.get("raw_size", 0)))
+                    if va_start <= fault_rva < va_start + va_size:
+                        target_sec = sec
+                        break
+
+                binary_mapping = {
+                    "is_internal_fault": True,
+                    "target_module": bin_name,
+                    "fault_rva": hex(fault_rva),
+                    "fault_virtual_address": hex(va),
+                    "file_offset": hex(file_offset) if file_offset is not None else None,
+                    "fault_section": target_sec["name"] if target_sec else "UNMAPPED_RVA_SPACE",
+                    "is_executable_section": target_sec.get("is_executable", False) if target_sec else False
+                }
+
+                # Map into Ghidra Decompiled Functions
+                if ghidra_export and va is not None:
+                    functions = ghidra_export.get("functions", [])
+                    matching_func = None
+                    for func in functions:
+                        try:
+                            f_entry = int(func.get("entry_point", "0x0"), 16)
+                            f_size = func.get("size")
+                            if f_size is not None and isinstance(f_size, int) and f_size > 0:
+                                if f_entry <= va < f_entry + f_size:
+                                    matching_func = func
+                                    break
+
+                            # Basic blocks (supporting start, end, stop, and size)
+                            blocks = func.get("basic_blocks", [])
+                            if blocks:
+                                b_starts = [int(b["start"], 16) for b in blocks if "start" in b]
+                                b_ends = [
+                                    int(b.get("end") or b.get("stop"), 16)
+                                    if (b.get("end") or b.get("stop")) else (int(b["start"], 16) + int(b.get("size", 1)))
+                                    for b in blocks if "start" in b
+                                ]
+                                if b_starts and min(b_starts) <= va <= max(b_ends):
+                                    matching_func = func
+                                    break
+
+                            f_ops = func.get("pcode_ops", [])
+                            if f_ops:
+                                op_addrs = [int(op["address"], 16) for op in f_ops if "address" in op]
+                                if op_addrs and min(op_addrs) <= va <= max(op_addrs):
+                                    matching_func = func
+                                    break
+
+                            if f_entry == va:
+                                matching_func = func
+                                break
+                        except Exception:
+                            continue
+
+                    if matching_func:
+                        binary_mapping["ghidra_function_name"] = matching_func.get("name")
+                        binary_mapping["ghidra_function_entry"] = matching_func.get("entry_point")
+            else:
+                attribution_val = (
+                    "ATTRIBUTION_UNKNOWN" if raw_fault_module == "UNKNOWN_MODULE"
+                    else "EXTERNAL_DEPENDENCY_OR_SYSTEM_MODULE"
+                )
+                binary_mapping = {
+                    "is_internal_fault": False,
+                    "target_module": bin_name,
+                    "external_fault_module": raw_fault_module,
+                    "fault_rva": hex(fault_offset),
+                    "attribution": attribution_val
+                }
+
+        # 4. Strict Epistemic Evidence Partitioning: FACTS vs OBSERVATIONS vs HYPOTHESES
+        facts: List[str] = []
+        observations: List[str] = []
+        hypotheses: List[str] = []
+
         root_cause_points: List[str] = []
         remediation_steps: List[str] = []
+        verdict = "HEALTHY_ENVIRONMENT"
+        severity = "INFO"
 
-        # Check missing dependencies
-        missing_dlls = [n for n in graph.nodes.values() if n.node_type == "IMPORTED_DLL" and n.properties.get("status") == "MISSING"]
-        if missing_dlls:
+        # (A) Empirical Facts
+        if crash_record:
+            exc_code = crash_record.get("exception_code", "UNKNOWN")
+            exc_name = crash_record.get("exception_name", "UNKNOWN")
+            facts.append(f"Recorded crash exception code: {exc_code} ({exc_name}) at offset {hex(fault_offset)}.")
+            if is_internal_fault and binary_mapping:
+                facts.append(
+                    f"Fault offset {hex(fault_offset)} is confirmed internal RVA within '{bin_name}' section '{binary_mapping.get('fault_section')}' "
+                    f"(Virtual Address: {binary_mapping.get('fault_virtual_address')})."
+                )
+                if binary_mapping.get("ghidra_function_name"):
+                    facts.append(
+                        f"Faulting virtual address maps directly into Ghidra function '{binary_mapping.get('ghidra_function_name')}' "
+                        f"(Entry: {binary_mapping.get('ghidra_function_entry')})."
+                    )
+            elif raw_fault_module != "UNKNOWN_MODULE":
+                facts.append(f"Faulting module is explicitly reported as external runtime: '{raw_fault_module}'.")
+
+            ctx = crash_record.get("thread_context")
+            if ctx and isinstance(ctx, dict):
+                reg_str = ", ".join(f"{k}={v}" for k, v in list(ctx.items())[:6])
+                facts.append(f"CPU thread context registers at exception: {reg_str}.")
+
+        # (B) Environmental Observations
+        k_info = os_data.get("kernel", {})
+        observations.append(
+            f"Host OS: Windows Build {k_info.get('build_number')} (Architecture: {os_data.get('architecture', {}).get('native_architecture')}, WOW64: {k_info.get('is_wow64_process')})."
+        )
+        observations.append(
+            f"Dependency Resolution: {dep_data.get('resolved_dlls_count')}/{dep_data.get('total_imported_dlls')} DLLs resolved. "
+            f"Missing DLLs: {dep_data.get('missing_dlls_count')}, Architecture Mismatches: {dep_data.get('architecture_mismatches_count')}."
+        )
+        observations.append(
+            f"Security Context: Admin={sec_data.get('is_elevated_admin')}, Directory Writable={sec_data.get('directory_write_permissions', {}).get('is_writable')}."
+        )
+
+        # (C) Diagnostic Hypotheses & Root Cause Synthesis
+        if dep_data.get("missing_dlls_count", 0) > 0:
+            missing_names = [d["imported_name"] for d in dep_data.get("missing_dlls", [])]
             verdict = "MISSING_DLL_DEPENDENCIES"
             severity = "CRITICAL"
-            m_names = [n.label for n in missing_dlls]
-            root_cause_points.append(f"Application cannot start due to missing runtime libraries: {', '.join(m_names)}.")
-            remediation_steps.append("Install required Visual C++ / DirectX redistributable runtimes or place DLLs alongside executable.")
+            hypotheses.append(f"Missing required runtime libraries prevent program initialization: {', '.join(missing_names)}.")
+            root_cause_points.append(f"Missing runtime dynamic libraries: {', '.join(missing_names)}.")
+            remediation_steps.append("Install required Visual C++ / DirectX runtimes or place missing DLLs in application folder.")
 
-        # Check PnP Hardware Problems
-        problem_devs = [n for n in graph.nodes.values() if n.node_type == "HARDWARE_DEVICE" and n.properties.get("has_problem")]
-        if problem_devs:
-            severity = "HIGH" if severity != "CRITICAL" else severity
-            for pd in problem_devs:
-                root_cause_points.append(f"Hardware Device '{pd.label}' reported non-zero status code: {pd.properties.get('problem_name')}.")
-            remediation_steps.append("Update or reinstall host display/audio drivers to resolve device error state.")
+        if dep_data.get("architecture_mismatches_count", 0) > 0:
+            verdict = "ARCHITECTURE_MISMATCH_FAILURE"
+            severity = "CRITICAL"
+            hypotheses.append("Architecture mismatch: 32-bit/64-bit module loading conflict prevents execution.")
+            root_cause_points.append("Incompatible CPU architecture between target binary and loaded dynamic libraries.")
+            remediation_steps.append("Ensure all loaded dependency DLLs match the target executable architecture.")
 
-        # Check Crash Telemetry & Access Violation
-        crash_node = graph.get_node("CRASH_TELEMETRY")
-        av_root = graph.get_node("AV_ROOT_CAUSE")
+        if crash_record:
+            exc_code = crash_record.get("exception_code", "UNKNOWN")
+            exc_name = crash_record.get("exception_name", "UNKNOWN")
+            av_details = crash_record.get("access_violation_details")
 
-        if crash_node:
-            exc_code = crash_node.properties.get("exception_code")
-            exc_name = crash_node.properties.get("exception_name")
-            fault_mod = crash_node.properties.get("fault_module")
-            fault_rva = crash_node.properties.get("fault_offset")
-
-            is_internal = os.path.basename(fault_mod).lower() == bin_name.lower()
-            if is_internal:
-                verdict = f"INTERNAL_BINARY_CRASH: {exc_name} ({exc_code})"
+            if is_internal_fault:
+                verdict = f"INTERNAL_BINARY_CRASH: CRASH_TELEMETRY_RECORDED: {exc_name} ({exc_code})"
                 severity = "CRITICAL"
-                root_cause_points.append(
-                    f"Fatal crash inside '{bin_name}' at RVA {fault_rva} ({exc_name} {exc_code})."
+                root_cause_points.append(f"Fatal crash inside '{bin_name}' at RVA {hex(fault_offset)} ({exc_name} {exc_code}).")
+            elif raw_fault_module != "UNKNOWN_MODULE":
+                verdict = f"EXTERNAL_MODULE_CRASH: {raw_fault_module} ({exc_name})"
+                severity = "CRITICAL"
+                root_cause_points.append(f"Fatal fault inside external module '{raw_fault_module}' at RVA {hex(fault_offset)}.")
+                hypotheses.append(
+                    f"External failure in '{raw_fault_module}'. Suspected incompatible graphics runtime or invalid pointer parameters passed across API boundary."
                 )
+                remediation_steps.append(f"Verify DirectX/graphics driver compatibility and audit API calls passed to '{raw_fault_module}'.")
             else:
-                verdict = f"EXTERNAL_DEPENDENCY_CRASH: {fault_mod} ({exc_name})"
-                severity = "CRITICAL"
-                root_cause_points.append(
-                    f"Fatal fault inside external module '{fault_mod}' at RVA {fault_rva}."
-                )
+                verdict = f"CRASH_TELEMETRY_RECORDED: {exc_name} (UNKNOWN_MODULE)"
+                severity = "HIGH"
+                root_cause_points.append(f"Fatal crash recorded without attributed module ({exc_name} {exc_code}).")
 
-            if av_root:
-                op = av_root.properties.get("operation")
-                addr = av_root.properties.get("target_virtual_address")
-                is_null = av_root.properties.get("is_null_pointer_dereference")
+            if av_details:
+                op = av_details.get("operation", "ACCESS")
+                addr = av_details.get("target_virtual_address", "0x0")
+                is_null = av_details.get("is_null_pointer_dereference", False)
+                try:
+                    t_int = int(addr, 16) if isinstance(addr, str) else int(addr)
+                    if t_int < 0x10000:
+                        is_null = True
+                except Exception:
+                    pass
+
                 if is_null:
-                    root_cause_points.append(
-                        f"Root Cause Confirmed: NULL Pointer Dereference ({op} at virtual address {addr}). An uninitialized object or null struct pointer was accessed."
-                    )
+                    hyp_text = f"Probable Cause Hypothesis: High-probability NULL pointer dereference ({op} at virtual address {addr}). An uninitialized object or null struct pointer was accessed."
+                    hypotheses.append(hyp_text)
+                    root_cause_points.append(hyp_text)
                     remediation_steps.append("Inspect pointer validation preceding the faulting instruction or add a NULL safety guard.")
                 else:
-                    root_cause_points.append(f"Memory Access Violation: Invalid {op} at unmapped/protected address {addr}.")
+                    hyp_text = f"Probable Cause Hypothesis: Invalid memory access ({op} at protected/unmapped virtual address {addr}). Suspected buffer overread, dangling pointer, or DEP violation."
+                    hypotheses.append(hyp_text)
+                    root_cause_points.append(hyp_text)
+                    remediation_steps.append("Validate buffer bounds and check for use-after-free or data execution prevention conflicts.")
 
-        # 2. Extract Causal Path
+        # 5. Build Evidence Graph & Extract Causal Chain
+        graph = cls.build_evidence_graph(norm_path, crash_record=crash_record, ghidra_export=ghidra_export)
+        target_node_id = f"TARGET:{bin_name}"
         causal_chain = []
-        if "AV_ROOT_CAUSE" in graph.nodes and f"TARGET:{bin_name}" in graph.nodes:
-            causal_chain = graph.find_causal_path(f"TARGET:{bin_name}", "AV_ROOT_CAUSE")
+        if "AV_ROOT_CAUSE" in graph.nodes and target_node_id in graph.nodes:
+            causal_chain = graph.find_causal_path(target_node_id, "AV_ROOT_CAUSE")
 
-        return {
+        dossier = {
             "status": "success",
             "binary_path": norm_path,
             "verdict": verdict,
             "severity": severity,
-            "root_cause_summary": root_cause_points or ["No critical failure conditions detected in host environment."],
+            "epistemic_classification": {
+                "facts": facts,
+                "observations": observations,
+                "hypotheses": hypotheses
+            },
+            "root_cause_summary": root_cause_points or ["No critical failure conditions detected in host Windows environment."],
             "remediation_advisory": remediation_steps or ["System and application dependencies are healthy."],
+            "os_environment": os_data,
+            "dependency_health": dep_data,
+            "graphics_and_hardware": hw_data,
+            "security_and_privileges": sec_data,
+            "crash_telemetry": crash_record,
+            "binary_mapping": binary_mapping,
             "causal_chain": causal_chain,
             "evidence_graph": graph.to_dict(),
             "mermaid_diagram": graph.to_mermaid()
         }
+
+        return dossier
+
+    @classmethod
+    def format_markdown(cls, dossier: Dict[str, Any]) -> str:
+        """Renders the Failure Evidence Dossier as an executive Markdown report."""
+        lines = [
+            "# REA-Neural Failure Evidence Dossier",
+            "",
+            f"**Target Binary:** `{dossier.get('binary_path')}`  ",
+            f"**Diagnosis Verdict:** `{dossier.get('verdict')}`  ",
+            f"**Severity Level:** `{dossier.get('severity')}`  ",
+            "",
+            "## 1. Epistemic Evidence Classification",
+            "",
+            "### Verified Facts (Empirical Ground Truth)",
+        ]
+
+        ep = dossier.get("epistemic_classification", {})
+        for f in ep.get("facts", []):
+            lines.append(f"- **[FACT]** {f}")
+        if not ep.get("facts"):
+            lines.append("- *(No direct crash telemetry facts recorded)*")
+
+        lines.extend([
+            "",
+            "### Environmental Observations",
+        ])
+        for o in ep.get("observations", []):
+            lines.append(f"- **[OBSERVATION]** {o}")
+
+        lines.extend([
+            "",
+            "### Diagnostic Hypotheses & Inferences",
+        ])
+        for h in ep.get("hypotheses", []):
+            lines.append(f"- **[HYPOTHESIS]** {h}")
+        if not ep.get("hypotheses"):
+            lines.append("- *(No failure hypotheses generated)*")
+
+        lines.extend([
+            "",
+            "## 2. Root Cause Summary",
+        ])
+        for rc in dossier.get("root_cause_summary", []):
+            lines.append(f"- {rc}")
+
+        lines.extend([
+            "",
+            "## 3. Engineering Remediation Advisory",
+        ])
+        for rem in dossier.get("remediation_advisory", []):
+            lines.append(f"1. {rem}")
+
+        # Crash Telemetry
+        crash = dossier.get("crash_telemetry")
+        if crash:
+            lines.extend([
+                "",
+                "## 4. Crash Telemetry & Exception Details",
+                f"- **Source:** `{crash.get('source')}`",
+                f"- **Exception Code:** `{crash.get('exception_code')}` ({crash.get('exception_name')})",
+                f"- **Faulting Module:** `{crash.get('fault_module')}`",
+                f"- **Fault Offset (RVA):** `{crash.get('fault_offset')}`"
+            ])
+
+        # Binary Mapping
+        mapping = dossier.get("binary_mapping")
+        if mapping:
+            lines.extend([
+                "",
+                "## 5. Static Binary & Ghidra IR Correlation"
+            ])
+            if mapping.get("is_internal_fault"):
+                lines.extend([
+                    f"- **Faulting Section:** `{mapping.get('fault_section')}` (Executable: {mapping.get('is_executable_section')})",
+                    f"- **Relative Virtual Address (RVA):** `{mapping.get('fault_rva')}`",
+                    f"- **Virtual Address (VA):** `{mapping.get('fault_virtual_address')}`",
+                    f"- **Raw File Offset:** `{mapping.get('file_offset')}`",
+                ])
+                if mapping.get("ghidra_function_name"):
+                    lines.append(f"- **Ghidra Function:** `{mapping.get('ghidra_function_name')}` (Entry: `{mapping.get('ghidra_function_entry')}`)")
+            else:
+                lines.extend([
+                    "- **Attribution:** External Dependency / System Runtime",
+                    f"- **External Module:** `{mapping.get('external_fault_module')}`",
+                    f"- **External RVA:** `{mapping.get('fault_rva')}`",
+                    f"- **Notice:** Fault did not occur within `{mapping.get('target_module')}` static code boundaries."
+                ])
+
+        # Dependencies
+        deps = dossier.get("dependency_health", {})
+        lines.extend([
+            "",
+            "## 6. Dependency Resolution Matrix",
+            f"- **Architecture:** `{deps.get('binary_architecture')}` ({deps.get('loader_mode')})",
+            f"- **Resolved DLLs:** {deps.get('resolved_dlls_count')}/{deps.get('total_imported_dlls')}",
+            f"- **Missing DLLs:** {deps.get('missing_dlls_count')}",
+            f"- **Architecture Mismatches:** {deps.get('architecture_mismatches_count')}",
+            f"- **Missing Exported Symbols:** {deps.get('missing_exports_count')}"
+        ])
+
+        # OS & Hardware
+        os_env = dossier.get("os_environment", {})
+        kernel = os_env.get("kernel", {})
+        lines.extend([
+            "",
+            "## 7. Host Windows Environment & Hardware",
+            f"- **OS:** {kernel.get('friendly_name', 'Windows')} (Build {kernel.get('build_number', 'Unknown')})",
+            f"- **Architecture:** {os_env.get('architecture', {}).get('native_architecture', 'Unknown')}",
+            f"- **Elevation:** Admin={dossier.get('security_and_privileges', {}).get('is_elevated_admin')}"
+        ])
+
+        mermaid = dossier.get("mermaid_diagram")
+        if mermaid:
+            lines.extend([
+                "",
+                "## 8. Evidence Causality Graph",
+                "```mermaid",
+                mermaid,
+                "```"
+            ])
+
+        return "\n".join(lines)

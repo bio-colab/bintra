@@ -89,6 +89,7 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
             Map<String, Object> funcData = new HashMap<>();
             funcData.put("name", func.getName());
             funcData.put("entry_point", "0x" + func.getEntryPoint().toString());
+            funcData.put("size", (int) func.getBody().getNumAddresses());
             funcData.put("parameter_count", func.getParameterCount());
             funcData.put("return_type", func.getReturnType().getName());
 
@@ -101,6 +102,8 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
                     blockData.put("id", block.getIndex());
                     blockData.put("start", "0x" + block.getStart().toString());
                     blockData.put("stop", "0x" + block.getStop().toString());
+                    blockData.put("end", "0x" + block.getStop().toString());
+                    blockData.put("size", (int) (block.getStop().getOffset() - block.getStart().getOffset() + 1));
                     blockData.put("in_degree", block.getInSize());
                     blockData.put("out_degree", block.getOutSize());
 

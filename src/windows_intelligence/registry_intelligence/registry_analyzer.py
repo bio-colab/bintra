@@ -34,7 +34,8 @@ class WindowsRegistryAnalyzer:
             res = WindowsRegistryReader.query_key_dual_view(
                 hive=spec.hive,
                 subkey=spec.subkey,
-                target_values=spec.target_values
+                target_values=spec.target_values,
+                include_subkeys=getattr(spec, "include_subkeys", False)
             )
             key_entry = {
                 "hive": spec.hive,
@@ -80,11 +81,16 @@ class WindowsRegistryAnalyzer:
             hazards.append({
                 "policy": "SafeDllSearchMode",
                 "severity": "WARNING",
-                "description": "SafeDllSearchMode is disabled (0). Current directory is searched before system directories."
+                "description": "SafeDllSearchMode is explicitly disabled (0). Current working directory is searched before system directories."
             })
-            findings.append("SafeDllSearchMode is disabled.")
+            findings.append("SafeDllSearchMode is explicitly disabled (0).")
+            sd_status = "EXPLICIT_DISABLED"
+        elif sd_val == 1:
+            findings.append("SafeDllSearchMode is explicitly enabled (1).")
+            sd_status = "EXPLICIT_ENABLED"
         else:
-            findings.append("SafeDllSearchMode is enabled (default safe loader order).")
+            findings.append("SafeDllSearchMode is NOT_CONFIGURED (Defaulting to OS Default: Enabled on modern Windows).")
+            sd_status = "NOT_CONFIGURED (OS_DEFAULT_ENABLED)"
 
         # 2. UAC EnableLUA Audit
         uac_res = WindowsRegistryReader.query_key_dual_view(
@@ -97,11 +103,16 @@ class WindowsRegistryAnalyzer:
             hazards.append({
                 "policy": "EnableLUA",
                 "severity": "WARNING",
-                "description": "UAC is completely disabled (EnableLUA=0). Token virtualization for legacy apps is inactive."
+                "description": "UAC is explicitly disabled (EnableLUA=0). Token virtualization for legacy apps is inactive."
             })
-            findings.append("UAC is disabled (EnableLUA=0).")
+            findings.append("UAC EnableLUA is explicitly disabled (0).")
+            lua_status = "EXPLICIT_DISABLED"
+        elif lua_val == 1:
+            findings.append("UAC EnableLUA is explicitly enabled (1).")
+            lua_status = "EXPLICIT_ENABLED"
         else:
-            findings.append("UAC is active (EnableLUA=1).")
+            findings.append("UAC EnableLUA is NOT_CONFIGURED (Defaulting to OS Default: Enabled).")
+            lua_status = "NOT_CONFIGURED (OS_DEFAULT_ENABLED)"
 
         # 3. KnownDLLs Verification
         kd_res = WindowsRegistryReader.query_key_dual_view(
@@ -141,14 +152,17 @@ class WindowsRegistryAnalyzer:
             "findings": findings,
             "hazards_count": len(hazards),
             "hazards": hazards,
-            "safedllsearch_mode": sd_val if sd_val is not None else 1,
+            "safedllsearch_mode": sd_val,
+            "safedllsearch_mode_status": sd_status,
             "uac_enabled": bool(lua_val != 0) if lua_val is not None else True,
+            "uac_enable_lua": lua_val,
+            "uac_status": lua_status,
             "known_dlls_count": kd_count,
             "active_shims": active_shims
         }
 
     @classmethod
-    def audit_all(cls) -> Dict[str, Any]:
+    def audit_all(cls, target_binary_path: Optional[str] = None) -> Dict[str, Any]:
         """Runs complete inspection across all 11 registry domains."""
         domain_reports = {}
         total_keys = 0
@@ -160,7 +174,7 @@ class WindowsRegistryAnalyzer:
             total_keys += report.get("keys_inspected", 0)
             total_discrepancies += report.get("discrepancies_count", 0)
 
-        policies = cls.evaluate_critical_policies()
+        policies = cls.evaluate_critical_policies(target_binary_path=target_binary_path)
 
         return {
             "status": "success",

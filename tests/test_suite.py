@@ -1152,6 +1152,8 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             self.assertIn("token_integrity", sec)
             self.assertIn("directory_write_permissions", sec)
             self.assertTrue(sec["directory_write_permissions"]["is_writable"])
+            # Invariant: 100% read-only inspection - zero probe files created on disk
+            self.assertEqual(len(os.listdir(temp_dir)), 0)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1566,18 +1568,24 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         exc_rva = mod_list_rva + len(mod_list_data)
 
         fmt_exc = '<IIIIQQII15QII'
-        exc_data = struct.pack(fmt_exc, 1001, 0, 0xC0000005, 0, 0, 0x401050, 2, 0, *( [1, 0x0] + [0]*13 ), 0, 0)
+        ctx_bytes = bytearray(716)
+        ctx_bytes[184:188] = struct.pack('<I', 0x401050)  # EIP
+        ctx_bytes[196:200] = struct.pack('<I', 0x12ff00)  # ESP
+        ctx_bytes[180:184] = struct.pack('<I', 0x12ff50)  # EBP
+        ctx_bytes[176:180] = struct.pack('<I', 0x1)       # EAX
+        ctx_rva = exc_rva + 168  # context bytes immediately follow 168-byte exception stream
+        exc_data = struct.pack(fmt_exc, 1001, 0, 0xC0000005, 0, 0, 0x401050, 2, 0, *( [1, 0x0] + [0]*13 ), len(ctx_bytes), ctx_rva)
 
         dir_entries = [
             struct.pack('<III', 7, len(sys_data), sys_rva),
-            struct.pack('<III', 10, len(misc_data), misc_rva),
+            struct.pack('<III', 15, len(misc_data), misc_rva),  # Stream 15 is standard MiscInfoStream
             struct.pack('<III', 3, len(thread_data), thread_rva),
             struct.pack('<III', 4, len(mod_list_data), mod_list_rva),
             struct.pack('<III', 6, len(exc_data), exc_rva),
         ]
         dir_bytes = b''.join(dir_entries)
         hdr = struct.pack('<IIIIII', 0x504D444D, 0xA793, 5, 32, 0, 0x65000000) + bytes([0] * 8)
-        payload = hdr + dir_bytes + sys_data + misc_data + thread_data + mod_str_data + mod_list_data + exc_data
+        payload = hdr + dir_bytes + sys_data + misc_data + thread_data + mod_str_data + mod_list_data + exc_data + bytes(ctx_bytes)
 
         with tempfile.NamedTemporaryFile(suffix='.dmp', delete=False) as tf:
             tf.write(payload)
@@ -1604,6 +1612,12 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             self.assertIn('access_violation_details', exc)
             self.assertEqual(exc['access_violation_details']['operation'], 'WRITE')
             self.assertTrue(exc['access_violation_details']['is_null_pointer_dereference'])
+            # Thread register extraction
+            self.assertIn('thread_registers', exc)
+            self.assertEqual(exc['thread_registers']['arch'], 'x86')
+            self.assertEqual(exc['thread_registers']['eip'], '0x401050')
+            self.assertEqual(exc['thread_registers']['esp'], '0x12ff00')
+            self.assertEqual(exc['thread_registers']['ebp'], '0x12ff50')
         finally:
             if os.path.exists(tpath):
                 os.unlink(tpath)
@@ -1732,6 +1746,12 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("evidence_graph", dossier)
         self.assertGreater(dossier["evidence_graph"]["total_nodes"], 10)
         self.assertTrue(dossier["mermaid_diagram"].startswith("flowchart TD"))
+        self.assertIn("epistemic_classification", dossier)
+        self.assertIn("facts", dossier["epistemic_classification"])
+        self.assertIn("observations", dossier["epistemic_classification"])
+        self.assertIn("hypotheses", dossier["epistemic_classification"])
+        self.assertGreater(len(dossier["epistemic_classification"]["facts"]), 0)
+        self.assertGreater(len(dossier["epistemic_classification"]["hypotheses"]), 0)
 
     def test_mcp_server_evidence_graph_dispatch(self):
         """Verifies MCP server protocol dispatch for rea_evidence_graph."""
@@ -1746,6 +1766,56 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("graph", res)
         self.assertIn("mermaid_diagram", res)
 
+
+
+    def test_causality_synthesizer_no_presumptive_fallback(self):
+        """Verifies no presumptive fallback when fault_module is missing from crash record."""
+        from windows_intelligence.evidence_engine import CausalitySynthesizer
+        cmd_path = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "System32", "cmd.exe")
+        crash_no_mod = {
+            "source": "WER_REPORT",
+            "exception_code": "0xc0000005",
+            "exception_name": "STATUS_ACCESS_VIOLATION",
+            "fault_offset": "0x1000"
+            # fault_module explicitly omitted
+        }
+        dossier = CausalitySynthesizer.synthesize_dossier(cmd_path, crash_record=crash_no_mod)
+        self.assertEqual(dossier["status"], "success")
+        self.assertFalse(dossier["binary_mapping"]["is_internal_fault"])
+        self.assertEqual(dossier["binary_mapping"]["external_fault_module"], "UNKNOWN_MODULE")
+        self.assertEqual(dossier["binary_mapping"]["attribution"], "ATTRIBUTION_UNKNOWN")
+
+    def test_registry_subkeys_and_three_state_policies(self):
+        """Verifies registry subkey enumeration and 3-state policy status (SafeDllSearchMode, EnableLUA)."""
+        from windows_intelligence.registry_intelligence import WindowsRegistryReader, WindowsRegistryAnalyzer
+        subkeys = WindowsRegistryReader.enumerate_subkeys(
+            WindowsRegistryReader.HIVE_MAP["HKLM"],
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+            max_subkeys=20
+        )
+        self.assertIsInstance(subkeys, list)
+        self.assertGreater(len(subkeys), 0)
+
+        policies = WindowsRegistryAnalyzer.evaluate_critical_policies()
+        self.assertIn("safedllsearch_mode_status", policies)
+        self.assertIn(policies["safedllsearch_mode_status"], (
+            "EXPLICIT_ENABLED", "EXPLICIT_DISABLED", "NOT_CONFIGURED (OS_DEFAULT_ENABLED)"
+        ))
+        self.assertIn("uac_status", policies)
+        self.assertIn(policies["uac_status"], (
+            "EXPLICIT_ENABLED", "EXPLICIT_DISABLED", "NOT_CONFIGURED (OS_DEFAULT_ENABLED)"
+        ))
+
+    def test_command_executor_privilege_and_output_guards(self):
+        """Verifies CommandExecutor administrative privilege gating and output limit."""
+        from windows_intelligence.command_engine import CommandExecutor, CommandCatalog
+        spec = CommandCatalog.get_spec("bcdedit_enum")
+        if spec and spec.requires_admin:
+            from windows_intelligence.security_inspector import WindowsSecurityInspector
+            if not WindowsSecurityInspector.is_elevated():
+                res = CommandExecutor.execute("bcdedit_enum")
+                self.assertEqual(res["status"], "error")
+                self.assertIn("requires elevated administrative privileges", res["error"])
 
 if __name__ == "__main__":
     unittest.main()

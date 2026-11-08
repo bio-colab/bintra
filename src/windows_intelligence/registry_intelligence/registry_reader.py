@@ -38,12 +38,41 @@ class WindowsRegistryReader:
     }
 
     @classmethod
+    def enumerate_subkeys(
+        cls,
+        hive_handle: int,
+        subkey: str,
+        view_flag: int = 0,
+        max_subkeys: int = 100
+    ) -> List[str]:
+        """Enumerates child subkey names under a given registry path in a specific view."""
+        if not winreg:
+            return []
+        access = winreg.KEY_READ | view_flag
+        subkeys = []
+        try:
+            with winreg.OpenKey(hive_handle, subkey, 0, access) as key:
+                idx = 0
+                while len(subkeys) < max_subkeys:
+                    try:
+                        child = winreg.EnumKey(key, idx)
+                        subkeys.append(child)
+                        idx += 1
+                    except OSError:
+                        break
+        except Exception:
+            pass
+        return subkeys
+
+    @classmethod
     def _read_single_view(
         cls,
         hive_handle: int,
         subkey: str,
         view_flag: int,
-        target_values: Optional[Tuple[str, ...]] = None
+        target_values: Optional[Tuple[str, ...]] = None,
+        include_subkeys: bool = False,
+        max_subkeys: int = 50
     ) -> Dict[str, Any]:
         """Reads values from a key using an explicit architecture view flag."""
         if not winreg:
@@ -77,11 +106,32 @@ class WindowsRegistryReader:
                         except OSError:
                             break
 
-                return {
+                result: Dict[str, Any] = {
                     "exists": True,
                     "values_count": len(values),
                     "values": values
                 }
+
+                if include_subkeys:
+                    subkeys = cls.enumerate_subkeys(hive_handle, subkey, view_flag, max_subkeys=max_subkeys)
+                    result["subkeys_count"] = len(subkeys)
+                    result["subkeys"] = subkeys
+
+                    # Deep sample child values if target_values was specified
+                    if target_values and len(target_values) > 0 and subkeys:
+                        child_samples = {}
+                        for child in subkeys[:20]:
+                            child_path = f"{subkey}\\{child}"
+                            c_res = cls._read_single_view(
+                                hive_handle, child_path, view_flag,
+                                target_values=target_values, include_subkeys=False
+                            )
+                            if c_res.get("exists") and c_res.get("values"):
+                                child_samples[child] = c_res.get("values")
+                        if child_samples:
+                            result["child_values"] = child_samples
+
+                return result
         except FileNotFoundError:
             return {"exists": False}
         except PermissionError:
@@ -94,7 +144,9 @@ class WindowsRegistryReader:
         cls,
         hive: str,
         subkey: str,
-        target_values: Optional[Tuple[str, ...]] = None
+        target_values: Optional[Tuple[str, ...]] = None,
+        include_subkeys: bool = False,
+        max_subkeys: int = 50
     ) -> Dict[str, Any]:
         """
         Queries a registry key under both 64-bit and 32-bit perspectives,
@@ -111,8 +163,8 @@ class WindowsRegistryReader:
         flag_64 = getattr(winreg, "KEY_WOW64_64KEY", 0x0100) if winreg else 0x0100
         flag_32 = getattr(winreg, "KEY_WOW64_32KEY", 0x0200) if winreg else 0x0200
 
-        res_64 = cls._read_single_view(hive_handle, subkey, flag_64, target_values)
-        res_32 = cls._read_single_view(hive_handle, subkey, flag_32, target_values)
+        res_64 = cls._read_single_view(hive_handle, subkey, flag_64, target_values, include_subkeys=include_subkeys, max_subkeys=max_subkeys)
+        res_32 = cls._read_single_view(hive_handle, subkey, flag_32, target_values, include_subkeys=include_subkeys, max_subkeys=max_subkeys)
 
         # Detect discrepancies between views
         has_discrepancy = False
@@ -133,6 +185,14 @@ class WindowsRegistryReader:
                 if v64 != v32:
                     has_discrepancy = True
                     discrepancy_details.append(f"Value '{k}' differs: 64-bit='{v64}' vs 32-bit='{v32}'")
+
+            if include_subkeys:
+                sub_64 = set(res_64.get("subkeys", []))
+                sub_32 = set(res_32.get("subkeys", []))
+                if sub_64 != sub_32:
+                    has_discrepancy = True
+                    diff_cnt = abs(len(sub_64) - len(sub_32))
+                    discrepancy_details.append(f"Child subkey count differs: 64-bit={len(sub_64)} vs 32-bit={len(sub_32)} (diff={diff_cnt})")
 
         return {
             "status": "success",

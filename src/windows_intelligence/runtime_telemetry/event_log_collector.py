@@ -30,6 +30,8 @@ class EventLogCollector:
         0xE06D7363: "STATUS_CPP_EXCEPTION"
     }
 
+    LAST_QUERY_ERRORS: List[str] = []
+
     @classmethod
     def _execute_wevtutil_query(cls, channel: str, xpath: str, max_events: int = 20) -> List[ET.Element]:
         """Safely queries Windows Event Log using wevtutil and parses rendered XML."""
@@ -46,9 +48,14 @@ class EventLogCollector:
 
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
-            if res.returncode != 0 or not res.stdout:
+            if res.returncode != 0:
+                err_msg = res.stderr.strip() or f"wevtutil exited with code {res.returncode} on channel '{channel}'"
+                cls.LAST_QUERY_ERRORS.append(err_msg)
                 return []
-        except Exception:
+            if not res.stdout:
+                return []
+        except Exception as e:
+            cls.LAST_QUERY_ERRORS.append(f"wevtutil execution exception on channel '{channel}': {str(e)}")
             return []
 
         raw_xml = f"<Events>{res.stdout}</Events>"
@@ -247,7 +254,7 @@ class EventLogCollector:
         Queries System Event Log for Kernel-Power (Event ID 41) or BugCheck (Event ID 1001)
         representing full host kernel panics or unexpected shutdowns.
         """
-        xpath = "*[System[(EventID=41 or EventID=1001) and (Provider[@Name='Microsoft-Windows-Kernel-Power' or Provider[@Name='BugCheck'])]]"
+        xpath = "*[System[(EventID=41 or EventID=1001) and (Provider[@Name='Microsoft-Windows-Kernel-Power'] or Provider[@Name='BugCheck'] or Provider[@Name='Microsoft-Windows-WER-SystemErrorReporting'])]]"
         event_nodes = cls._execute_wevtutil_query("System", xpath, max_events)
 
         events = []
@@ -273,14 +280,18 @@ class EventLogCollector:
     @classmethod
     def collect_all_telemetry(cls, app_name_filter: Optional[str] = None) -> Dict[str, Any]:
         """Gathers unified event log failure telemetry across all failure categories."""
+        cls.LAST_QUERY_ERRORS = []
         crashes = cls.query_application_errors(app_name_filter)
         wers = cls.query_wer_events(app_name_filter)
         hangs = cls.query_application_hangs(app_name_filter)
         system_events = cls.query_system_crashes(max_events=3)
 
+        status_str = "success" if not cls.LAST_QUERY_ERRORS else "partial_success"
+
         return {
-            "status": "success",
+            "status": status_str,
             "filter": app_name_filter,
+            "query_errors": list(cls.LAST_QUERY_ERRORS),
             "counts": {
                 "application_crashes_1000": len(crashes),
                 "wer_events_1001": len(wers),

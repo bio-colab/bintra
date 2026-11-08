@@ -18,6 +18,7 @@ class RegistryKeySpec:
     target_values: Tuple[str, ...]
     description: str
     diagnostic_significance: str
+    include_subkeys: bool = False
 
 
 class RegistryCatalog:
@@ -91,7 +92,8 @@ class RegistryCatalog:
             subkey=r"SYSTEM\CurrentControlSet\Services",
             target_values=("Type", "Start", "ErrorControl", "ImagePath"),
             description="Windows service configurations, driver binaries, and startup policies",
-            diagnostic_significance="Detects disabled or misconfigured dependency services and driver roots"
+            diagnostic_significance="Detects disabled or misconfigured dependency services and driver roots",
+            include_subkeys=True
         ),
         # 6. Device Configuration
         RegistryKeySpec(
@@ -100,7 +102,8 @@ class RegistryCatalog:
             subkey=r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}",
             target_values=("DriverDesc", "DriverVersion", "ProviderName", "MatchingDeviceId"),
             description="Display adapter driver class registry nodes",
-            diagnostic_significance="Identifies GPU hardware ID, vendor, and installed driver release"
+            diagnostic_significance="Identifies GPU hardware ID, vendor, and installed driver release",
+            include_subkeys=True
         ),
         # 7. Security Policies
         RegistryKeySpec(
@@ -127,7 +130,8 @@ class RegistryCatalog:
             subkey=r"CLSID",
             target_values=("InprocServer32",),
             description="Component Object Model class identifier mappings and implementing DLLs",
-            diagnostic_significance="Diagnoses REGDB_E_CLASSNOTREG (0x80040154) when COM objects fail to instantiate"
+            diagnostic_significance="Diagnoses REGDB_E_CLASSNOTREG (0x80040154) when COM objects fail to instantiate",
+            include_subkeys=True
         ),
         # 10. Boot Configuration
         RegistryKeySpec(
@@ -145,7 +149,8 @@ class RegistryCatalog:
             subkey=r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
             target_values=("DisplayName", "DisplayVersion", "Publisher", "InstallLocation"),
             description="Installed software inventory, runtimes, and redistributable packages",
-            diagnostic_significance="Verifies presence of Visual C++ Redistributable packages and DirectX runtimes"
+            diagnostic_significance="Verifies presence of Visual C++ Redistributable packages and DirectX runtimes",
+            include_subkeys=True
         )
     ]
 

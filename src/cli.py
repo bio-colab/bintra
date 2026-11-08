@@ -275,7 +275,7 @@ def main():
             if args.domain:
                 report = WindowsRegistryAnalyzer.audit_domain(args.domain)
             else:
-                report = WindowsRegistryAnalyzer.audit_all()
+                report = WindowsRegistryAnalyzer.audit_all(target_binary_path=args.binary)
 
             if args.format == "md":
                 lines = [

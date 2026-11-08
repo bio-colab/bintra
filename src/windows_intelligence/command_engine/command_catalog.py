@@ -186,10 +186,11 @@ class CommandCatalog:
         if os.path.isfile(candidate):
             return candidate
 
-        # Fallback to PATH search
-        path_env = os.environ.get("PATH", "")
-        for p in path_env.split(os.pathsep):
-            c = os.path.join(p.strip('"'), binary_name)
-            if os.path.isfile(c):
-                return c
+        # Fallback strictly to trusted system directories (SysWOW64, Windows)
+        syswow64 = os.path.join(windir, "SysWOW64", binary_name)
+        if os.path.isfile(syswow64):
+            return syswow64
+        win_bin = os.path.join(windir, binary_name)
+        if os.path.isfile(win_bin):
+            return win_bin
         return None

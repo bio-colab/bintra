@@ -6,6 +6,7 @@ enforcing timeouts, build compatibility gates, and typed schema validation.
 """
 
 import os
+import sys
 import time
 import subprocess
 from datetime import datetime, timezone
@@ -41,14 +42,31 @@ class CommandExecutor:
             }
 
         # 1. Build Compatibility Check
-        if current_build is not None and current_build < spec.min_windows_build:
+        actual_build = current_build
+        if actual_build is None and sys.platform == "win32":
+            try:
+                actual_build = sys.getwindowsversion().build
+            except Exception:
+                actual_build = None
+
+        if actual_build is not None and actual_build < spec.min_windows_build:
             return {
                 "status": "error",
                 "command_id": command_id,
-                "error": f"Command requires Windows Build >= {spec.min_windows_build} (Current: {current_build})."
+                "error": f"Command requires Windows Build >= {spec.min_windows_build} (Current: {actual_build})."
             }
 
-        # 2. Strict Argument Whitelisting Check
+        # 2. Administrative Privilege Gate
+        if spec.requires_admin:
+            from ..security_inspector import WindowsSecurityInspector
+            if not WindowsSecurityInspector.is_elevated():
+                return {
+                    "status": "error",
+                    "command_id": command_id,
+                    "error": f"Command '{command_id}' requires elevated administrative privileges (spec.requires_admin=True)."
+                }
+
+        # 3. Strict Argument Whitelisting Check
         validated_extra = []
         if extra_flags:
             for flag in extra_flags:
@@ -92,8 +110,13 @@ class CommandExecutor:
                     "error": res.stderr.strip() or "Command execution returned non-zero exit code without stdout."
                 }
 
-            # 6. Parse Output into Typed Schema
-            parsed_data = OutputParsers.dispatch_parser(spec.parser_name, res.stdout)
+            # 6. Parse Output into Typed Schema (with 5MB output guard)
+            stdout_text = res.stdout
+            MAX_OUTPUT_BYTES = 5 * 1024 * 1024  # 5 MB
+            if len(stdout_text.encode('utf-8', errors='ignore')) > MAX_OUTPUT_BYTES:
+                stdout_text = stdout_text[:MAX_OUTPUT_BYTES] + "\n... [OUTPUT TRUNCATED AT 5MB SAFETY LIMIT]"
+
+            parsed_data = OutputParsers.dispatch_parser(spec.parser_name, stdout_text)
 
             return {
                 "status": "success",

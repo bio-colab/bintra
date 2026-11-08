@@ -1,8 +1,8 @@
 # Ghidra Integration Architecture & Operational Guide (v7.3.0)
 
 ## Overview
-REA-Neural establishes a verified, bidirectional, closed-loop integration with **Ghidra 12.1.x / 11.x**.
-Rather than treating Ghidra as a detached decompiler or requiring manual JSON preparation, REA-Neural provides native in-engine Ghidra scripts (`ghidra_scripts/`) and automated CLI pipelines that execute the complete 6-step symbiotic reverse engineering cycle.
+REA-Neural provides **file-exchange + headless orchestration** integration with Ghidra (target 12.1.x / 11.x, **unverified**).
+> **Honest status (aligned with `README.md`):** there is **no live TCP/socket bridge** to a running Ghidra instance. What ships is: (a) in-engine scripts (`ghidra_scripts/ReaNeuralGhidraBridge.java`, `rea_extract_pcode.py`), (b) a headless orchestrator (`cli.py ghidra-headless`) that launches `analyzeHeadless.bat` with the bridge as a `-postScript`, and (c) a P-code vectorizer/matcher plus an annotation **plan generator** (`cli.py ghidra-analyze`) that consumes exported JSON. The 6-step cycle below is the DESIGN; the loop is only truly closed once `rea_extract_pcode.py` exports live P-code into `ghidra-analyze` automatically.
 
 ---
 

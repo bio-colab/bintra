@@ -47,7 +47,7 @@ class PowerShellExecutor:
         if not os.path.isfile(ps_exe):
             ps_exe = "powershell.exe"
 
-        command_str = f"{cmdlet} | ConvertTo-Json -Compress"
+        command_str = f"{cmdlet} | ConvertTo-Json -Depth 4 -Compress"
         cmd_vector = [
             ps_exe,
             "-NoProfile",

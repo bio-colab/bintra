@@ -2,13 +2,15 @@
 name: reverse-engineer-anything
 description: Reverse engineer native, managed, Electron/JavaScript, packaged, firmware, browser, and modern hybrid targets with REA, featuring continuous semantic deobfuscation, cross-architecture function matching, surgical binary patching, and weight-space neural program analysis. Use shipped-artifact or requested runtime evidence to explain features, compare versions, decompile code, or guide a reconstruction.
 metadata:
-  version: "7.3.0"
-  tool_count: 13
+  version: "7.4.0"
+  tool_count: 25
 ---
 
 # REA
 
-> **REA-Neural Agent-Native Architecture (v7.3.0):**  
+> **Fork honesty note:** this Windows-native fork ships a **25-tool Python MCP server** (`src/mcp_server.py`) + the Unified CLI. References below to the `rea-agents` npm package, `analyze-javascript-application`, Android, or Hopper are **inherited from upstream REA and are NOT shipped here**; use `python src/cli.py <command>` or the `rea_*` MCP tools instead.
+>
+> **REA-Neural Agent-Native Architecture (v7.4.0):**  
 > This repository ships its own native Python Model Context Protocol (MCP) server ([`src/mcp_server.py`](../../src/mcp_server.py) or `python src/cli.py mcp`)
 > providing 13 direct, type-safe reverse engineering tools for AI models (`rea_inspect_binary`, `rea_deobfuscate_binary`,
 > `rea_match_functions`, `rea_patch_binary`, `rea_dump_bytes`, `rea_scan_hybrid`, `rea_sensory_audit`, `rea_match_pcode`,

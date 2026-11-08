@@ -543,7 +543,7 @@ def main():
             parser = argparse.ArgumentParser(description="Run Ghidra headless analysis with REA-Neural bridge script")
             parser.add_argument("command")
             parser.add_argument("--binary", "--file", "--input", dest="binary", required=True, help="Path to target executable (PE/ELF)")
-            parser.add_argument("--ghidra-path", default=os.environ.get("GHIDRA_INSTALL_DIR", r"C:\Users\Eylias\tools\ghidra"), help="Ghidra installation directory")
+            parser.add_argument("--ghidra-path", default=os.environ.get("GHIDRA_INSTALL_DIR", r"C:\ghidra"), help="Ghidra installation directory")
             parser.add_argument("--project-dir", default=None, help="Ghidra project directory (default: temp)")
             parser.add_argument("--project-name", default="REANeuralHeadless", help="Ghidra project name")
             parser.add_argument("--apply", action="store_true", help="Automatically commit mutations to Ghidra database")

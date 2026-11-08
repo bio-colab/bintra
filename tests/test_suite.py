@@ -1031,6 +1031,13 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         # mcp_server.py
         from mcp_server import SERVER_VERSION
         self.assertEqual(SERVER_VERSION, "7.4.0")
+        # SKILL.md
+        skill_file = os.path.join(repo_root, "skills", "reverse-engineer-anything", "SKILL.md")
+        if os.path.exists(skill_file):
+            with open(skill_file, "r", encoding="utf-8") as sf:
+                skill_content = sf.read()
+                self.assertIn('version: "7.4.0"', skill_content)
+                self.assertIn('tool_count: 25', skill_content)
 
 
     def test_ssa_analyzer_negative_same_seq_different_address(self):

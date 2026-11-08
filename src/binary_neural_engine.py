@@ -1618,7 +1618,9 @@ class SensoryCortex:
             "score_semantics": (
                 "efficiency_score/overall_sensory_efficiency are STATIC capability-presence "
                 "indicators (fixed per sense), NOT measured accuracy. Read each sense's "
-                "'telemetry' for the real computed values."
+                "'telemetry' for the real computed values. When no --file/--hex input is "
+                "supplied, a FIXED synthetic code sample is analyzed, so senses still "
+                "report activity without a real target."
             ),
             "senses": senses_output,
         }

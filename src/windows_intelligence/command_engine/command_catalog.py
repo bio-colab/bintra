@@ -85,7 +85,7 @@ class CommandCatalog:
             command_id="service_list",
             binary_name="sc.exe",
             fixed_arguments=("query", "type=", "service"),
-            allowed_flags=(),
+            allowed_flags=("state= all", "state= inactive"),
             min_windows_build=2600,
             requires_admin=False,
             timeout_seconds=15,

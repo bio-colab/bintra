@@ -768,8 +768,10 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
         tools_res = server.handle_tools_list({})
         self.assertIn("tools", tools_res)
-        self.assertEqual(len(tools_res["tools"]), 25)
+        self.assertEqual(len(tools_res["tools"]), 27)
         tool_names = [t["name"] for t in tools_res["tools"]]
+        self.assertIn("rea_device_driver_intelligence", tool_names)
+        self.assertIn("rea_process_resource_audit", tool_names)
         self.assertIn("rea_hardware_audit", tool_names)
         self.assertIn("rea_driver_audit", tool_names)
         self.assertIn("rea_service_audit", tool_names)
@@ -1037,7 +1039,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             with open(skill_file, "r", encoding="utf-8") as sf:
                 skill_content = sf.read()
                 self.assertIn('version: "7.4.0"', skill_content)
-                self.assertIn('tool_count: 25', skill_content)
+                self.assertIn('tool_count: 27', skill_content)
 
 
     def test_ssa_analyzer_negative_same_seq_different_address(self):
@@ -2106,6 +2108,94 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertEqual(res["dispatcher_comparisons_count"], 3)
         self.assertEqual(res["state_transitions_count"], 3)
         self.assertGreater(res["dispatcher_cadence_regularity"], 0.0)
+
+
+    @unittest.skipUnless(sys.platform == 'win32', "Windows SetupAPI & Device Inspector tests require Windows host")
+    def test_native_device_inspector_instance_id_and_multi_sz(self):
+        """Verifies Track 1: SetupDiGetDeviceInstanceIdW string IDs and REG_MULTI_SZ hardware IDs."""
+        from windows_intelligence.system_introspection import NativeDeviceInspector
+        from windows_intelligence.device_intelligence import DeviceIdentity, DriverMatcher
+
+        devs = NativeDeviceInspector.enumerate_devices(max_devices=32)
+        self.assertIsInstance(devs, list)
+        self.assertGreater(len(devs), 0)
+
+        # Inspect first valid device with instance_id
+        valid_devs = [d for d in devs if d.get("device_instance_id")]
+        self.assertGreater(len(valid_devs), 0)
+        sample = valid_devs[0]
+
+        # Ensure instance_id is real string (e.g. PCI\VEN_... or ROOT\... or USB\...)
+        self.assertIsInstance(sample["device_instance_id"], str)
+        self.assertGreater(len(sample["device_instance_id"]), 3)
+
+        # Ensure hardware_ids is list
+        self.assertIsInstance(sample["hardware_ids"], list)
+
+        # Ensure problem status is properly parsed
+        self.assertIn("has_problem", sample)
+        self.assertIn("problem_name", sample)
+
+        # Test DeviceIdentity parser
+        parsed = DeviceIdentity.parse_device_instance(sample)
+        self.assertIn("bus_type", parsed)
+
+    @unittest.skipUnless(sys.platform == 'win32', "Windows Restart Manager tests require Windows host")
+    def test_file_usage_inspector_restart_manager(self):
+        """Verifies Track 2: Native Windows Restart Manager discovers file lock holders."""
+        from windows_intelligence.process_intelligence import FileUsageInspector
+
+        # Create temporary locked file
+        with tempfile.NamedTemporaryFile(delete=False) as tf:
+            tf.write(b"lock_test_payload_rea_neural")
+            tf.flush()
+            temp_path = tf.name
+
+        try:
+            # Open file with exclusive lock in current process
+            with open(temp_path, "r+b") as locked_f:
+                res = FileUsageInspector.inspect_file_locks(temp_path)
+                self.assertTrue(res["is_locked"])
+                self.assertGreater(res["locking_processes_count"], 0)
+                pids = [p["process_id"] for p in res["locking_processes"]]
+                self.assertIn(os.getpid(), pids)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    @unittest.skipUnless(sys.platform == 'win32', "Windows Toolhelp32 & Process Inventory require Windows host")
+    def test_process_inventory_and_service_mapper(self):
+        """Verifies Track 2: Process inventory, process tree, and SCM service mapping."""
+        from windows_intelligence.process_intelligence import ProcessInventory, ServiceProcessMapper
+
+        # Test process enumeration
+        procs = ProcessInventory.enumerate_processes(resolve_paths=False)
+        self.assertIsInstance(procs, list)
+        self.assertGreater(len(procs), 0)
+        cur_pid = os.getpid()
+        self.assertTrue(any(p["process_id"] == cur_pid for p in procs))
+
+        # Test process tree
+        tree = ProcessInventory.get_process_tree()
+        self.assertIn("total_processes", tree)
+        self.assertIn("process_tree", tree)
+        self.assertGreater(tree["total_processes"], 0)
+
+        # Test service-to-process mapper
+        svc_map = ServiceProcessMapper.get_service_process_mapping()
+        self.assertIn("running_services_with_pid", svc_map)
+        self.assertIn("service_host_groups_count", svc_map)
+
+    @unittest.skipUnless(sys.platform == 'win32', "Driver Matcher requires Windows host")
+    def test_driver_matcher_audit(self):
+        """Verifies Track 1: Driver matcher correlates devices with driver rank."""
+        from windows_intelligence.device_intelligence import DriverMatcher
+
+        audit_res = DriverMatcher.audit_device_driver_bindings(max_devices=10)
+        self.assertEqual(audit_res["status"], "success")
+        self.assertIn("devices_audited", audit_res)
+        self.assertIn("driver_packages_cataloged", audit_res)
+        self.assertIn("device_reports", audit_res)
 
 if __name__ == "__main__":
     unittest.main()

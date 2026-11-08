@@ -94,6 +94,12 @@ class NativeDeviceInspector:
                 ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)
             ]
 
+            setupapi.SetupDiGetDeviceInstanceIdW.restype = wintypes.BOOL
+            setupapi.SetupDiGetDeviceInstanceIdW.argtypes = [
+                ctypes.c_void_p, ctypes.POINTER(SP_DEVINFO_DATA),
+                ctypes.c_wchar_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)
+            ]
+
             setupapi.SetupDiDestroyDeviceInfoList.restype = wintypes.BOOL
             setupapi.SetupDiDestroyDeviceInfoList.argtypes = [ctypes.c_void_p]
 
@@ -122,6 +128,26 @@ class NativeDeviceInspector:
             ctypes.byref(req_size)
         )
         return buf.value.strip() if success and buf.value else None
+
+    @classmethod
+    def _read_multi_sz_property(cls, setupapi, dev_info: int, dev_data: SP_DEVINFO_DATA, prop_id: int) -> List[str]:
+        """Reads a REG_MULTI_SZ property containing multiple null-terminated wide strings."""
+        buf = (ctypes.c_wchar * 2048)()
+        prop_type = wintypes.DWORD()
+        req_size = wintypes.DWORD()
+        success = setupapi.SetupDiGetDeviceRegistryPropertyW(
+            dev_info,
+            ctypes.byref(dev_data),
+            prop_id,
+            ctypes.byref(prop_type),
+            ctypes.byref(buf),
+            ctypes.sizeof(buf),
+            ctypes.byref(req_size)
+        )
+        if success and req_size.value > 0:
+            raw_wchars = buf[:req_size.value // 2]
+            return [s for s in raw_wchars.split('\x00') if s]
+        return []
 
     @classmethod
     def enumerate_devices(
@@ -154,6 +180,14 @@ class NativeDeviceInspector:
                 break
             idx += 1
 
+            # Read Device Instance ID (the true canonical string ID, e.g. PCI\VEN_... or USB\VID_...)
+            id_buf = (ctypes.c_wchar * 512)()
+            req_id_sz = wintypes.DWORD()
+            if setupapi.SetupDiGetDeviceInstanceIdW(dev_info, ctypes.byref(dev_data), id_buf, len(id_buf), ctypes.byref(req_id_sz)):
+                inst_id_str = id_buf.value
+            else:
+                inst_id_str = f"DevNode_{dev_data.DevInst}"
+
             # Query device status via Configuration Manager (CfgMgr32)
             dev_status = wintypes.DWORD()
             problem_code = wintypes.DWORD()
@@ -164,16 +198,19 @@ class NativeDeviceInspector:
                 0
             )
 
-            has_problem = (cr == 0 and bool(dev_status.value & cls.DN_HAS_PROBLEM))
-            prob_num = problem_code.value if cr == 0 else -1
+            status_available = (cr == 0)
+            has_problem = (status_available and bool(dev_status.value & cls.DN_HAS_PROBLEM))
+            prob_num = problem_code.value if status_available else 0
 
-            if filter_problems_only and not has_problem and prob_num == 0:
+            # Filter out healthy devices when filter_problems_only is requested
+            if filter_problems_only and not has_problem:
                 continue
 
             # Read device properties
             dev_desc = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_DEVICEDESC)
             friendly_name = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_FRIENDLYNAME)
-            hw_id = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_HARDWAREID)
+            hw_ids = cls._read_multi_sz_property(setupapi, dev_info, dev_data, cls.SPDRP_HARDWAREID)
+            compat_ids = cls._read_multi_sz_property(setupapi, dev_info, dev_data, cls.SPDRP_COMPATIBLEIDS)
             cls_name = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_CLASS)
             service = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_SERVICE)
             driver = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_DRIVER)
@@ -186,18 +223,22 @@ class NativeDeviceInspector:
             name_repr = friendly_name or dev_desc or "Unknown PnP Device"
 
             devices.append({
-                "device_instance_id": dev_data.DevInst,
+                "device_instance_id": inst_id_str,
+                "devnode_handle": dev_data.DevInst,
                 "name": name_repr,
                 "description": dev_desc,
                 "class": cls_name,
-                "hardware_id": hw_id,
+                "hardware_id": hw_ids[0] if hw_ids else None,
+                "hardware_ids": hw_ids,
+                "compatible_ids": compat_ids,
                 "service": service,
                 "driver_key": driver,
                 "manufacturer": mfg,
-                "is_started": bool(dev_status.value & cls.DN_STARTED) if cr == 0 else False,
+                "is_started": bool(dev_status.value & cls.DN_STARTED) if status_available else False,
                 "has_problem": has_problem,
                 "problem_code": prob_num,
-                "problem_name": cls.CM_PROBLEM_NAMES.get(prob_num, f"CM_PROB_{prob_num}")
+                "problem_name": cls.CM_PROBLEM_NAMES.get(prob_num, f"CM_PROB_{prob_num}"),
+                "status_available": status_available
             })
 
         setupapi.SetupDiDestroyDeviceInfoList(dev_info)

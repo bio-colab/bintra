@@ -162,6 +162,38 @@ class CausalitySynthesizer:
                 if correlated:
                     graph.add_edge(disp_id, drv_id, relation="RESOLVES_TO_DRIVER")
 
+        # 5.1 Process & Resource Intelligence: File Locks and Active Instances
+        try:
+            from ..process_intelligence import FileUsageInspector, ProcessInventory
+            locks = FileUsageInspector.inspect_file_locks(norm_path)
+            if locks.get("is_locked"):
+                for proc in locks.get("locking_processes", []):
+                    lock_pid = proc.get("process_id")
+                    lock_id = f"LOCK:{lock_pid}"
+                    graph.add_node(
+                        lock_id,
+                        node_type="FILE_LOCK",
+                        label=f"Locked by: {proc.get('app_name', 'PID')} ({lock_pid})",
+                        process_id=lock_pid,
+                        app_name=proc.get("app_name")
+                    )
+                    graph.add_edge(bin_id, lock_id, relation="LOCKED_BY")
+
+            active_procs = ProcessInventory.find_processes_by_file(norm_path)
+            for ap in active_procs:
+                ap_pid = ap.get("process_id")
+                proc_id = f"PROC:{ap_pid}"
+                graph.add_node(
+                    proc_id,
+                    node_type="RUNNING_INSTANCE",
+                    label=f"Running: {ap.get('exe_name', bin_name)} ({ap_pid})",
+                    process_id=ap_pid,
+                    parent_process_id=ap.get("parent_process_id")
+                )
+                graph.add_edge(bin_id, proc_id, relation="RUNNING_AS")
+        except Exception:
+            pass
+
         # 6. Ghidra Decompiled AST & P-Code Basic Blocks
         func_entry_map = {}
         if ghidra_export:
@@ -327,6 +359,17 @@ class CausalitySynthesizer:
         dep_data = WindowsDependencyResolver.audit_dependencies(norm_path)
         hw_data = WindowsDeviceInspector.audit()
         sec_data = WindowsSecurityInspector.audit(norm_path)
+
+        # Process & Resource Intelligence Telemetry
+        resource_data: Dict[str, Any] = {}
+        try:
+            from ..process_intelligence import FileUsageInspector, ProcessInventory
+            resource_data = {
+                "file_locks": FileUsageInspector.inspect_file_locks(norm_path),
+                "running_instances": ProcessInventory.find_processes_by_file(norm_path)
+            }
+        except Exception as _res_exc:
+            resource_data = {"error": str(_res_exc)}
 
         # 2. Crash Telemetry (if not provided, auto-discover)
         if not crash_record:
@@ -530,6 +573,21 @@ class CausalitySynthesizer:
             f"Security Context: Admin={sec_data.get('is_elevated_admin')}, Directory Writable={sec_data.get('directory_write_permissions', {}).get('is_writable')}."
         )
 
+        # (B.1) Process & Resource Observations and Facts
+        fl = resource_data.get("file_locks", {})
+        if fl.get("is_locked"):
+            p_names = [f"{p.get('app_name', 'PID')} ({p.get('process_id')})" for p in fl.get("locking_processes", [])]
+            facts.append(f"Target file is actively LOCKED on disk by {len(p_names)} process(es): {', '.join(p_names)}.")
+            observations.append(f"File lock handles prevent write, modification, or patching operations on '{bin_name}'.")
+            if not is_internal_fault and not crash_record and verdict == "HEALTHY_ENVIRONMENT":
+                verdict = "FILE_LOCKED_BY_ACTIVE_PROCESS"
+                severity = "WARNING"
+            root_cause_points.append(f"Target binary file is locked by running process(es): {', '.join(p_names)}.")
+            remediation_steps.append("Close or terminate the locking application before attempting to modify or patch the binary.")
+
+        for rproc in resource_data.get("running_instances", []):
+            facts.append(f"Target binary is currently running as active process PID {rproc.get('process_id')} ('{rproc.get('exe_name')}').")
+
         # (C) Diagnostic Hypotheses & Root Cause Synthesis
         if dep_data.get("missing_dlls_count", 0) > 0:
             missing_names = [d["imported_name"] for d in dep_data.get("missing_dlls", [])]
@@ -629,6 +687,7 @@ class CausalitySynthesizer:
             "dependency_health": dep_data,
             "graphics_and_hardware": hw_data,
             "security_and_privileges": sec_data,
+            "resource_and_process_intelligence": resource_data,
             "crash_telemetry": crash_record,
             "binary_mapping": binary_mapping,
             "causal_chain": causal_chain,

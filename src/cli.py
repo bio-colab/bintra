@@ -40,7 +40,7 @@ WEIGHT_COMMANDS = {
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless"}
-WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "driver-audit", "service-audit", "dmp-inspect", "etw-audit"}
+WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match"}
 
 
 def print_help():
@@ -421,7 +421,38 @@ def main():
                 print(json.dumps(report, indent=2, ensure_ascii=False))
             return
 
-        elif cmd == "etw-audit":
+        
+    elif cmd == "file-locks":
+        parser = argparse.ArgumentParser(prog="rea file-locks", description="Detect processes locking a target file")
+        parser.add_argument("--file", required=True, help="Path to file to inspect")
+        args = parser.parse_args(sys.argv[2:])
+        from windows_intelligence.process_intelligence import FileUsageInspector
+        res = FileUsageInspector.inspect_file_locks(args.file)
+        print(json.dumps(res, indent=2, ensure_ascii=False))
+
+    elif cmd == "proc-modules":
+        parser = argparse.ArgumentParser(prog="rea proc-modules", description="Find processes hosting a loaded DLL")
+        parser.add_argument("--module", required=True, help="Module/DLL name or keyword")
+        args = parser.parse_args(sys.argv[2:])
+        from windows_intelligence.process_intelligence import ModuleInventory
+        res = ModuleInventory.find_processes_hosting_module(args.module)
+        print(json.dumps(res, indent=2, ensure_ascii=False))
+
+    elif cmd == "dev-match":
+        parser = argparse.ArgumentParser(prog="rea dev-match", description="Match PnP devices against Driver Store packages")
+        parser.add_argument("--query", default=None, help="Device query name, instance ID, or hardware ID")
+        parser.add_argument("--class-filter", default=None, help="Filter by device class")
+        parser.add_argument("--problems-only", action="store_true", help="Filter to devices with active problem codes")
+        args = parser.parse_args(sys.argv[2:])
+        from windows_intelligence.device_intelligence import DriverMatcher
+        res = DriverMatcher.audit_device_driver_bindings(
+            device_query=args.query,
+            class_filter=args.class_filter,
+            problems_only=args.problems_only
+        )
+        print(json.dumps(res, indent=2, ensure_ascii=False))
+
+    elif cmd == "etw-audit":
             parser = argparse.ArgumentParser(description="Audit ETW trace sessions and diagnostic providers")
             parser.add_argument("command")
             parser.add_argument("--session", default=None, help="Query specific session name")

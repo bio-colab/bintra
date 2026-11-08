@@ -3,18 +3,18 @@ name: reverse-engineer-anything
 description: Reverse engineer native, managed, Electron/JavaScript, packaged, firmware, browser, and modern hybrid targets with REA, featuring continuous semantic deobfuscation, cross-architecture function matching, surgical binary patching, and weight-space neural program analysis. Use shipped-artifact or requested runtime evidence to explain features, compare versions, decompile code, or guide a reconstruction.
 metadata:
   version: "7.4.0"
-  tool_count: 25
+  tool_count: 27
 ---
 
 # REA
 
-> **Fork honesty note:** this Windows-native fork ships a **25-tool Python MCP server** (`src/mcp_server.py`) + the Unified CLI. References below to the `rea-agents` npm package, `analyze-javascript-application`, Android, or Hopper are **inherited from upstream REA and are NOT shipped here**; use `python src/cli.py <command>` or the `rea_*` MCP tools instead.
+> **Fork honesty note:** this Windows-native fork ships a **27-tool Python MCP server** (`src/mcp_server.py`) + the Unified CLI. References below to the `rea-agents` npm package, `analyze-javascript-application`, Android, or Hopper are **inherited from upstream REA and are NOT shipped here**; use `python src/cli.py <command>` or the `rea_*` MCP tools instead.
 >
 > **REA-Neural Agent-Native Architecture (v7.4.0):**  
 > This repository ships its own native Python Model Context Protocol (MCP) server ([`src/mcp_server.py`](../../src/mcp_server.py) or `python src/cli.py mcp`)
-> providing **25 direct, type-safe tools for AI models** structured across two specialized operational tiers:
+> providing **27 direct, type-safe tools for AI models** structured across two specialized operational tiers:
 > 1. **Core Binary & Decompilation Engine (13 Tools):** `rea_inspect_binary`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_dump_bytes`, `rea_scan_hybrid`, `rea_sensory_audit`, `rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`, `rea_wsp_audit`, `rea_patch_weights`.
-> 2. **Windows System Intelligence & Forensics Tier (12 Tools):** `rea_win_os_profile`, `rea_win_resolve_deps`, `rea_win_device_audit`, `rea_win_security_audit`, `rea_win_wer_inspect`, `rea_win_diagnose`, `rea_win_cmd_exec`, `rea_win_ps_exec`, `rea_win_reg_query`, `rea_win_reg_audit`, `rea_win_etw_audit`, `rea_win_events_query`.
+> 2. **Windows System Intelligence & Forensics Tier (14 Tools):** `rea_win_os_profile`, `rea_win_resolve_deps`, `rea_win_device_audit`, `rea_win_security_audit`, `rea_win_wer_inspect`, `rea_win_diagnose`, `rea_win_cmd_exec`, `rea_win_ps_exec`, `rea_win_reg_query`, `rea_win_reg_audit`, `rea_win_etw_audit`, `rea_win_events_query`, `rea_device_driver_intelligence`, `rea_process_resource_audit`.
 > Autonomous agents (Antigravity, Claude Code, Codex, Cursor, Devin) can also execute commands directly via the
 > Unified CLI (`python src/cli.py <command> [options]`). See [`AGENTS.md`](../../AGENTS.md) for the complete agent field guide.
 

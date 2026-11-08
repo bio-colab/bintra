@@ -494,6 +494,66 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
             },
             "required": ["source_path", "output_path", "tensor_name"]
         }
+    },
+    {
+        "name": "rea_device_driver_intelligence",
+        "description": "Deep device identity parsing, PnP hardware topology, Driver Store package matching, and Driver Rank evaluation.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["audit", "match", "find_packages"],
+                    "description": "Action: 'audit' (default device driver audit), 'match' (match hardware IDs), 'find_packages' (search driver packages)",
+                    "default": "audit"
+                },
+                "device_query": {
+                    "type": "string",
+                    "description": "Optional search term matching device name, instance ID, or hardware ID"
+                },
+                "class_filter": {
+                    "type": "string",
+                    "description": "Optional device class filter (e.g. 'Display', 'Net', 'USB', 'Audio')"
+                },
+                "problems_only": {
+                    "type": "boolean",
+                    "description": "Filter to devices with active problem codes (CM_PROB_*)",
+                    "default": False
+                },
+                "max_devices": {
+                    "type": "integer",
+                    "description": "Maximum number of devices to inspect",
+                    "default": 64
+                }
+            }
+        }
+    },
+    {
+        "name": "rea_process_resource_audit",
+        "description": "Inspects running processes, in-memory loaded modules, file lock handles via Windows Restart Manager, and service-to-process hosting mappings.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["find_file_locks", "find_module_holders", "process_tree", "service_process_map", "audit_process"],
+                    "description": "Action: 'find_file_locks' (discover processes locking a file), 'find_module_holders' (find processes with DLL loaded), 'process_tree' (parent-child tree), 'service_process_map' (services hosted in processes), 'audit_process' (inspect PID)",
+                    "default": "find_file_locks"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Absolute path to file on disk to check for active lock handles or running image"
+                },
+                "module_query": {
+                    "type": "string",
+                    "description": "DLL name or keyword to search across loaded process modules"
+                },
+                "pid": {
+                    "type": "integer",
+                    "description": "Process ID for detailed inspection"
+                }
+            }
+        }
     }
 ]
 
@@ -805,6 +865,58 @@ class ReaMcpServer:
                 operation="column_direction_subtract",
                 num_columns=num_cols
             )
+
+        elif name == "rea_device_driver_intelligence":
+            from windows_intelligence.device_intelligence import DriverMatcher, DriverPackageInventory
+            action = args.get("action", "audit")
+            query = args.get("device_query")
+            c_filter = args.get("class_filter")
+            prob_only = args.get("problems_only", False)
+
+            if action == "find_packages":
+                pkgs = DriverPackageInventory.find_driver_package_by_name(query or "")
+                return {"status": "success", "query": query, "packages_count": len(pkgs), "packages": pkgs}
+            return DriverMatcher.audit_device_driver_bindings(
+                device_query=query,
+                class_filter=c_filter,
+                problems_only=prob_only,
+                max_devices=int(args.get("max_devices", 64))
+            )
+
+        elif name == "rea_process_resource_audit":
+            from windows_intelligence.process_intelligence import FileUsageInspector, ModuleInventory, ProcessInventory, ServiceProcessMapper
+            action = args.get("action", "find_file_locks")
+            f_path = args.get("file_path")
+            pid = args.get("pid")
+            mod_q = args.get("module_query")
+
+            if action == "find_file_locks":
+                if not f_path:
+                    return {"status": "error", "error": "file_path is required for action 'find_file_locks'"}
+                return FileUsageInspector.inspect_file_locks(f_path)
+            elif action == "find_module_holders":
+                if not mod_q:
+                    return {"status": "error", "error": "module_query is required for action 'find_module_holders'"}
+                return ModuleInventory.find_processes_hosting_module(mod_q)
+            elif action == "process_tree":
+                return ProcessInventory.get_process_tree()
+            elif action == "service_process_map":
+                return ServiceProcessMapper.get_service_process_mapping()
+            elif action == "audit_process":
+                target_pid = pid or os.getpid()
+                mod_res = ModuleInventory.get_modules_for_process(target_pid)
+                svcs = ServiceProcessMapper.get_services_for_process(target_pid)
+                img = ProcessInventory.get_process_image_path(target_pid)
+                return {
+                    "status": "success",
+                    "process_id": target_pid,
+                    "image_path": img,
+                    "hosted_services": svcs,
+                    "loaded_modules_count": mod_res.get("modules_count", 0),
+                    "modules_sample": mod_res.get("modules", [])[:15]
+                }
+            else:
+                return {"status": "error", "error": f"Unknown action: '{action}'"}
 
         else:
             raise ValueError(f"Unknown tool name: '{name}'")

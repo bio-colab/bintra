@@ -33,6 +33,14 @@ class CommandExecutor:
         """
         Executes a registered command safely and returns parsed JSON.
         """
+        if sys.platform != "win32":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "command_id": command_id,
+                "error": "Windows Command Execution harness requires a Windows host system."
+            }
+
         spec = CommandCatalog.get_spec(command_id)
         if not spec:
             return {

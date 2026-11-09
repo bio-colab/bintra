@@ -237,6 +237,12 @@ class WindowsOSProfiler:
     @classmethod
     def profile(cls, binary_path: Optional[str] = None) -> Dict[str, Any]:
         """Generates comprehensive OS environmental profile."""
+        if sys.platform != "win32":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "error": "Windows OS Profiler requires a Windows host system."
+            }
         kernel = cls.get_real_kernel_version()
         arch = cls.get_system_architecture()
         process_wow64 = cls.get_process_wow64_status()

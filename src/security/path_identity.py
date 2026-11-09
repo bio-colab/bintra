@@ -49,7 +49,9 @@ class PathIdentity:
 
     @classmethod
     def _validate_no_ads(cls, path: str) -> None:
-        """Ensures the path does not target an Alternate Data Stream (:stream)."""
+        """Ensures the path does not target an Alternate Data Stream (:stream) on Windows."""
+        if sys.platform != "win32":
+            return
         # Drive letter colon (e.g. C:) is permitted at index 1
         tail = path[2:] if (len(path) >= 2 and path[1] == ":") else path
         if ":" in tail:

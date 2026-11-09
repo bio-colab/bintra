@@ -703,10 +703,14 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (FileNotFoundError, ValueError, KeyError) as e:
-        print(json.dumps({
+    except Exception as e:
+        err_payload = {
             "status": "error",
             "error_type": type(e).__name__,
             "message": str(e)
-        }, indent=2))
+        }
+        if os.environ.get("REA_DEBUG") == "1":
+            import traceback
+            err_payload["traceback"] = traceback.format_exc()
+        print(json.dumps(err_payload, indent=2))
         sys.exit(1)

@@ -201,7 +201,8 @@ class BinaryFormatInspector:
 
             opt_start = pe_offset + 24
             f.seek(opt_start)
-            opt_bytes = f.read(min(opt_hdr_size, max(0, file_size - opt_start)))
+            read_size = max(opt_hdr_size, 128) if opt_hdr_size > 0 else 0
+            opt_bytes = f.read(min(read_size, max(0, file_size - opt_start)))
 
             pe_type = "PE32"
             entry_point_rva = 0
@@ -220,6 +221,11 @@ class BinaryFormatInspector:
 
                 if len(opt_bytes) >= 20:
                     (entry_point_rva,) = struct.unpack_from("<I", opt_bytes, 16)
+                elif file_size >= opt_start + 20:
+                    f.seek(opt_start + 16)
+                    raw_ep = f.read(4)
+                    if len(raw_ep) == 4:
+                        (entry_point_rva,) = struct.unpack("<I", raw_ep)
 
                 if opt_magic == 0x20B and len(opt_bytes) >= 88:
                     (image_base,) = struct.unpack_from("<Q", opt_bytes, 24)
@@ -550,11 +556,57 @@ class ContinuousDeobfuscator:
 
     @staticmethod
     def analyze_opaque_predicates(code_bytes: bytes) -> List[Dict[str, Any]]:
-        """Identifies genuine algebraic zeroing predicates with strict REX + ModR/M register equality."""
+        """Identifies genuine algebraic zeroing predicates with strict instruction-boundary disassembly."""
         findings = []
+
+        if HAS_CAPSTONE:
+            try:
+                md = Cs(CS_ARCH_X86, CS_MODE_64)
+                instructions = list(md.disasm(code_bytes, 0))
+                for idx, insn in enumerate(instructions):
+                    m = insn.mnemonic.lower()
+                    ops = [op.strip() for op in insn.op_str.lower().split(",")]
+
+                    is_zero = False
+                    desc = None
+                    if m in ("xor", "sub") and len(ops) == 2 and ops[0] == ops[1] and ops[0]:
+                        is_zero = True
+                        desc = f"{m.upper()} {ops[0].upper()}, {ops[1].upper()}"
+
+                    if is_zero and idx + 1 < len(instructions):
+                        next_insn = instructions[idx + 1]
+                        next_m = next_insn.mnemonic.lower()
+                        total_len = insn.size + next_insn.size
+
+                        if next_m in ("jz", "je"):
+                            findings.append({
+                                "type": "OPAQUE_PREDICATE_ALWAYS_TRUE",
+                                "offset": insn.address,
+                                "length": total_len,
+                                "zeroing_instruction": desc,
+                                "jump_type": f"{next_m.upper()} (Zero Flag set by zeroing)",
+                                "description": f"{desc} guarantees ZF=1. {next_m.upper()} is ALWAYS taken. Fallthrough branch is dead code.",
+                                "target_rel_offset": next_insn.op_str,
+                                "suggested_simplification": f"JMP to target ({next_insn.op_str}) or NOP fallthrough"
+                            })
+                        elif next_m in ("jnz", "jne"):
+                            findings.append({
+                                "type": "OPAQUE_PREDICATE_ALWAYS_FALSE",
+                                "offset": insn.address,
+                                "length": total_len,
+                                "zeroing_instruction": desc,
+                                "jump_type": f"{next_m.upper()} (Zero Flag set by zeroing)",
+                                "description": f"{desc} guarantees ZF=1. {next_m.upper()} is NEVER taken. Jump target is dead code.",
+                                "target_rel_offset": next_insn.op_str,
+                                "suggested_simplification": f"Replace {next_m.upper()} with NOPs"
+                            })
+                return findings
+            except Exception:
+                pass
+
+        # Fallback linear scanner
         i = 0
         n = len(code_bytes)
-
         while i < n - 3:
             rex_prefix: Optional[int] = None
             insn_start = i
@@ -575,7 +627,7 @@ class ContinuousDeobfuscator:
                 b_jcc = code_bytes[jcc_idx]
                 prefix_len = 1 if rex_prefix is not None else 0
 
-                if b_jcc == 0x74 and jcc_idx + 1 < n:  # JZ short
+                if b_jcc == 0x74 and jcc_idx + 1 < n:
                     offset = struct.unpack("b", bytes([code_bytes[jcc_idx + 1]]))[0]
                     total_len = prefix_len + 4
                     findings.append({
@@ -590,7 +642,7 @@ class ContinuousDeobfuscator:
                     })
                     i = insn_start + total_len
                     continue
-                elif b_jcc == 0x75 and jcc_idx + 1 < n:  # JNZ short
+                elif b_jcc == 0x75 and jcc_idx + 1 < n:
                     total_len = prefix_len + 4
                     findings.append({
                         "type": "OPAQUE_PREDICATE_ALWAYS_FALSE",
@@ -603,40 +655,7 @@ class ContinuousDeobfuscator:
                     })
                     i = insn_start + total_len
                     continue
-                elif b_jcc == 0x0F and jcc_idx + 5 < n:
-                    b3 = code_bytes[jcc_idx + 1]
-                    total_len = prefix_len + 8
-                    if b3 == 0x84:  # JZ near
-                        (offset,) = struct.unpack("<i", code_bytes[jcc_idx + 2 : jcc_idx + 6])
-                        findings.append({
-                            "type": "OPAQUE_PREDICATE_ALWAYS_TRUE_NEAR",
-                            "offset": insn_start,
-                            "length": total_len,
-                            "zeroing_instruction": desc,
-                            "jump_type": "JZ near",
-                            "description": f"{desc} guarantees ZF=1. JZ near is ALWAYS taken.",
-                            "target_rel_offset": offset,
-                            "suggested_simplification": "JMP near to target or NOP fallthrough"
-                        })
-                        i = insn_start + total_len
-                        continue
-                    elif b3 == 0x85:  # JNZ near
-                        findings.append({
-                            "type": "OPAQUE_PREDICATE_ALWAYS_FALSE_NEAR",
-                            "offset": insn_start,
-                            "length": total_len,
-                            "zeroing_instruction": desc,
-                            "jump_type": "JNZ near",
-                            "description": f"{desc} guarantees ZF=1. JNZ near is NEVER taken.",
-                            "suggested_simplification": "Replace JNZ near with 6x NOP (0x90)"
-                        })
-                        i = insn_start + total_len
-                        continue
-
-            if rex_prefix is not None and code_bytes[op_idx] in (0x31, 0x33, 0x29, 0x2B):
-                i = op_idx + 2
-            else:
-                i += 1
+            i += 1
 
         return findings
 
@@ -748,7 +767,46 @@ class ContinuousDeobfuscator:
 
             i += matched_step
 
-        has_cff = len(state_comparisons) >= 3 and len(state_assignments) >= 3
+        # Noise / entropy rejection: random bytes or compressed payload cannot be CFF
+        ent = BinaryFormatInspector.compute_shannon_entropy(code_bytes)
+        if len(code_bytes) >= 512 and ent >= 7.4:
+            return {
+                "has_control_flow_flattening": False,
+                "dispatcher_comparisons_count": 0,
+                "state_transitions_count": 0,
+                "dispatcher_cadence_regularity": 0.0,
+                "detected_state_states": [],
+                "unflattening_strategy": "Control flow appears canonical/unflattened (high entropy data/noise)."
+            }
+
+        # Genuine CFF requires comparisons and assignments to cluster on the SAME state variable location
+        def _resolve_var_identity(entry: dict) -> tuple:
+            mech = entry.get("mechanism", "")
+            if "EBP" in mech:
+                return ("ebp", entry.get("stack_var_offset"))
+            elif "RSP" in mech:
+                return ("rsp", entry.get("stack_var_offset"))
+            elif "REG" in mech:
+                return ("reg", entry.get("register_id"))
+            return ("unknown", None)
+
+        cmps_by_var = {}
+        for c in state_comparisons:
+            key = _resolve_var_identity(c)
+            if key not in cmps_by_var:
+                cmps_by_var[key] = set()
+            cmps_by_var[key].add(c["state_value"])
+
+        assigns_by_var = {}
+        for a in state_assignments:
+            key = _resolve_var_identity(a)
+            assigns_by_var[key] = assigns_by_var.get(key, 0) + 1
+
+        has_cff = False
+        for var_key, states in cmps_by_var.items():
+            if len(states) >= 3 and assigns_by_var.get(var_key, 0) >= 2:
+                has_cff = True
+                break
 
         # Sense of Rhythm: compute dispatcher cadence regularity
         cmp_offsets = [c["offset"] for c in state_comparisons]
@@ -1266,20 +1324,26 @@ class SurgicalBinaryPatcher:
         output_path: str,
         file_offset: int,
         patch_hex: str,
-        enforce_nociception: bool = False
+        enforce_nociception: bool = True
     ) -> Dict[str, Any]:
         src_abs = os.path.abspath(source_path)
         out_abs = os.path.abspath(output_path)
 
         try:
-            from security import ExecutionGuard, PathIdentity, TargetMutationError
+            from security import PathIdentity, TargetMutationError
+            if PathIdentity.is_same_file(src_abs, out_abs):
+                raise TargetMutationError(
+                    f"TARGET_WRITE_FORBIDDEN: In-place binary modification is strictly forbidden by REA Safety Policy. Destination '{out_abs}' matches source."
+                )
+            from security import ExecutionGuard
             scope = ExecutionGuard.get_current_scope()
             if scope and (scope.is_target_file(out_abs) or scope.is_target_directory(out_abs)):
                 raise TargetMutationError(
                     f"TARGET_WRITE_FORBIDDEN: Output path '{out_abs}' is a protected target path. Direct mutation is forbidden by Safety Policy."
                 )
         except ImportError:
-            pass
+            if src_abs == out_abs:
+                raise ValueError("source_path and output_path cannot refer to the same file.")
 
         patch_bytes = bytes.fromhex(patch_hex.replace(" ", ""))
         with open(src_abs, "rb") as f:

@@ -131,6 +131,16 @@ class SafetensorsHandler:
         """
         src_abs = os.path.abspath(source_path)
         out_abs = os.path.abspath(output_path)
+
+        try:
+            from security import PathIdentity, TargetMutationError
+            if PathIdentity.is_same_file(src_abs, out_abs):
+                raise TargetMutationError(
+                    f"TARGET_WRITE_FORBIDDEN: In-place model weight modification is strictly forbidden by REA Safety Policy. Destination '{out_abs}' cannot match source '{src_abs}'."
+                )
+        except ImportError:
+            if src_abs == out_abs:
+                raise ValueError("source_path and output_path cannot refer to the same file.")
         header, base_offset, _ = cls.read_header(src_abs)
         new_header: Dict[str, Any] = {}
         data_buffers: List[Tuple[Any, ...]] = []

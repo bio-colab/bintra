@@ -247,11 +247,26 @@ class PcodeFunctionMatcher:
             cosine = float(np.dot(v_a, v_b) / (norm_a * norm_b))
         cosine = max(-1.0, min(1.0, cosine))
 
-        is_match = cosine >= cls.MATCH_THRESHOLD
-        confidence = (
-            "HIGH" if cosine >= cls.HIGH_CONFIDENCE_THRESHOLD else
-            ("MODERATE" if is_match else "LOW")
-        )
+        ops_a = res_a["op_count"]
+        ops_b = res_b["op_count"]
+        if ops_a < 5 or ops_b < 5:
+            is_match = False
+            confidence = "INSUFFICIENT_EVIDENCE"
+            interpretation = (
+                f"Insufficient P-code operations (func_a={ops_a}, func_b={ops_b}, minimum required: 5) "
+                "to evaluate semantic equivalence reliably without high false-positive risk."
+            )
+        else:
+            is_match = cosine >= cls.MATCH_THRESHOLD
+            confidence = (
+                "HIGH" if cosine >= cls.HIGH_CONFIDENCE_THRESHOLD else
+                ("MODERATE" if is_match else "LOW")
+            )
+            interpretation = (
+                "High statistical correlation in P-code operation distribution and transition topology."
+                if is_match else
+                "Substantial divergence in intermediate P-code operations or control flow."
+            )
 
         return {
             "pcode_cosine_similarity": round(cosine, 5),
@@ -267,11 +282,7 @@ class PcodeFunctionMatcher:
                 "effective_rank": res_b["effective_rank"],
                 "dominance_ratio": res_b["dominance_ratio"]
             },
-            "interpretation": (
-                "P-code dataflow and transition topology proves architectural equivalence."
-                if is_match else
-                "Substantial divergence in intermediate P-code operations or control flow."
-            )
+            "interpretation": interpretation
         }
 
 
@@ -528,7 +539,7 @@ class PcodeSSAAnalyzer:
                                     "cbranch_address": user_op.get("address"),
                                     "algebraic_proof": (
                                         f"{opcode}({_get_varnode_key(inputs[0])}, {_get_varnode_key(inputs[1])}) "
-                                        f"mathematically proves condition=0 in SSA. CBRANCH is NEVER taken."
+                                        f"determines condition=0 in SSA. CBRANCH is NEVER taken."
                                     ),
                                     "dead_block_id": target_block_id,
                                     "dead_block_address": target_addr,

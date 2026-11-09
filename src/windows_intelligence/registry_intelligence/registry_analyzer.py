@@ -5,6 +5,7 @@ Evaluates registry configurations across the 11 functional domains to detect
 disabled security controls, DLL search vulnerabilities, and WOW64 view conflicts.
 """
 
+import sys
 from typing import Dict, Any, List, Optional
 from .registry_catalog import RegistryCatalog, RegistryKeySpec
 from .registry_reader import WindowsRegistryReader
@@ -19,6 +20,13 @@ class WindowsRegistryAnalyzer:
     @classmethod
     def audit_domain(cls, domain_name: str) -> Dict[str, Any]:
         """Audits all registered keys within a specific functional domain."""
+        if sys.platform != "win32":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "domain": domain_name,
+                "error": "Windows Registry inspection is only supported on Windows host systems."
+            }
         specs = RegistryCatalog.get_specs_for_domain(domain_name)
         if not specs:
             return {
@@ -176,6 +184,13 @@ class WindowsRegistryAnalyzer:
     @classmethod
     def audit_all(cls, target_binary_path: Optional[str] = None) -> Dict[str, Any]:
         """Runs complete inspection across all 11 registry domains."""
+        if sys.platform != "win32":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "total_domains_audited": 0,
+                "error": "Windows Registry inspection is only supported on Windows host systems."
+            }
         domain_reports = {}
         total_keys = 0
         total_discrepancies = 0

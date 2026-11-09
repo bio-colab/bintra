@@ -204,6 +204,30 @@ python tests/test_suite.py
 - **Academic Research Reference:** Inspired by *"Sparks of Weight-Space Programming: LLMs can natively read & write neural network weights"*, by Rikiya Takehi, Jayden Teoh, Alex Zhang, and Omar Khattab (MIT CSAIL, November 2026).
   - [alphaXiv Preprint Discussion](https://www.alphaxiv.org/abs/2611.weight-space-programming)
   - [Official MIT CSAIL Replication Logs & Prompts Repository](https://github.com/RikiyaT/lm_understand-logs)
-  - [Alan Turing Institute Weights Editing Replications](https://github.com/alan-turing-institute/weights_editing)
+  - [Weights Editing Replications (Jasper Zhao)](https://github.com/jasperzhao05/weights_editing)
 - **Scope & Methodological Verification:** While WSP research explores direct LLM reasoning over neural network parameters in small models, `REA-Neural` extends this conceptual foundation into continuous state-transition analysis, deterministic deobfuscation, and surgical PE patching for compiled native software.
 - Maintained by [bio-colab](https://github.com/bio-colab).
+
+---
+
+## Known Limitations & Heuristic Boundaries
+
+`REA-Neural` maintains a strict, transparent distinction between deterministic mathematical verification and heuristic statistical pattern matching:
+
+1. **High P-Code IR Semantic Matching Boundaries:**
+   - Cross-architecture semantic function matching utilizes normalized Ghidra High P-Code opcode frequency histograms and control flow transition topology.
+   - Routines with fewer than 5 P-Code operations possess insufficient statistical signal. Rather than asserting architectural equivalence, the engine flags these comparisons as `is_semantic_match: false` with confidence `INSUFFICIENT_EVIDENCE`.
+   - Semantic matching metrics reflect statistical correlation across tested compilation targets and are not formal algebraic proofs of function equivalence.
+
+2. **Deobfuscator Detection & Capstone Instruction Boundaries:**
+   - **Opaque Predicates:** Evaluated via Capstone linear sweep disassembly following valid x86/x64 instruction boundaries. Immediate operand constants containing zeroing bit patterns (e.g. `mov eax, 0x0574C031`) are strictly parsed as operands and never falsely flagged as opaque predicates.
+   - **Control Flow Flattening (CFF):** Requires dispatcher comparison and assignment operations to cluster on the *same* state variable storage location ($\ge 3$ comparisons and $\ge 2$ assignments on the identical frame offset or register). Furthermore, regions with Shannon entropy $\ge 7.4$ (such as compressed payloads or cryptographic keys) are rejected to eliminate false positives.
+
+3. **Complete Mediation & Target Immutability:**
+   - Target executables and neural weight files are treated as immutable reference artifacts.
+   - In-place modification is strictly blocked at both the CLI layer and the low-level library layer (`SurgicalBinaryPatcher.patch_file` and `SafetensorsHandler.write_patched_safetensors`) via `PathIdentity.is_same_file()`. Any attempt to patch a target into itself unconditionally raises `TargetMutationError(TARGET_WRITE_FORBIDDEN)`.
+   - All surgical patches and weight interventions must specify an explicit, distinct destination path.
+
+4. **Cross-Platform Host Degradation:**
+   - Windows Intelligence subsystems (`WindowsRegistryAnalyzer`, `CommandExecutor`, `WindowsOSProfiler`) fail-closed gracefully on non-Windows host environments (such as Linux CI or sandboxes), returning structured `status: "not_applicable"` diagnostics rather than failing with platform attribute errors.
+

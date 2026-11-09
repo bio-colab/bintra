@@ -214,13 +214,20 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             np.testing.assert_allclose(loaded_f32, arr_f32)
             np.testing.assert_allclose(loaded_bf16, arr_bf16_vals, rtol=1e-2)
 
-            # In-place write on the exact same path must not truncate or corrupt!
+            # Policy enforcement: In-place write on same path is strictly forbidden
+            from security.execution_guard import TargetMutationError
             patched_f32, _ = WeightPatcher.rank1_nullify(loaded_f32, mode_index=0, alpha=0.5)
-            res = SafetensorsHandler.write_patched_safetensors(st_path, st_path, {"weight_f32": patched_f32})
-            self.assertTrue(res["in_place_atomic_safe"])
+            with self.assertRaises(TargetMutationError):
+                SafetensorsHandler.write_patched_safetensors(st_path, st_path, {"weight_f32": patched_f32})
 
-            reloaded_f32, _ = SafetensorsHandler.read_tensor(st_path, "weight_f32")
-            reloaded_bf16, _ = SafetensorsHandler.read_tensor(st_path, "weight_bf16")
+            # Out-of-place write succeeds and preserves original file
+            out_st_path = os.path.join(tmpdir, "patched_model.safetensors")
+            res = SafetensorsHandler.write_patched_safetensors(st_path, out_st_path, {"weight_f32": patched_f32})
+            self.assertEqual(res["output_path"], out_st_path)
+            self.assertTrue(os.path.exists(out_st_path))
+
+            reloaded_f32, _ = SafetensorsHandler.read_tensor(out_st_path, "weight_f32")
+            reloaded_bf16, _ = SafetensorsHandler.read_tensor(out_st_path, "weight_bf16")
             np.testing.assert_allclose(reloaded_f32, patched_f32)
             np.testing.assert_allclose(reloaded_bf16, arr_bf16_vals, rtol=1e-2)
 
@@ -371,13 +378,16 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         with tempfile.NamedTemporaryFile(suffix=".exe", delete=False) as tf:
             tf.write(pe_bytes)
             pe_path = tf.name
+        out_path = pe_path + ".patched.exe"
 
         try:
             with self.assertRaises(RuntimeError):
-                SurgicalBinaryPatcher.patch_file(pe_path, pe_path, 0x200, "90", enforce_nociception=True)
+                SurgicalBinaryPatcher.patch_file(pe_path, out_path, 0x200, "90", enforce_nociception=True)
         finally:
             if os.path.exists(pe_path):
                 os.remove(pe_path)
+            if os.path.exists(out_path):
+                os.remove(out_path)
 
     def test_sensory_cortex_all_10_senses_on_pe64(self):
         """Verifies that SensoryCortex evaluates all 10 Metaphorical Senses with high efficiency."""
@@ -419,20 +429,28 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             self.assertEqual(report["senses"]["analytical_vision"]["telemetry"]["target_modality"], "SAFETENSORS_MODEL")
 
     def test_in_place_binary_patching_atomic_windows_safety(self):
-        """Verifies that SurgicalBinaryPatcher safely patches a Windows PE64 binary in-place and maps RVA."""
+        """Verifies that SurgicalBinaryPatcher enforces target immutability on in-place calls and safely patches out-of-place."""
         pe_bytes = _create_synthetic_pe64()
         with tempfile.NamedTemporaryFile(suffix=".exe", delete=False) as tf:
             tf.write(pe_bytes)
             pe_path = tf.name
+        out_path = pe_path + ".patched.exe"
         try:
-            res = SurgicalBinaryPatcher.patch_file(pe_path, pe_path, 0x208, "90 90")
+            from security.execution_guard import TargetMutationError
+            with self.assertRaises(TargetMutationError):
+                SurgicalBinaryPatcher.patch_file(pe_path, pe_path, 0x208, "90 90")
+
+            res = SurgicalBinaryPatcher.patch_file(pe_path, out_path, 0x208, "90 90")
             self.assertTrue(res["is_stack_safe"])
             self.assertTrue(res["pe_checksum_recalculated"])
             self.assertEqual(res["virtual_rva"], "0x1008")
             self.assertEqual(res["target_section"], ".text")
+            self.assertTrue(os.path.exists(out_path))
         finally:
             if os.path.exists(pe_path):
                 os.remove(pe_path)
+            if os.path.exists(out_path):
+                os.remove(out_path)
 
     def test_arm64_instruction_decoding_and_vectorization(self):
         """Verifies ARM64 instruction decoding and behavioral vectorization."""
@@ -899,7 +917,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         dossier = res["evidence_dossiers"][0]
         self.assertEqual(dossier["dead_block_id"], 2)
         self.assertEqual(dossier["dead_block_address"], "0x140001050")
-        self.assertIn("mathematically proves condition=0 in SSA", dossier["algebraic_proof"])
+        self.assertIn("determines condition=0 in SSA", dossier["algebraic_proof"])
 
     def test_scope_decoupling_synthesize_weights(self):
         """Verifies that synthesize-weights is decoupled from active CLI commands per SCOPE.md."""
@@ -2041,12 +2059,13 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             pe_path = tf.name
 
         try:
+            out_path = pe_path + ".patched.exe"
             # At offset 0x240 in .text section, inject destructive 'sub rsp, 0x28' (48 83 ec 28)
             # over previously neutral bytes. With enforce_nociception=True, this MUST raise RuntimeError!
             with self.assertRaises(RuntimeError) as ctx:
                 SurgicalBinaryPatcher.patch_file(
                     pe_path,
-                    pe_path,
+                    out_path,
                     0x240,
                     "4883ec28",
                     enforce_nociception=True
@@ -2057,7 +2076,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             # When enforce_nociception=False, it should record the STACK_FRAME_IMBALANCE_HAZARD
             res = SurgicalBinaryPatcher.patch_file(
                 pe_path,
-                pe_path,
+                out_path,
                 0x240,
                 "4883ec28",
                 enforce_nociception=False

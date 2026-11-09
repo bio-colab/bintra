@@ -616,16 +616,18 @@ class ReaMcpServer:
             }
         except Exception as exc:
             tb = traceback.format_exc()
+            err_payload = {
+                "status": "error",
+                "tool": tool_name,
+                "error": str(exc),
+            }
+            if os.environ.get("REA_DEBUG") == "1":
+                err_payload["traceback"] = tb
             return {
                 "content": [
                     {
                         "type": "text",
-                        "text": json.dumps({
-                            "status": "error",
-                            "tool": tool_name,
-                            "error": str(exc),
-                            "traceback": tb
-                        }, indent=2)
+                        "text": json.dumps(err_payload, indent=2)
                     }
                 ],
                 "isError": True

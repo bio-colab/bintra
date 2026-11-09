@@ -15,24 +15,26 @@ Launch the native zero-dependency MCP server via stdio:
 {
   "mcpServers": {
     "rea-neural": {
-      "command": "python",
-      "args": ["<path-to-repo>/src/mcp_server.py"]
+      "command": "rea-mcp",
+      "args": []
     }
   }
 }
 ```
-Exposes 25 type-safe tools: core binary analysis (`rea_inspect_binary`, `rea_dump_bytes`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_scan_hybrid`, `rea_sensory_audit`), Ghidra P-Code integration (`rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`), Windows intelligence & diagnostics (`rea_windows_env_audit`, `rea_resolve_dependencies`, `rea_inspect_crash_reports`, `rea_correlate_failure_evidence`, `rea_win_catalog_cmd`, `rea_registry_audit`), Native hardware and system introspection (`rea_hardware_audit`, `rea_driver_audit`, `rea_service_audit`), Runtime telemetry & crash intelligence (`rea_dmp_inspect`, `rea_etw_audit`), Evidence graph & causality synthesis (`rea_evidence_graph`), and embedded weights security (`rea_wsp_audit`, `rea_patch_weights`).
+Exposes **27 type-safe tools**:
+- **Core Binary & Decompilation (13 Tools):** `rea_inspect_binary`, `rea_dump_bytes`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_scan_hybrid`, `rea_sensory_audit`, `rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`, `rea_wsp_audit`, `rea_patch_weights`.
+- **Windows System Intelligence & Forensics (14 Tools):** `rea_windows_env_audit`, `rea_resolve_dependencies`, `rea_inspect_crash_reports`, `rea_correlate_failure_evidence`, `rea_win_catalog_cmd`, `rea_registry_audit`, `rea_hardware_audit`, `rea_driver_audit`, `rea_service_audit`, `rea_dmp_inspect`, `rea_etw_audit`, `rea_evidence_graph`, `rea_device_driver_intelligence`, `rea_process_resource_audit`.
 
-### Modality 2: Unified CLI (`src/cli.py`) -- Recommended for Terminal / Bash / PowerShell
+### Modality 2: Unified CLI (`rea-neural`) -- Recommended for Terminal / Bash / PowerShell
 ```powershell
-python src/cli.py <command> [options]
+rea-neural <command> [options]
+# Or: python -m cli <command> [options]
 ```
 All commands produce machine-readable JSON on `stdout` and exit with code `0` on success.
 
 ### Modality 3: Pure Python API -- Recommended for In-Process Scripts
 ```python
 import sys
-sys.path.insert(0, r"D:\rea-neural\src")
 from binary_neural_engine import BinaryFormatInspector, ContinuousDeobfuscator, SurgicalBinaryPatcher, SensoryCortex
 from ghidra_pcode_vectorizer import GhidraAnnotationPlanner, PcodeDeobfuscator
 from windows_intelligence import (
@@ -44,25 +46,43 @@ from windows_intelligence import (
     MiniDumpParser, EventLogCollector, EtwController,
     EvidenceGraph, EvidenceNode, EvidenceEdge, CausalitySynthesizer
 )
+from windows_intelligence.process_intelligence import FileUsageInspector, ModuleInventory, ProcessInventory
+from windows_intelligence.device_intelligence import DriverMatcher, DriverPackageInventory
+from security import ExecutionGuard, Capability
 ```
 
 ---
 
-## 2. Critical Rules for AI Agents on Windows
+## 2. Agent Skills Architecture (`skills/`)
 
-1. **Avoid Inline JSON Quoting in PowerShell:**  
-   Windows PowerShell strips unescaped double quotes from inline arguments like `'[{"opcode": "INT_ADD"}]'`.  
-   *Best Practice:* Always write complex JSON payloads to a temporary file (`temp_pcode.json`) and pass `--file temp_pcode.json` or `--input temp_pcode.json`.
-2. **Deterministic Machine Output:**  
-   Parse `stdout` directly with `json.loads(output)`. Stderr contains telemetry logs or scope warnings that should not interfere with JSON parsing.
-3. **Atomic Writes & Rollbacks:**  
-   `patch-binary` uses atomic writes via temporary files and `os.replace`. If a patch fails the nociceptive stack frame balance check, it returns a safe rejection diagnostic without corrupting the target binary.
-4. **Scope Discipline:**  
-   Auditing embedded weights to secure or understand a Windows binary is legitimate reverse engineering. Building, merging, or training standalone models from scratch is out of scope (see `SCOPE.md`).
+REA-Neural provides 4 specialized skills designed for AI Agents during "vibe coding":
+
+1. **[`rea-binary-dissection`](skills/rea-binary-dissection/SKILL.md):**  
+   Anatomy inspection, ASLR/DEP/CFG mitigations, REX-aware opaque predicates, CFF dispatcher loops, cross-architecture matching (x86-64 vs ARM64), 10 Metaphorical Senses.
+2. **[`rea-safe-binary-patching`](skills/rea-safe-binary-patching/SKILL.md):**  
+   Safe byte modification, stack frame balance proprioception ($\Delta RSP/RBP$ guard), automated PE checksum recalculation, strict workspace isolation.
+3. **[`rea-windows-troubleshooter`](skills/rea-windows-troubleshooter/SKILL.md):**  
+   Crash diagnostics (0xc0000005, NULL dereference, DEP violation), MiniDump (.dmp) inspection, Restart Manager file locks, loaded DLL tracking, driver problem codes (`CM_PROB_*`).
+4. **[`rea-neural-weight-security`](skills/rea-neural-weight-security/SKILL.md):**  
+   Safetensors weight auditing without execution, backdoor/trojan outlier neurons ($>4.5\sigma$), spectral effective rank, selective column direction subtraction without training.
 
 ---
 
-## 3. Command Reference & Payload Matrix
+## 3. Critical Rules for AI Agents on Windows (Safety Kernel)
+
+1. **Target Immutability & Workspace Confinement:**  
+   Never modify source binaries in-place. Passing `file_path == output_path` or writing inside the target's original directory is strictly blocked with `TargetMutationError`. Always write outputs to an isolated `./workspace/` directory.
+2. **Avoid Inline JSON Quoting in PowerShell:**  
+   Windows PowerShell strips unescaped double quotes from inline arguments like `'[{"opcode": "INT_ADD"}]'`.  
+   *Best Practice:* Always write complex JSON payloads to a temporary file (`temp_pcode.json`) and pass `--file temp_pcode.json`.
+3. **Deterministic Machine Output:**  
+   Parse `stdout` directly with `json.loads(output)`. Stderr contains telemetry logs or scope warnings that should not interfere with JSON parsing.
+4. **Stack Balance Nociceptive Reflex:**  
+   `patch-binary` checks stack frame balance. If a patch injects stack-altering instructions over neutral code, it aborts to prevent silent memory corruption.
+
+---
+
+## 4. Command Reference & Payload Matrix
 
 | Command | Purpose | Input Flags | Expected Output JSON Keys |
 |:---|:---|:---|:---|
@@ -70,7 +90,7 @@ from windows_intelligence import (
 | `dump` | Extract raw bytes & hex preview at offset/RVA | `--file <path> --offset <N> [--length <L>]` | `file`, `offset`, `length`, `hex`, `ascii_preview` |
 | `deobfuscate` | Prune opaque predicates & CFF | `--file <path> [--offset <N>]` or `--hex "<bytes>"` | `opaque_predicates`, `control_flow_flattening`, `pruned_hex` |
 | `match` | Cross-architecture matching | `--func1 "<hex>" --func2 "<hex>"` | `cosine_similarity`, `is_semantic_match`, `confidence` |
-| `patch-binary` | Surgical byte patch with RSP balance | `--file <path> --offset <N> --patch "<hex>"` | `success`, `target_offset`, `patch_length`, `pe_checksum_updated` |
+| `patch-binary` | Surgical byte patch with RSP balance | `--file <path> --output <dst> --offset <N> --patch-hex "<hex>"` | `is_safe`, `target_offset`, `patch_length`, `pe_checksum_recalculated` |
 | `scan-hybrid` | Scan embedded AI runtimes | `--file <path>` | `embedded_logic_assets_count`, `embedded_assets`, `shannon_entropy` |
 | `sense` | Holistic 10-sense perception | `--file <path>` or `--hex "<bytes>"` | `active_senses_count`, `overall_sensory_efficiency`, `senses` |
 | `match-pcode` | Architecture-invariant P-code matching | `--func1 <file.json> --func2 <file.json>` | `pcode_cosine_similarity`, `is_semantic_match`, `confidence` |
@@ -90,90 +110,42 @@ from windows_intelligence import (
 | `service-audit` | Interrogate SCM service states | `[--format json|md]` | `total_services_enumerated`, `running_services_count` |
 | `dmp-inspect` | Multi-stream MiniDump & AV analysis | `[--file <f>] [--scan] [--format json|md]` | `status`, `system_info`, `exception_info`, `access_violation_details` |
 | `etw-audit` | Audit ETW sessions & providers | `[--session <s>] [--format json|md]` | `standard_sessions_probed`, `active_sessions`, `providers` |
+| `file-locks` | Detect processes holding file locks | `--file <path>` | `status`, `is_locked`, `usage_classifications`, `locking_processes` |
+| `proc-modules` | Find processes hosting loaded DLL | `--module <name>` | `status`, `query_module`, `hosting_processes_count`, `hosting_processes` |
+| `dev-match` | Match PnP devices with Driver Store | `[--query <name>] [--problems-only]` | `status`, `devices_audited`, `device_reports` |
 
 ---
 
-## 4. Driving the Ghidra Symbiosis Loop as an Autonomous Agent
+## 5. Driving Common Vibe-Coding Workflows
 
-When asked to reverse engineer an obfuscated Windows executable using Ghidra:
-
-1. **One-Command Headless Deobfuscation:**  
-   Run:
+### Scenario 1: User says "Why is this game/app crashing on startup?"
+1. Inspect the MiniDump file:
    ```powershell
-   python src/cli.py ghidra-headless --binary "path/to/target.exe" --apply
+   rea-neural dmp-inspect --file "C:\path\to\crash.dmp"
    ```
-2. **What happens automatically:**  
-   - Ghidra headless imports the binary and decompiles all functions via `DecompInterface`.
-   - `ReaNeuralGhidraBridge.java` extracts High P-Code, Varnodes, and CFG topologies.
-   - Invokes `cli.py ghidra-analyze` to detect algebraic opaque predicates and compute 64-D spectral embeddings.
-   - With `--apply`, the script automatically commits function renames (`REA_Deob_...`) and detailed plate comments into Ghidra's Program Database in a safe transaction.
-3. **Inspect the Output Plan:**  
-   The agent can read the generated `mutation_plan.json` to immediately report discovered keys, bypassed license checks, or deobfuscated dispatchers to the user.
-
-
----
-
-## 5. Windows System Intelligence & Failure Diagnostic Workflow
-
-When an executable crashes, fails to launch, or encounters runtime access violations on Windows:
-
-1. **Host Environment & Privilege Audit:**
+2. Check for missing DLL dependencies:
    ```powershell
-   python src/cli.py win-audit --binary "path/to/target.exe" --format md
+   rea-neural resolve-deps --binary "C:\path\to\game.exe"
    ```
-   Checks real kernel version (via `ntdll.RtlGetVersion`), WOW64 emulation, AppCompatFlags registry shims, token integrity level, and directory write ACLs.
-
-2. **Loader Dependency & Missing Exports Verification:**
+3. Synthesize the complete causality dossier:
    ```powershell
-   python src/cli.py resolve-deps --binary "path/to/target.exe" --format md
+   rea-neural diagnose --binary "C:\path\to\game.exe" --crash "C:\path\to\crash.dmp"
    ```
-   Simulates Safe DLL search order, resolves MinWin API-Set virtual contracts (e.g., `api-ms-win-core-*` -> `kernelbase.dll`), detects 32-bit vs 64-bit architecture mismatches, and parses up to 4096 exports from disk DLLs to identify unexported APIs (`0xC0000139`).
 
-3. **Crash Telemetry & Event Log Inspection:**
+### Scenario 2: User says "This file is locked and I can't replace it."
+1. Interrogate the Windows Restart Manager:
    ```powershell
-   python src/cli.py wer-inspect --binary "target.exe"
+   rea-neural file-locks --file "C:\path\to\locked.dll"
    ```
-   Parses `Report.wer` archives and Application Event Log (Event ID 1000/1001) without requiring WinDbg or heavy symbols.
+2. Inform the user which application (PID, Name, Service) holds the lock without forcefully killing system processes.
 
-4. **Authoritative Failure Evidence Dossier Synthesis:**
+### Scenario 3: User says "Patch this instruction to bypass a check."
+1. Create a segregated output directory:
    ```powershell
-   python src/cli.py diagnose --binary "path/to/target.exe" --format md
+   mkdir workspace -Force
    ```
-   Cross-references runtime crash offset (`FaultOffset`), PE section layout, RVAs, and Ghidra decompilation into an actionable engineering dossier with root cause diagnosis and mitigation guidance.
-
-
-5. **Live Hardware & PnP Subsystem Health Check:**
+2. Surgically apply the patch to the workspace destination:
    ```powershell
-   python src/cli.py hw-audit --format md
+   rea-neural patch-binary --file "C:\path\to\game.exe" --output ".\workspace\game_patched.exe" --offset 0x2400 --patch-hex "90 90"
    ```
-   Interrogates live PnP devices via `SetupAPI` and `CfgMgr32`, flagging device problem codes (`CM_PROB_FAILED_START`, `CM_PROB_FAILED_ADD`, Code 10, Code 43).
-
-6. **Kernel Driver & Graphics Base Introspection:**
-   ```powershell
-   python src/cli.py driver-audit --format md
-   ```
-   Enumerates loaded kernel drivers via `PSAPI`, resolving 64-bit kernel virtual base addresses and highlighting graphics and audio drivers.
-
-7. **Service Control Manager (SCM) Audit:**
-   ```powershell
-   python src/cli.py service-audit --format md
-   ```
-   Audits active and stopped Windows services via `Advapi32`.
-
-8. **Crash Dump Multi-Stream Inspection & Root Cause Analysis:**
-   ```powershell
-   python src/cli.py dmp-inspect --scan --format md
-   ```
-   Parses `MDMP` files across all streams (SystemInfo, ThreadList, ModuleList, ExceptionRecord), resolves faulting module/RVA, and performs access violation parameter diagnostics (read/write/DEP, NULL pointer dereferences).
-
-9. **ETW Trace Sessions & Graphics Providers Audit:**
-   ```powershell
-   python src/cli.py etw-audit --format md
-   ```
-   Interrogates active kernel and application trace sessions and checks provider registration (Kernel-Process, Direct3D11, DXGI, DxgKrnl).
-
-10. **Evidence Graph & Causal Chain Synthesis:**
-    ```powershell
-    python src/cli.py diagnose --binary "path/to/target.exe" --format md
-    ```
-    Synthesizes the complete directed Evidence Graph G = (V, E), traces the primary causal path from low-level memory access violations (e.g. NULL pointer write/read, DEP execution) through Ghidra functions and PE sections to host environment and drivers, rendering an executive Failure Evidence Dossier with embedded Mermaid flowchart diagrams.
+3. Verify that `is_safe: true` and `pe_checksum_recalculated: true`.

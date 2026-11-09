@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 Deep Windows Event Log Telemetry Collector.
-Interrogates the Windows Event Log infrastructure via wevtutil RenderedXml queries.
+Interrogates the Windows Event Log infrastructure via native Win32 WEVTAPI (wevtapi.dll)
+with in-process XML rendering (EvtQuery, EvtNext, EvtRender) and fallback to wevtutil.
 Extracts Event ID 1000 (Application Crash), 1001 (Windows Error Reporting),
 1002 (Application Hang), and System Event 41/1001 (Kernel Power / BugCheck BSOD).
 """
 
 import os
+import ctypes
+from ctypes import wintypes
 import subprocess
 import xml.etree.ElementTree as ET
 from typing import Dict, Any, List, Optional
@@ -16,6 +19,7 @@ class EventLogCollector:
     """
     Collects structured crash and failure events from Windows Event Log channels.
     Extracts faulting binaries, exception codes, fault offsets, and WER problem signatures.
+    Prefers native in-process Win32 wevtapi.dll, with automatic fallback to wevtutil.
     """
 
     COMMON_EXCEPTION_CODES = {
@@ -31,10 +35,94 @@ class EventLogCollector:
     }
 
     LAST_QUERY_ERRORS: List[str] = []
+    _wevtapi = None
+    _EVT_HANDLE = wintypes.HANDLE
+    _initialized = False
+    _backend_used: str = "none"
 
     @classmethod
-    def _execute_wevtutil_query(cls, channel: str, xpath: str, max_events: int = 20) -> List[ET.Element]:
-        """Safely queries Windows Event Log using wevtutil and parses rendered XML."""
+    def _init_native_wevtapi(cls) -> bool:
+        """Initializes Win32 wevtapi.dll function bindings if running on Windows NT."""
+        if cls._initialized:
+            return cls._wevtapi is not None
+        cls._initialized = True
+        if os.name != "nt":
+            return False
+        try:
+            wevtapi = ctypes.WinDLL("wevtapi.dll")
+            cls._EVT_HANDLE = wintypes.HANDLE
+
+            wevtapi.EvtQuery.restype = cls._EVT_HANDLE
+            wevtapi.EvtQuery.argtypes = [cls._EVT_HANDLE, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+
+            wevtapi.EvtNext.restype = wintypes.BOOL
+            wevtapi.EvtNext.argtypes = [cls._EVT_HANDLE, wintypes.DWORD, ctypes.POINTER(cls._EVT_HANDLE), wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+
+            wevtapi.EvtRender.restype = wintypes.BOOL
+            wevtapi.EvtRender.argtypes = [cls._EVT_HANDLE, cls._EVT_HANDLE, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD)]
+
+            wevtapi.EvtClose.restype = wintypes.BOOL
+            wevtapi.EvtClose.argtypes = [cls._EVT_HANDLE]
+
+            cls._wevtapi = wevtapi
+            return True
+        except Exception as e:
+            cls.LAST_QUERY_ERRORS.append(f"wevtapi.dll native init failed: {e}")
+            cls._wevtapi = None
+            return False
+
+    @classmethod
+    def _execute_native_query(cls, channel: str, xpath: str, max_events: int = 20) -> Optional[List[ET.Element]]:
+        """Queries Windows Event Log using in-process Win32 wevtapi.dll functions."""
+        if not cls._init_native_wevtapi():
+            return None
+
+        # EvtQueryChannelPath (0x1) | EvtQueryReverseDirection (0x200)
+        flags = 0x1 | 0x200
+        try:
+            h_query = cls._wevtapi.EvtQuery(None, channel, xpath, flags)
+            if not h_query:
+                err = ctypes.GetLastError()
+                cls.LAST_QUERY_ERRORS.append(f"EvtQuery failed on channel '{channel}' (Win32 error {err})")
+                return None
+
+            events_array = (cls._EVT_HANDLE * max_events)()
+            returned = wintypes.DWORD(0)
+            nodes: List[ET.Element] = []
+
+            try:
+                ok = cls._wevtapi.EvtNext(h_query, max_events, events_array, 2000, 0, ctypes.byref(returned))
+                count = returned.value
+                for i in range(count):
+                    h_event = events_array[i]
+                    if not h_event:
+                        continue
+                    try:
+                        buf_size = wintypes.DWORD(0)
+                        prop_count = wintypes.DWORD(0)
+                        cls._wevtapi.EvtRender(None, h_event, 1, 0, None, ctypes.byref(buf_size), ctypes.byref(prop_count))
+                        if buf_size.value > 0:
+                            buf = ctypes.create_unicode_buffer(buf_size.value // 2 + 2)
+                            if cls._wevtapi.EvtRender(None, h_event, 1, buf_size.value, buf, ctypes.byref(buf_size), ctypes.byref(prop_count)):
+                                xml_str = buf.value
+                                if xml_str:
+                                    node = ET.fromstring(xml_str)
+                                    nodes.append(node)
+                    except Exception as ex:
+                        cls.LAST_QUERY_ERRORS.append(f"EvtRender parse error on channel '{channel}': {ex}")
+                    finally:
+                        cls._wevtapi.EvtClose(h_event)
+            finally:
+                cls._wevtapi.EvtClose(h_query)
+
+            return nodes
+        except Exception as e:
+            cls.LAST_QUERY_ERRORS.append(f"Native wevtapi exception on channel '{channel}': {e}")
+            return None
+
+    @classmethod
+    def _execute_wevtutil_fallback(cls, channel: str, xpath: str, max_events: int = 20) -> List[ET.Element]:
+        """Fallback query runner using wevtutil command line tool."""
         if os.name != "nt":
             return []
 
@@ -66,13 +154,29 @@ class EventLogCollector:
             return []
 
     @classmethod
+    def _execute_event_query(cls, channel: str, xpath: str, max_events: int = 20) -> List[ET.Element]:
+        """Primary entrypoint: attempts native Win32 wevtapi.dll query first, with wevtutil fallback."""
+        native_nodes = cls._execute_native_query(channel, xpath, max_events)
+        if native_nodes is not None:
+            cls._backend_used = "wevtapi.dll (native Win32 in-process)"
+            return native_nodes
+
+        cls._backend_used = "wevtutil (subprocess fallback)"
+        return cls._execute_wevtutil_fallback(channel, xpath, max_events)
+
+    @classmethod
+    def _execute_wevtutil_query(cls, channel: str, xpath: str, max_events: int = 20) -> List[ET.Element]:
+        """Backwards-compatible wrapper delegating to _execute_event_query."""
+        return cls._execute_event_query(channel, xpath, max_events)
+
+    @classmethod
     def query_application_errors(cls, app_name_filter: Optional[str] = None, max_events: int = 20) -> List[Dict[str, Any]]:
         """
         Queries Application Event Log for Event ID 1000 (Application Error).
         Extracts faulting executable, faulting module, exception code, and fault offset RVA.
         """
         xpath = "*[System[Provider[@Name='Application Error'] and (EventID=1000)]]"
-        event_nodes = cls._execute_wevtutil_query("Application", xpath, max_events)
+        event_nodes = cls._execute_event_query("Application", xpath, max_events)
 
         events = []
         for event_elem in event_nodes:
@@ -164,7 +268,7 @@ class EventLogCollector:
         Extracts Bucket ID, Problem Signatures (P1-P10), and CabId.
         """
         xpath = "*[System[Provider[@Name='Windows Error Reporting'] and (EventID=1001)]]"
-        event_nodes = cls._execute_wevtutil_query("Application", xpath, max_events)
+        event_nodes = cls._execute_event_query("Application", xpath, max_events)
 
         events = []
         for event_elem in event_nodes:
@@ -217,7 +321,7 @@ class EventLogCollector:
         Extracts hanging executable name, process ID, and hang type.
         """
         xpath = "*[System[Provider[@Name='Application Hang'] and (EventID=1002)]]"
-        event_nodes = cls._execute_wevtutil_query("Application", xpath, max_events)
+        event_nodes = cls._execute_event_query("Application", xpath, max_events)
 
         events = []
         for event_elem in event_nodes:
@@ -255,7 +359,7 @@ class EventLogCollector:
         representing full host kernel panics or unexpected shutdowns.
         """
         xpath = "*[System[(EventID=41 or EventID=1001) and (Provider[@Name='Microsoft-Windows-Kernel-Power'] or Provider[@Name='BugCheck'] or Provider[@Name='Microsoft-Windows-WER-SystemErrorReporting'])]]"
-        event_nodes = cls._execute_wevtutil_query("System", xpath, max_events)
+        event_nodes = cls._execute_event_query("System", xpath, max_events)
 
         events = []
         for event_elem in event_nodes:
@@ -290,6 +394,7 @@ class EventLogCollector:
 
         return {
             "status": status_str,
+            "backend": cls._backend_used,
             "filter": app_name_filter,
             "query_errors": list(cls.LAST_QUERY_ERRORS),
             "counts": {

@@ -112,90 +112,227 @@ D:/rea-neural/
 │   ├── workflows/
 │   │   └── windows-ci.yml         # Automated Windows-only CI/CD pipeline
 │   └── ISSUE_TEMPLATE/            # Bug report and feature request templates
+├── install.bat                    # 1-Click Windows batch installer (Double-clickable)
+├── install.ps1                    # Automated PowerShell installer & PATH configurator
 ├── LICENSE                        # Apache 2.0 License
 ├── CONTRIBUTING.md                # Development and contribution guide
 ├── SECURITY.md                    # Vulnerability reporting protocol
-├── pyproject.toml                 # Standard packaging metadata
-├── requirements.txt               # Lightweight runtime dependencies
+├── pyproject.toml                 # Standard PEP 517/621 packaging metadata
+├── requirements.txt               # Lightweight runtime dependencies (numpy, capstone)
 ├── README.md                      # Comprehensive guide
 ├── src/
-│   ├── cli.py                     # Unified CLI entry point
+│   ├── cli.py                     # Unified CLI entry point (`rea-neural`)
+│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`rea-mcp`)
 │   ├── binary_neural_engine.py    # PE binary analysis, deobfuscator & patcher
 │   ├── rea_neural_engine.py       # Weight-space SVD & circuit decompiler
 │   ├── sensory_cortex.py          # 10 Metaphorical Senses evaluation cortex
-│   └── ghidra_pcode_vectorizer.py # Ghidra P-Code IR continuous vectorizer
+│   ├── ghidra_pcode_vectorizer.py # Ghidra P-Code IR continuous vectorizer
+│   ├── security/                  # ExecutionGuard, AuditLogger & Reference Monitor
+│   └── windows_intelligence/      # Process, Device, Registry & Crash Diagnostics
 ├── skills/
 │   └── reverse-engineer-anything/ # Agent-native skill specification
-│       ├── SKILL.md               # Main skill contract
-│       └── references/            # In-depth technical reference manuals
 ├── schemas/                       # Agent MCP tool definitions
-├── tests/                         # Automated unit & Windows PE regression test suite
+├── tests/                         # 122 automated unit, sensory & security tests
 └── docs/                          # Architecture & mathematical foundation
 ```
 
 ---
 
-## Quickstart on Windows
+## Installation & Quickstart on Windows
 
-### 1. Installation
+### Prerequisites
+- **Operating System:** Windows 10, Windows 11, or Windows Server (x86-64 / ARM64).
+- **Python:** Python 3.10, 3.11, or 3.12 (64-bit recommended). Ensure *"Add Python to PATH"* was selected during Python installation.
+
+---
+
+### Option 1: Automated 1-Click Installation (Recommended)
+Clone the repository and run the automated PowerShell installer:
+```powershell
+git clone https://github.com/bio-colab/rea-neural.git
+cd rea-neural
+
+# Run the PowerShell installer (automatically configures PATH, installs package, runs smoke test)
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+
+# Or double-click install.bat
+```
+
+---
+
+### Option 2: Standard Developer Installation (`pip`)
 ```powershell
 # Clone the repository
 git clone https://github.com/bio-colab/rea-neural.git
 cd rea-neural
 
-# Install dependencies
-pip install -r requirements.txt
+# Install in editable mode
+pip install -e .
 ```
 
-### 2. CLI Usage Examples
+---
+
+### Option 3: Direct Installation via Git (Zero-Clone)
+Install REA-Neural directly into your active Python environment without manually downloading the repository:
+```bash
+pip install git+https://github.com/bio-colab/rea-neural.git
+```
+
+---
+
+### Option 4: Fast Installation via `uv`
+If you use Astral's [`uv`](https://github.com/astral-sh/uv):
 ```powershell
-# Inspect a native Windows PE executable header and section mapping
-python src/cli.py inspect --file "C:\Windows\System32\notepad.exe"
+# Install as a persistent global tool
+uv tool install git+https://github.com/bio-colab/rea-neural.git
+
+# Or in an active project virtual environment
+uv pip install -e .
+```
+
+---
+
+### 2. Immediate Verification & Smoke Test
+Run the unified CLI from any directory or terminal:
+```powershell
+# Verify CLI presence and version
+rea-neural --help
+
+# Run a quick 10-Sense Sensory Cortex smoke test on a sample hex stream
+rea-neural sense --hex "55 48 89 e5 90 5d c3"
+```
+
+---
+
+## Agent-Native MCP (Model Context Protocol) Integration
+
+`REA-Neural` ships with a production-ready **JSON-RPC 2.0 stdio MCP server** (`rea-mcp`) offering **27 mediated reverse engineering and Windows intelligence tools** to AI agents (Claude Desktop, Cursor, Antigravity, Windsurf).
+
+### 1. Claude Desktop Configuration
+Add the `rea` server to your `%APPDATA%\Claude\claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "rea": {
+      "command": "rea-mcp",
+      "args": []
+    }
+  }
+}
+```
+*(If `rea-mcp` is not yet in your system PATH, replace `"rea-mcp"` with the absolute path to your Python Scripts executable, e.g. `"C:\\Users\\<YourUser>\\AppData\\Local\\Programs\\Python\\Python312\\Scripts\\rea-mcp.exe"` or `["python", "-m", "mcp_server"]`)*.
+
+### 2. Cursor / VS Code MCP Configuration
+In your Cursor or VS Code `.cursor/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "rea-neural": {
+      "command": "rea-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+### 3. Verification of MCP Server
+Test the stdio JSON-RPC handshake directly:
+```powershell
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | rea-mcp
+```
+Output:
+```json
+{"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2024-11-05", "serverInfo": {"name": "rea-neural", "version": "7.4.0"}}}
+```
+
+---
+
+## CLI Usage Reference
+
+### Binary / Windows Executable Commands
+```powershell
+# Inspect PE executable headers, ASLR/DEP/CFG mitigations, and sections
+rea-neural inspect --file "C:\Windows\System32\notepad.exe"
 
 # Deobfuscate machine code bytes and isolate dead opaque predicates
-python src/cli.py deobfuscate --hex "55 48 89 e5 31 c0 74 05 e8 11 22 33 44 90 c3"
+rea-neural deobfuscate --hex "55 48 89 e5 31 c0 74 05 e8 11 22 33 44 90 c3"
 
 # Match functions across compilers or architectures semantically
-python src/cli.py match `
+rea-neural match `
   --func1 "55 48 89 e5 89 7d fc 8b 45 fc 83 c0 01 5d c3" `
   --func2 "55 48 89 e5 8d 47 01 5d c3"
 
-# Surgically patch an executable file on disk with stack preservation
-python src/cli.py patch `
-  --source target.exe `
-  --output target_patched.exe `
+# Surgically patch an executable file on disk with stack preservation & PE checksum sync
+# Note: Output file must be outside the target source directory (Complete Mediation guarantee)
+rea-neural patch-binary `
+  --file target.exe `
+  --output workspace/target_patched.exe `
   --offset 0x1A40 `
   --patch-hex "90 90"
 
-# Scan a native Windows binary for embedded neural logic (ONNX, DirectML, GGUF)
-python src/cli.py scan-hybrid --file application.exe
+# Scan a native Windows binary for embedded neural logic (DirectML, ONNX, GGUF)
+rea-neural scan-hybrid --file application.exe
 
+# Holistic multi-modal binary inspection & 10 Metaphorical Senses evaluation
+rea-neural sense --file application.exe --hex "55 48 89 e5 5d c3"
+```
+
+### Windows System & Diagnostic Intelligence Commands
+```powershell
+# Profile host Windows OS build, WOW64 emulation, and AppCompatFlags layers
+rea-neural win-audit --file target.exe
+
+# Audit DLL search order, API-Sets, and verify required exported symbols
+rea-neural resolve-deps --file target.exe
+
+# Detect processes holding active locks on a target file (via Windows Restart Manager)
+rea-neural file-locks --file target.dll
+
+# Find processes currently hosting a loaded DLL
+rea-neural proc-modules --module kernel32.dll
+
+# Match PnP devices against Driver Store packages and evaluate driver ranks
+rea-neural dev-match --query "PCI" --problems-only
+```
+
+### Weight-Space & Safetensors Neural Commands
+```powershell
 # Audit embedded Safetensors neural model (Effective Rank, Induction Heads, Backdoors, Amenability)
-python src/cli.py wsp-audit --model model.safetensors
+rea-neural wsp-audit --model model.safetensors
 
 # Perform surgical low-rank column direction subtraction on embedded linear layers
-python src/cli.py patch-weights `
+rea-neural patch-weights `
   --source model.safetensors `
-  --output patched.safetensors `
+  --output workspace/patched.safetensors `
   --tensor mlp.down_proj `
   --operation column_direction_subtract `
   --num-columns 64
-
-# Holistic multi-modal binary inspection & 10 Metaphorical Senses evaluation
-python src/cli.py sense --file application.exe --hex "55 48 89 e5 5d c3"
-
-# Match functions across architectures using Ghidra High P-Code IR
-python src/cli.py match-pcode --func1 pcode_x86.json --func2 pcode_arm64.json
-
-# Prune P-Code opaque predicates before decompiler AST construction
-python src/cli.py deobfuscate-pcode --file routine_pcode.json
-
-# Generate Ghidra Program Database annotation plan
-python src/cli.py ghidra-plan --address 0x140001000 --name "CheckLicense" --return-type "bool"
-
-# Run the automated Windows test suite
-python tests/test_suite.py
 ```
+
+### Running the Test Suite
+```powershell
+# Run the complete test suite (122 unit, sensory, and security remediation tests)
+python -m unittest discover -s tests -p "test_*.py"
+```
+
+---
+
+## Windows Troubleshooting & FAQ
+
+### 1. Error: `'rea-neural' is not recognized as an internal or external command`
+**Cause:** The Python `Scripts` directory is not in your user environment `PATH`.  
+**Solution:**
+1. Run `install.ps1`, which automatically detects your Python `Scripts` directory and appends it to your User `PATH`.
+2. Or manually add `%LOCALAPPDATA%\Programs\Python\Python3xx\Scripts` (or `%APPDATA%\Python\Python3xx\Scripts`) to your User Environment Variables, then restart your terminal.
+3. Alternatively, invoke REA-Neural directly via Python from any location:
+   ```powershell
+   python -m cli --help
+   python -m mcp_server
+   ```
+
+### 2. Error: `WRITE_OUTSIDE_WORKSPACE` or `TARGET_DIRECTORY_WRITE_FORBIDDEN`
+**Cause:** The `ExecutionGuard` reference monitor enforces **Target Immutability**. Modifying the target binary in-place or writing output patches inside the target's original directory is strictly blocked to protect host software from corruption.  
+**Solution:** Direct `--output` to an isolated workspace folder (e.g. `--output ./workspace/target_patched.exe`).
 
 ---
 

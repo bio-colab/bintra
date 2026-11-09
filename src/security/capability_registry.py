@@ -82,6 +82,10 @@ class CapabilityRegistry:
         "command_executor": {Capability.SUBPROCESS_CATALOG_EXEC},
         "cmd_executor": {Capability.SUBPROCESS_CATALOG_EXEC},
 
+        # Mutation / Surgery Engines (Confined to Authorized Workspace Only)
+        "binary_patcher": {Capability.WORKSPACE_WRITE},
+        "weight_patcher": {Capability.WORKSPACE_WRITE},
+
         # Intelligence Engines
         "evidence_engine": {Capability.FILE_READ, Capability.WORKSPACE_WRITE},
         "dossier_generator": {Capability.WORKSPACE_WRITE},

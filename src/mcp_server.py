@@ -599,21 +599,90 @@ class ReaMcpServer:
             "tools": TOOLS_REGISTRY
         }
 
+    TOOL_SECURITY_METADATA = {
+        "rea_inspect_binary": ("cap.file.read", "READ", "file_path"),
+        "rea_deobfuscate_binary": ("cap.file.read", "READ", "file_path"),
+        "rea_dump_bytes": ("cap.file.read", "READ", "file_path"),
+        "rea_match_functions": ("cap.file.read", "READ", None),
+        "rea_patch_binary": ("cap.workspace.write", "WRITE", "output_path"),
+        "rea_scan_hybrid": ("cap.file.read", "READ", "file_path"),
+        "rea_sensory_audit": ("cap.file.read", "READ", "file_path"),
+        "rea_match_pcode": ("cap.file.read", "READ", None),
+        "rea_deobfuscate_pcode": ("cap.file.read", "READ", "file_path"),
+        "rea_ghidra_analyze": ("cap.file.read", "READ", "file_path"),
+        "rea_ghidra_headless": ("cap.file.read", "READ", "binary_path"),
+        "rea_windows_env_audit": ("cap.registry.read", "READ", "binary_path"),
+        "rea_resolve_dependencies": ("cap.file.read", "READ", "binary_path"),
+        "rea_inspect_crash_reports": ("cap.minidump.read", "READ", "binary_path"),
+        "rea_correlate_failure_evidence": ("cap.file.read", "READ", "binary_path"),
+        "rea_win_catalog_cmd": ("cap.subprocess.catalog_exec", "EXECUTE", "command_id"),
+        "rea_registry_audit": ("cap.registry.read", "READ", "domain"),
+        "rea_hardware_audit": ("cap.device.query", "QUERY", None),
+        "rea_driver_audit": ("cap.driver.query", "QUERY", None),
+        "rea_service_audit": ("cap.service.query", "QUERY", None),
+        "rea_dmp_inspect": ("cap.minidump.read", "READ", "dump_path"),
+        "rea_etw_audit": ("cap.event_log.read", "READ", "session_name"),
+        "rea_evidence_graph": ("cap.file.read", "READ", "binary_path"),
+        "rea_wsp_audit": ("cap.file.read", "READ", "model_path"),
+        "rea_patch_weights": ("cap.workspace.write", "WRITE", "output_path"),
+        "rea_device_driver_intelligence": ("cap.device.query", "QUERY", "device_query"),
+        "rea_process_resource_audit": ("cap.process.query", "QUERY", "target_path")
+    }
+
     def handle_tools_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
         tool_name = params.get("name")
         args = params.get("arguments", {})
 
         try:
-            result_data = self.dispatch_tool(tool_name, args)
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": json.dumps(result_data, indent=2, ensure_ascii=False)
-                    }
-                ],
-                "isError": False
-            }
+            from security import ExecutionGuard, Capability, SecurityViolationError, TargetMutationError, PathIdentity
+
+            sec_meta = self.TOOL_SECURITY_METADATA.get(tool_name)
+            if not sec_meta:
+                raise SecurityViolationError(f"UNREGISTERED_TOOL: Tool '{tool_name}' has no registered security capability in PolicyEngine.")
+
+            cap_val, mode, target_param = sec_meta
+            cap = Capability(cap_val)
+
+            # Extract target path and workspace if present
+            target_path = (
+                args.get("file_path") or args.get("binary_path") or
+                args.get("model_path") or args.get("source_path") or
+                args.get("target_path") or args.get("dump_path")
+            )
+            workspace_dir = args.get("workspace_dir") or args.get("workspace")
+            if not workspace_dir and "output_path" in args:
+                workspace_dir = os.path.dirname(os.path.abspath(args["output_path"]))
+
+            # Determine mediated target name
+            effective_target = args.get(target_param) if target_param else (target_path or tool_name)
+            if not effective_target:
+                effective_target = tool_name
+
+            req_metadata = {}
+            if tool_name == "rea_win_catalog_cmd":
+                req_metadata["is_catalog_command"] = True
+
+            with ExecutionGuard.scoped_session(target_binary_path=target_path, workspace_dir=workspace_dir):
+                # COMPLETE MEDIATION: All MCP tool invocations MUST be authorized by Reference Monitor
+                ExecutionGuard.request_access(
+                    component="mcp_server",
+                    operation=tool_name,
+                    target=str(effective_target),
+                    capability=cap,
+                    access_mode=mode,
+                    metadata=req_metadata
+                )
+
+                result_data = self.dispatch_tool(tool_name, args)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(result_data, indent=2, ensure_ascii=False)
+                        }
+                    ],
+                    "isError": False
+                }
         except Exception as exc:
             tb = traceback.format_exc()
             err_payload = {

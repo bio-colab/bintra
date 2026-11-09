@@ -39,6 +39,18 @@ class DriverMatcher:
         Conducts a unified compatibility audit linking PnP devices to their active drivers,
         evaluating driver rank, and detecting missing driver packages.
         """
+        try:
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="device_intelligence",
+                operation="audit_device_driver_bindings",
+                target=str(device_query or "AllDevices"),
+                capability=Capability.DEVICE_QUERY,
+                access_mode="QUERY"
+            )
+        except ImportError:
+            pass
+
         raw_devices = NativeDeviceInspector.enumerate_devices(
             filter_problems_only=problems_only,
             class_filter=class_filter,
@@ -112,7 +124,14 @@ class DriverMatcher:
                     "provider_type": provider_type,
                     "has_problem": has_prob,
                     "problem_code": prob_code,
-                    "problem_name": identity.get("problem_name")
+                    "problem_name": identity.get("problem_name"),
+                    "is_cryptographically_verified_whql": False,
+                    "whql_verification_note": "Signer name parsed from metadata only; cryptographic catalog signature validation was not executed."
+                },
+                "hardware_ids_match_evaluation": {
+                    "hardware_ids_count": len(identity.get("hardware_ids", [])),
+                    "compatible_ids_count": len(identity.get("compatible_ids", [])),
+                    "match_tier": "RANK_EXACT_HWID" if estimated_rank == 0 else ("RANK_NEUTRAL_HWID" if estimated_rank == 1 else ("RANK_COMPATIBLE_ID" if estimated_rank == 2 else "RANK_GENERIC_CLASS"))
                 },
                 "candidate_packages_count": len(candidate_pkgs),
                 "candidate_packages_sample": candidate_pkgs[:3]

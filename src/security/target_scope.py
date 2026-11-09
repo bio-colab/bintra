@@ -3,6 +3,7 @@
 REA-Neural Target Scope & Isolation Boundary.
 Defines the boundary between read-only target binaries and controlled-write workspaces.
 Maintains tamper-evident SHA-256 hash baselines to prove zero mutation.
+Enforces read-scope and workspace confinement policies across all execution contexts.
 """
 
 import os
@@ -17,11 +18,17 @@ class TargetScope:
     Guarantees that analysis results are never written into target directories.
     """
 
-    def __init__(self, target_binary_path: Optional[str] = None, workspace_dir: Optional[str] = None):
+    def __init__(
+        self,
+        target_binary_path: Optional[str] = None,
+        workspace_dir: Optional[str] = None,
+        strict_read_scope: bool = False
+    ):
         self._target_paths: Set[str] = set()
         self._target_dirs: Set[str] = set()
         self._target_hashes: Dict[str, str] = {}
         self._session_created_files: Set[str] = set()
+        self.strict_read_scope = strict_read_scope
 
         if workspace_dir:
             self._workspace_dir = PathIdentity.canonicalize(workspace_dir)
@@ -102,6 +109,10 @@ class TargetScope:
             "tamper_detected": not is_intact
         }
 
+    def has_registered_targets(self) -> bool:
+        """Returns True if one or more target binaries are registered."""
+        return len(self._target_paths) > 0
+
     def is_target_file(self, file_path: str) -> bool:
         """Checks if a path matches any registered target binary."""
         try:
@@ -125,7 +136,23 @@ class TargetScope:
 
     def is_inside_workspace(self, file_path: str) -> bool:
         """Checks if a path is located strictly within the designated workspace."""
-        return PathIdentity.is_within_directory(file_path, self._workspace_dir)
+        try:
+            return PathIdentity.is_within_directory(file_path, self._workspace_dir)
+        except Exception:
+            return False
+
+    def is_authorized_read_target(self, file_path: str) -> bool:
+        """
+        Checks if a file path is permitted for reading under current scope.
+        In strict mode, permits registered targets, target directory contents, and workspace files.
+        """
+        if not self.strict_read_scope:
+            return True
+        return (
+            self.is_target_file(file_path) or
+            self.is_inside_workspace(file_path) or
+            self.is_target_directory(file_path)
+        )
 
     def record_session_file(self, file_path: str) -> None:
         """Records a file created by REA during the current session."""

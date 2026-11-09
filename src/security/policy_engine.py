@@ -3,6 +3,7 @@
 REA-Neural Policy Engine.
 Evaluates system access requests against the 5 Inviolable Rules,
 CapabilityRegistry grants, and Default Deny matrix.
+Enforces read target scope boundaries and workspace write confinement.
 """
 
 from dataclasses import dataclass, field
@@ -139,13 +140,30 @@ class PolicyEngine:
                 side_effects=["workspace_mutation"]
             )
 
-        # Rule 7: Read-only operations within authorized capabilities
+        # Rule 7: Read-only operations within authorized capabilities & read scope enforcement
         if mode in ("READ", "QUERY"):
             if cap in (
                 Capability.FILE_READ, Capability.FILE_HASH, Capability.REGISTRY_READ,
                 Capability.PROCESS_QUERY, Capability.SERVICE_QUERY, Capability.DEVICE_QUERY,
                 Capability.DRIVER_QUERY, Capability.EVENT_LOG_READ, Capability.MINIDUMP_READ
             ):
+                # If target is a filesystem path, validate read scope and prevent forbidden credential reads
+                if cap in (Capability.FILE_READ, Capability.FILE_HASH, Capability.MINIDUMP_READ) and target and not target.startswith("\\\\"):
+                    norm_target = str(target).replace("/", "\\").lower()
+                    if "\\windows\\system32\\config\\sam" in norm_target or "\\windows\\system32\\config\\security" in norm_target:
+                        return AccessDecision(
+                            verdict="DENY",
+                            reason=f"FORBIDDEN_SYSTEM_READ: Direct access to security credential store '{target}' is prohibited.",
+                            capability=cap
+                        )
+                    if scope and getattr(scope, "strict_read_scope", False):
+                        if not scope.is_authorized_read_target(target):
+                            return AccessDecision(
+                                verdict="DENY",
+                                reason=f"OUT_OF_SCOPE_READ: File '{target}' is outside designated read target scope.",
+                                capability=cap
+                            )
+
                 return AccessDecision(
                     verdict="ALLOW",
                     reason=f"Authorized read-only query for {cap.value if hasattr(cap, 'value') else cap}.",

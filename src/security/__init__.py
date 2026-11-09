@@ -7,7 +7,7 @@ Autonomous, non-destructive Reference Monitor for Windows system introspection.
 from .capability_registry import Capability, CapabilityRegistry, PROHIBITED_HAZARDS
 from .path_identity import PathIdentity
 from .target_scope import TargetScope
-from .audit_logger import AuditLogger
+from .audit_logger import AuditLogger, AuditPersistenceError, AuditIntegrityError
 from .policy_engine import PolicyEngine, AccessRequest, AccessDecision
 from .execution_guard import (
     ExecutionGuard,
@@ -27,6 +27,8 @@ __all__ = [
     "PathIdentity",
     "TargetScope",
     "AuditLogger",
+    "AuditPersistenceError",
+    "AuditIntegrityError",
     "PolicyEngine",
     "AccessRequest",
     "AccessDecision",

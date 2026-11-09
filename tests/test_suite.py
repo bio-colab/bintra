@@ -1,6 +1,7 @@
 import unittest
 import sys
 import os
+import shutil
 import struct
 import io
 import zipfile
@@ -220,14 +221,20 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             with self.assertRaises(TargetMutationError):
                 SafetensorsHandler.write_patched_safetensors(st_path, st_path, {"weight_f32": patched_f32})
 
-            # Out-of-place write succeeds and preserves original file
-            out_st_path = os.path.join(tmpdir, "patched_model.safetensors")
-            res = SafetensorsHandler.write_patched_safetensors(st_path, out_st_path, {"weight_f32": patched_f32})
-            self.assertEqual(res["output_path"], out_st_path)
-            self.assertTrue(os.path.exists(out_st_path))
+            # Out-of-place write succeeds to separate workspace and preserves original file
+            from security import ExecutionGuard
+            work_dir = tempfile.mkdtemp(prefix="rea_ws_")
+            try:
+                out_st_path = os.path.join(work_dir, "patched_model.safetensors")
+                with ExecutionGuard.scoped_session(target_binary_path=st_path, workspace_dir=work_dir):
+                    res = SafetensorsHandler.write_patched_safetensors(st_path, out_st_path, {"weight_f32": patched_f32})
+                self.assertEqual(res["output_path"], out_st_path)
+                self.assertTrue(os.path.exists(out_st_path))
 
-            reloaded_f32, _ = SafetensorsHandler.read_tensor(out_st_path, "weight_f32")
-            reloaded_bf16, _ = SafetensorsHandler.read_tensor(out_st_path, "weight_bf16")
+                reloaded_f32, _ = SafetensorsHandler.read_tensor(out_st_path, "weight_f32")
+                reloaded_bf16, _ = SafetensorsHandler.read_tensor(out_st_path, "weight_bf16")
+            finally:
+                shutil.rmtree(work_dir, ignore_errors=True)
             np.testing.assert_allclose(reloaded_f32, patched_f32)
             np.testing.assert_allclose(reloaded_bf16, arr_bf16_vals, rtol=1e-2)
 
@@ -366,28 +373,32 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
                     f.write(hdr)
                     f.write(raw)
 
-            perturbed = mat.copy()
-            perturbed[0, 0] += 0.01
-            SafetensorsHandler.write_patched_safetensors(base_p, patch_p, {"w": perturbed})
-            ver = NeuralBehaviorVerifier.verify_behavior(base_p, patch_p, tolerance=0.005)
-            self.assertTrue(ver["is_equilibrium_preserved"])
+            from security import ExecutionGuard
+            work_dir = tempfile.mkdtemp(prefix="rea_ws_")
+            try:
+                out_patch_p = os.path.join(work_dir, "patch.safetensors")
+                perturbed = mat.copy()
+                perturbed[0, 0] += 0.01
+                with ExecutionGuard.scoped_session(target_binary_path=base_p, workspace_dir=work_dir):
+                    SafetensorsHandler.write_patched_safetensors(base_p, out_patch_p, {"w": perturbed})
+                ver = NeuralBehaviorVerifier.verify_behavior(base_p, out_patch_p, tolerance=0.005)
+                self.assertTrue(ver["is_equilibrium_preserved"])
+            finally:
+                shutil.rmtree(work_dir, ignore_errors=True)
 
     def test_nociceptive_pain_reflex_blocks_unsafe_patch(self):
         """Verifies Sense #9 (Metaphorical Pain): enforce_nociception blocks stack-destroying patches."""
         pe_bytes = _create_synthetic_pe64()
-        with tempfile.NamedTemporaryFile(suffix=".exe", delete=False) as tf:
-            tf.write(pe_bytes)
-            pe_path = tf.name
-        out_path = pe_path + ".patched.exe"
+        with tempfile.TemporaryDirectory() as tgt_dir, tempfile.TemporaryDirectory() as ws_dir:
+            pe_path = os.path.join(tgt_dir, "test.exe")
+            with open(pe_path, "wb") as f:
+                f.write(pe_bytes)
+            out_path = os.path.join(ws_dir, "out_patched.exe")
 
-        try:
-            with self.assertRaises(RuntimeError):
-                SurgicalBinaryPatcher.patch_file(pe_path, out_path, 0x200, "90", enforce_nociception=True)
-        finally:
-            if os.path.exists(pe_path):
-                os.remove(pe_path)
-            if os.path.exists(out_path):
-                os.remove(out_path)
+            from security import ExecutionGuard
+            with ExecutionGuard.scoped_session(target_binary_path=pe_path, workspace_dir=ws_dir):
+                with self.assertRaises(RuntimeError):
+                    SurgicalBinaryPatcher.patch_file(pe_path, out_path, 0x200, "90", enforce_nociception=True)
 
     def test_sensory_cortex_all_10_senses_on_pe64(self):
         """Verifies that SensoryCortex evaluates all 10 Metaphorical Senses with high efficiency."""
@@ -431,26 +442,24 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
     def test_in_place_binary_patching_atomic_windows_safety(self):
         """Verifies that SurgicalBinaryPatcher enforces target immutability on in-place calls and safely patches out-of-place."""
         pe_bytes = _create_synthetic_pe64()
-        with tempfile.NamedTemporaryFile(suffix=".exe", delete=False) as tf:
-            tf.write(pe_bytes)
-            pe_path = tf.name
-        out_path = pe_path + ".patched.exe"
-        try:
+        with tempfile.TemporaryDirectory() as tgt_dir, tempfile.TemporaryDirectory() as ws_dir:
+            pe_path = os.path.join(tgt_dir, "test.exe")
+            with open(pe_path, "wb") as f:
+                f.write(pe_bytes)
+            out_path = os.path.join(ws_dir, "out_patched.exe")
+
             from security.execution_guard import TargetMutationError
             with self.assertRaises(TargetMutationError):
                 SurgicalBinaryPatcher.patch_file(pe_path, pe_path, 0x208, "90 90")
 
-            res = SurgicalBinaryPatcher.patch_file(pe_path, out_path, 0x208, "90 90")
+            from security import ExecutionGuard
+            with ExecutionGuard.scoped_session(target_binary_path=pe_path, workspace_dir=ws_dir):
+                res = SurgicalBinaryPatcher.patch_file(pe_path, out_path, 0x208, "90 90")
             self.assertTrue(res["is_stack_safe"])
             self.assertTrue(res["pe_checksum_recalculated"])
             self.assertEqual(res["virtual_rva"], "0x1008")
             self.assertEqual(res["target_section"], ".text")
             self.assertTrue(os.path.exists(out_path))
-        finally:
-            if os.path.exists(pe_path):
-                os.remove(pe_path)
-            if os.path.exists(out_path):
-                os.remove(out_path)
 
     def test_arm64_instruction_decoding_and_vectorization(self):
         """Verifies ARM64 instruction decoding and behavioral vectorization."""
@@ -1110,19 +1119,19 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         padding = b"\x90" * 0x300
         full_pe = bytes(dos_hdr[:0x40] + pe_hdr + opt_hdr + sec_hdr + padding)
 
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            f.write(full_pe)
-            src_tmp = f.name
-        out_tmp = src_tmp + ".patched.exe"
-        try:
+        with tempfile.TemporaryDirectory() as tgt_dir, tempfile.TemporaryDirectory() as ws_dir:
+            src_tmp = os.path.join(tgt_dir, "src.exe")
+            with open(src_tmp, "wb") as f:
+                f.write(full_pe)
+            out_tmp = os.path.join(ws_dir, "out_patched.exe")
+
+            from security import ExecutionGuard
             # Patching offset 0x3C (e_lfanew) should NOT be safe
-            res = SurgicalBinaryPatcher.patch_file(src_tmp, out_tmp, 0x3C, "90909090")
+            with ExecutionGuard.scoped_session(target_binary_path=src_tmp, workspace_dir=ws_dir):
+                res = SurgicalBinaryPatcher.patch_file(src_tmp, out_tmp, 0x3C, "90909090")
             self.assertFalse(res["is_safe"])
             self.assertEqual(res["patch_type"], "PE_STRUCTURAL_HEADER_MUTATION")
             self.assertIn("PE_HEADER_CORRUPTION_HAZARD", res["pain_hazards"])
-        finally:
-            if os.path.exists(src_tmp): os.remove(src_tmp)
-            if os.path.exists(out_tmp): os.remove(out_tmp)
 
 
 
@@ -2054,39 +2063,38 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         import tempfile
 
         pe_bytes = _create_synthetic_pe64()
-        with tempfile.NamedTemporaryFile(suffix=".exe", delete=False) as tf:
-            tf.write(pe_bytes)
-            pe_path = tf.name
+        with tempfile.TemporaryDirectory() as tgt_dir, tempfile.TemporaryDirectory() as ws_dir:
+            pe_path = os.path.join(tgt_dir, "test.exe")
+            with open(pe_path, "wb") as f:
+                f.write(pe_bytes)
+            out_path = os.path.join(ws_dir, "out_patched.exe")
 
-        try:
-            out_path = pe_path + ".patched.exe"
-            # At offset 0x240 in .text section, inject destructive 'sub rsp, 0x28' (48 83 ec 28)
-            # over previously neutral bytes. With enforce_nociception=True, this MUST raise RuntimeError!
-            with self.assertRaises(RuntimeError) as ctx:
-                SurgicalBinaryPatcher.patch_file(
+            from security import ExecutionGuard
+            with ExecutionGuard.scoped_session(target_binary_path=pe_path, workspace_dir=ws_dir):
+                # At offset 0x240 in .text section, inject destructive 'sub rsp, 0x28' (48 83 ec 28)
+                # over previously neutral bytes. With enforce_nociception=True, this MUST raise RuntimeError!
+                with self.assertRaises(RuntimeError) as ctx:
+                    SurgicalBinaryPatcher.patch_file(
+                        pe_path,
+                        out_path,
+                        0x240,
+                        "4883ec28",
+                        enforce_nociception=True
+                    )
+                self.assertIn("Nociceptive Reflex blocked destructive binary patch", str(ctx.exception))
+                self.assertIn("Stack frame balance violated", str(ctx.exception))
+
+                # When enforce_nociception=False, it should record the STACK_FRAME_IMBALANCE_HAZARD
+                res = SurgicalBinaryPatcher.patch_file(
                     pe_path,
                     out_path,
                     0x240,
                     "4883ec28",
-                    enforce_nociception=True
+                    enforce_nociception=False
                 )
-            self.assertIn("Nociceptive Reflex blocked destructive binary patch", str(ctx.exception))
-            self.assertIn("Stack frame balance violated", str(ctx.exception))
-
-            # When enforce_nociception=False, it should record the STACK_FRAME_IMBALANCE_HAZARD
-            res = SurgicalBinaryPatcher.patch_file(
-                pe_path,
-                out_path,
-                0x240,
-                "4883ec28",
-                enforce_nociception=False
-            )
             self.assertFalse(res["is_safe"])
             self.assertIn("STACK_FRAME_IMBALANCE_HAZARD", res["pain_hazards"])
             self.assertGreaterEqual(res["pain_score"], 0.65)
-        finally:
-            if os.path.exists(pe_path):
-                os.remove(pe_path)
 
     def test_semantic_function_matcher_real_gcc_x86_vs_arm64(self):
         """Verifies Fix for Audit 5.1: Real compiler instructions are disassembled via Capstone without collapse."""

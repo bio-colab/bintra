@@ -100,6 +100,17 @@ class FileUsageInspector:
         Pure read-only: does NOT shut down or restart processes.
         """
         norm_path = os.path.abspath(file_path)
+        try:
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="process_intelligence",
+                operation="inspect_file_locks",
+                target=norm_path,
+                capability=Capability.PROCESS_QUERY,
+                access_mode="QUERY"
+            )
+        except ImportError:
+            pass
         if not os.path.exists(norm_path):
             return {
                 "status": "error",
@@ -178,14 +189,67 @@ class FileUsageInspector:
             rm.RmEndSession(session_handle)
 
         is_in_use = len(locking_processes) > 0
+
+        # Detailed breakdown of usage states (Executing vs DLL vs Restart Manager vs Lock)
+        is_actively_executing = False
+        is_loaded_as_dll = False
+        has_exclusive_lock = False
+
+        # 1. Probe for exclusive file lock
+        try:
+            with open(norm_path, "r+b"):
+                pass
+        except (PermissionError, OSError):
+            has_exclusive_lock = True
+
+        # 2. Check if running process matches image path
+        base_name = os.path.basename(norm_path).lower()
+        try:
+            from .process_inventory import ProcessInventory
+            running = ProcessInventory.enumerate_processes(resolve_paths=True, max_processes=128)
+            for rp in running:
+                rp_path = (rp.get("image_path") or "").lower()
+                if rp_path and os.path.abspath(rp_path) == norm_path.lower():
+                    is_actively_executing = True
+                    break
+        except Exception:
+            pass
+
+        # 3. Check if loaded as DLL
+        if norm_path.lower().endswith(".dll"):
+            try:
+                from .module_inventory import ModuleInventory
+                hosting = ModuleInventory.find_hosting_processes(base_name)
+                if hosting.get("hosting_processes_count", 0) > 0:
+                    is_loaded_as_dll = True
+            except Exception:
+                pass
+
+        usage_classifications = []
+        if is_actively_executing:
+            usage_classifications.append("PROCESS_EXECUTING")
+        if is_loaded_as_dll:
+            usage_classifications.append("MODULE_LOADED_DLL")
+        if len(locking_processes) > 0:
+            usage_classifications.append("RESTART_MANAGER_HANDLE")
+        if has_exclusive_lock:
+            usage_classifications.append("FILE_LOCK_EXCLUSIVE")
+
         return {
             "status": "success",
             "file_path": norm_path,
-            "resource_state": "RESOURCE_IN_USE" if is_in_use else "RESOURCE_AVAILABLE",
-            "is_locked": is_in_use,
+            "resource_state": "RESOURCE_IN_USE" if (is_in_use or usage_classifications) else "RESOURCE_AVAILABLE",
+            "is_locked": has_exclusive_lock or is_in_use,
+            "usage_classifications": usage_classifications,
+            "usage_breakdown": {
+                "is_actively_executing": is_actively_executing,
+                "is_loaded_as_dll": is_loaded_as_dll,
+                "has_restart_manager_handle": is_in_use,
+                "has_exclusive_lock": has_exclusive_lock
+            },
             "handle_exclusivity": "POTENTIALLY_SHARED_OR_LOCKED",
             "locking_processes_count": len(locking_processes),
             "locking_processes": locking_processes,
-            "audit_method": "WINDOWS_RESTART_MANAGER_RM_GET_LIST",
+            "audit_method": "WINDOWS_RESTART_MANAGER_AND_TOOLHELP32",
             "read_only_guarantee": True
         }

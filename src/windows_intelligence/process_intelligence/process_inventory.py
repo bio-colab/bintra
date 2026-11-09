@@ -65,7 +65,15 @@ class ProcessInventory:
 
     @classmethod
     def get_process_image_path(cls, pid: int) -> Optional[str]:
-        """Resolves the authoritative full image path on disk for a given PID."""
+        """Resolves the authoritative full image path on disk for a given PID via SafeProcessAccess."""
+        try:
+            from security import SafeProcessAccess
+            safe_path = SafeProcessAccess.query_process_image_path(pid)
+            if safe_path:
+                return safe_path
+        except Exception:
+            pass
+
         k32 = cls._get_kernel32()
         if not k32 or not hasattr(k32, "QueryFullProcessImageNameW"):
             return None

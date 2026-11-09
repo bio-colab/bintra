@@ -133,11 +133,20 @@ class SafetensorsHandler:
         out_abs = os.path.abspath(output_path)
 
         try:
-            from security import PathIdentity, TargetMutationError
+            from security import PathIdentity, TargetMutationError, OutOfScopeError, ExecutionGuard, Capability
             if PathIdentity.is_same_file(src_abs, out_abs):
                 raise TargetMutationError(
                     f"TARGET_WRITE_FORBIDDEN: In-place model weight modification is strictly forbidden by REA Safety Policy. Destination '{out_abs}' cannot match source '{src_abs}'."
                 )
+
+            # Mandatory Reference Monitor Mediation: Enforce workspace confinement & target immutability
+            ExecutionGuard.request_access(
+                component="weight_patcher",
+                operation="write_patched_safetensors",
+                target=out_abs,
+                capability=Capability.WORKSPACE_WRITE,
+                access_mode="WRITE"
+            )
         except ImportError:
             if src_abs == out_abs:
                 raise ValueError("source_path and output_path cannot refer to the same file.")

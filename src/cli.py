@@ -89,6 +89,9 @@ Windows System Intelligence & Failure Diagnostic Commands:
   service-audit     Inspect Windows Service Control Manager (SCM) service states via Advapi32
   dmp-inspect       Multi-stream MiniDump (.dmp) inspection and access violation root-cause analysis
   etw-audit         Inspect active ETW trace sessions and diagnostic providers (Process, D3D11, DXGI)
+  file-locks        Detect processes and services holding active locks on a file via Restart Manager
+  proc-modules      Locate running processes that have loaded a specific module or DLL
+  dev-match         Match Plug and Play (PnP) hardware IDs against driver INF store and problem codes
 
 Agent-Native MCP (Model Context Protocol):
   mcp               Launch native JSON-RPC 2.0 stdio MCP server for AI models (Claude, Antigravity, Cursor)

@@ -1668,6 +1668,19 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn('wer_events_1001', telemetry['counts'])
         self.assertIn('application_hangs_1002', telemetry['counts'])
         self.assertIn('system_crashes', telemetry['counts'])
+        if os.name == 'nt':
+            self.assertEqual(telemetry.get('backend'), 'wevtapi.dll (native Win32 in-process)')
+
+    def test_event_log_collector_native_backend(self):
+        """Verifies EventLogCollector directly leverages in-process Win32 wevtapi bindings."""
+        from windows_intelligence import EventLogCollector
+        if os.name != 'nt':
+            return
+        native_nodes = EventLogCollector._execute_native_query("Application", "*[System[(EventID=1000)]]", 2)
+        self.assertIsNotNone(native_nodes)
+        self.assertIsInstance(native_nodes, list)
+        self.assertFalse(EventLogCollector.LAST_QUERY_ERRORS)
+
 
     def test_etw_controller_live_and_providers(self):
         """Verifies EtwController providers catalog and session query capabilities."""
@@ -1690,6 +1703,22 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         sess = EtwController.query_trace_session('Eventlog-Application')
         self.assertEqual(sess['session_name'], 'Eventlog-Application')
         self.assertTrue(sess['is_active'])
+
+    def test_etw_controller_bounded_session(self):
+        """Verifies EtwController bounded trace session lifecycle with fail-closed elevation handling."""
+        from windows_intelligence import EtwController
+        if os.name != 'nt':
+            return
+        res = EtwController.capture_bounded_session(
+            session_name="REA_Unit_Test_Trace",
+            duration_sec=0.5,
+            workspace_dir=r"D:\rea-neural\workspace"
+        )
+        self.assertIn('status', res)
+        self.assertIn(res['status'], ('elevation_required', 'success', 'already_active'))
+        if res['status'] == 'elevation_required':
+            self.assertEqual(res['error_code'], 5)
+            self.assertIn('safe_alternatives', res)
 
     def test_mcp_server_telemetry_dispatch(self):
         """Verifies MCP server protocol dispatch for rea_dmp_inspect and rea_etw_audit."""

@@ -335,6 +335,26 @@ class CausalitySynthesizer:
                 if ext_dll_id in graph.nodes:
                     graph.add_edge(crash_id, ext_dll_id, relation="FAULTS_INSIDE_EXTERNAL_DLL")
 
+        # 8. Corroborating Event Log Telemetry Node Integration
+        try:
+            evts = EventLogCollector.query_application_errors(bin_name, max_events=3)
+            for idx, ev in enumerate(evts):
+                ev_id = f"EVT_LOG:{idx+1}"
+                graph.add_node(
+                    ev_id,
+                    node_type="EVENT_LOG_RECORD",
+                    label=f"Event 1000 ({ev.get('fault_module')} @ {ev.get('fault_offset')})",
+                    time_created=ev.get("time_created"),
+                    fault_module=ev.get("fault_module"),
+                    exception_code=ev.get("exception_code"),
+                    fault_offset=ev.get("fault_offset")
+                )
+                graph.add_edge(bin_id, ev_id, relation="HAS_EVENT_LOG_RECORD")
+                if crash_record and "CRASH_TELEMETRY" in graph.nodes:
+                    graph.add_edge("CRASH_TELEMETRY", ev_id, relation="CORROBORATED_BY_EVENT_LOG")
+        except Exception:
+            pass
+
         return graph
 
     @classmethod
@@ -386,9 +406,56 @@ class CausalitySynthesizer:
         except Exception as _res_exc:
             resource_data = {"error": str(_res_exc)}
 
-        # 2. Crash Telemetry (if not provided, auto-discover)
+        # 2. Multi-Source Crash Telemetry Discovery & Chronological Timeline Synthesis
+        discovered_events: List[Dict[str, Any]] = []
+        discovered_wers: List[Dict[str, Any]] = []
+        dumps: Dict[str, Any] = {}
+        try:
+            discovered_events = EventLogCollector.query_application_errors(bin_name, max_events=5)
+            discovered_wers = EventLogCollector.query_wer_events(bin_name, max_events=5)
+            dumps = MiniDumpParser.audit_dumps(bin_name, max_dumps=5)
+        except Exception:
+            pass
+
+        timeline: List[Dict[str, Any]] = []
+        for ev in discovered_events:
+            timeline.append({
+                "timestamp": ev.get("time_created") or "UNKNOWN_TIME",
+                "source": "EVENT_LOG_1000",
+                "event_type": "APPLICATION_CRASH",
+                "fault_module": ev.get("fault_module"),
+                "fault_offset": ev.get("fault_offset"),
+                "exception_code": ev.get("exception_code"),
+                "summary": f"Application Error (Event 1000): {ev.get('app_name')} crashed in {ev.get('fault_module')} at offset {ev.get('fault_offset')}"
+            })
+        for wer in discovered_wers:
+            timeline.append({
+                "timestamp": wer.get("time_created") or "UNKNOWN_TIME",
+                "source": "WER_1001",
+                "event_type": "ERROR_REPORTING",
+                "bucket": wer.get("bucket"),
+                "summary": f"Windows Error Reporting (Event 1001): Bucket {wer.get('bucket')} ({wer.get('event_name')})"
+            })
+        for dmp in dumps.get("crash_reports", []):
+            d_exc = dmp.get("exception_info") or {}
+            d_time = "UNKNOWN_TIME"
+            f_path = dmp.get("file_path", "")
+            if f_path and os.path.exists(f_path):
+                import datetime
+                mtime = os.path.getmtime(f_path)
+                d_time = datetime.datetime.fromtimestamp(mtime, tz=datetime.timezone.utc).isoformat()
+            timeline.append({
+                "timestamp": d_time,
+                "source": "MINIDUMP",
+                "event_type": "MEMORY_DUMP",
+                "fault_module": d_exc.get("fault_module"),
+                "fault_offset": d_exc.get("fault_offset"),
+                "exception_code": d_exc.get("exception_code"),
+                "summary": f"MiniDump generated: {os.path.basename(f_path)} ({d_exc.get('exception_code')} {d_exc.get('exception_name')})"
+            })
+        timeline.sort(key=lambda x: str(x.get("timestamp", "")))
+
         if not crash_record:
-            dumps = MiniDumpParser.audit_dumps(bin_name, max_dumps=1)
             if dumps.get("crash_reports"):
                 rep = dumps["crash_reports"][0]
                 exc = rep.get("exception_info") or {}
@@ -403,18 +470,16 @@ class CausalitySynthesizer:
                     "access_violation_details": exc.get("access_violation_details"),
                     "thread_context": exc.get("thread_context")
                 }
-            else:
-                events = EventLogCollector.query_application_errors(bin_name, max_events=1)
-                if events:
-                    ev = events[0]
-                    crash_record = {
-                        "source": "EVENT_LOG_1000",
-                        "app_name": bin_name,
-                        "fault_module": ev.get("fault_module"),
-                        "exception_code": ev.get("exception_code"),
-                        "exception_name": ev.get("exception_name"),
-                        "fault_offset": ev.get("fault_offset", "0x0")
-                    }
+            elif discovered_events:
+                ev = discovered_events[0]
+                crash_record = {
+                    "source": "EVENT_LOG_1000",
+                    "app_name": bin_name,
+                    "fault_module": ev.get("fault_module"),
+                    "exception_code": ev.get("exception_code"),
+                    "exception_name": ev.get("exception_name"),
+                    "fault_offset": ev.get("fault_offset", "0x0")
+                }
 
         # 3. Static Binary Mapping with Strict Epistemic Module Attribution
         pe_info = BinaryFormatInspector.inspect(norm_path)
@@ -712,6 +777,7 @@ class CausalitySynthesizer:
             "crash_telemetry": crash_record,
             "binary_mapping": binary_mapping,
             "causal_chain": causal_chain,
+            "synchronized_evidence_timeline": timeline,
             "evidence_graph": graph.to_dict(),
             "mermaid_diagram": graph.to_mermaid()
         }
@@ -777,6 +843,18 @@ class CausalitySynthesizer:
         ])
         for rem in dossier.get("remediation_advisory", []):
             lines.append(f"1. {rem}")
+
+        # Timeline
+        timeline = dossier.get("synchronized_evidence_timeline", [])
+        if timeline:
+            lines.extend([
+                "",
+                "## Synchronized Multi-Source Telemetry Timeline",
+                "| Timestamp | Telemetry Source | Event Type | Description |",
+                "| :--- | :--- | :--- | :--- |"
+            ])
+            for item in timeline[:10]:
+                lines.append(f"| `{item.get('timestamp')}` | `{item.get('source')}` | `{item.get('event_type')}` | {item.get('summary')} |")
 
         # Crash Telemetry
         crash = dossier.get("crash_telemetry")

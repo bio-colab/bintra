@@ -89,6 +89,12 @@ class SafeSubprocessBroker:
             "base_args": ["filters"],
             "allowed_flags": ["instances"],
             "risk": "read_only"
+        },
+        "event_query": {
+            "exe": "wevtutil.exe",
+            "base_args": ["qe"],
+            "allowed_flags": ["Application", "System", "Security", "/q:", "/c:", "/rd:", "/f:"],
+            "risk": "read_only"
         }
     }
 

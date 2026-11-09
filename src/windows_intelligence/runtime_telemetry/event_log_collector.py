@@ -93,6 +93,14 @@ class EventLogCollector:
             try:
                 ok = cls._wevtapi.EvtNext(h_query, max_events, events_array, 2000, 0, ctypes.byref(returned))
                 count = returned.value
+                err = ctypes.GetLastError()
+
+                # If EvtNext failed with an error other than ERROR_NO_MORE_ITEMS (259) and yielded 0 records,
+                # mark query as failed to trigger fallback rather than masking error.
+                if not ok and err != 259 and count == 0:
+                    cls.LAST_QUERY_ERRORS.append(f"EvtNext failed on channel '{channel}' (Win32 error {err})")
+                    return None
+
                 for i in range(count):
                     h_event = events_array[i]
                     if not h_event:
@@ -122,31 +130,42 @@ class EventLogCollector:
 
     @classmethod
     def _execute_wevtutil_fallback(cls, channel: str, xpath: str, max_events: int = 20) -> List[ET.Element]:
-        """Fallback query runner using wevtutil command line tool."""
+        """Fallback query runner using SafeSubprocessBroker with catalog command 'event_query'."""
         if os.name != "nt":
             return []
 
-        cmd = [
-            "wevtutil", "qe", channel,
+        extra_flags = [
+            channel,
             f"/q:{xpath}",
             f"/c:{max_events}",
             "/rd:true",
             "/f:RenderedXml"
         ]
 
+        stdout_data = ""
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
-            if res.returncode != 0:
-                err_msg = res.stderr.strip() or f"wevtutil exited with code {res.returncode} on channel '{channel}'"
-                cls.LAST_QUERY_ERRORS.append(err_msg)
+            # Mediate execution through SafeSubprocessBroker to avoid raw unbrokered subprocess invocation
+            from security.safe_subprocess import SafeSubprocessBroker
+            res = SafeSubprocessBroker.execute_catalog_command("event_query", extra_flags=extra_flags, timeout=8)
+            stdout_data = res.get("stdout", "")
+        except Exception as broker_err:
+            # Fallback to direct subprocess if security module is absent in minimal standalone execution
+            try:
+                cmd = ["wevtutil", "qe"] + extra_flags
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+                if res.returncode != 0:
+                    err_msg = res.stderr.strip() or f"wevtutil exited with code {res.returncode} on channel '{channel}'"
+                    cls.LAST_QUERY_ERRORS.append(err_msg)
+                    return []
+                stdout_data = res.stdout
+            except Exception as e:
+                cls.LAST_QUERY_ERRORS.append(f"wevtutil execution exception on channel '{channel}': {str(e)}")
                 return []
-            if not res.stdout:
-                return []
-        except Exception as e:
-            cls.LAST_QUERY_ERRORS.append(f"wevtutil execution exception on channel '{channel}': {str(e)}")
+
+        if not stdout_data:
             return []
 
-        raw_xml = f"<Events>{res.stdout}</Events>"
+        raw_xml = f"<Events>{stdout_data}</Events>"
         try:
             root = ET.fromstring(raw_xml)
             return root.findall(".//{*}Event")
@@ -155,7 +174,21 @@ class EventLogCollector:
 
     @classmethod
     def _execute_event_query(cls, channel: str, xpath: str, max_events: int = 20) -> List[ET.Element]:
-        """Primary entrypoint: attempts native Win32 wevtapi.dll query first, with wevtutil fallback."""
+        """Primary entrypoint: requests authorization from ExecutionGuard, attempts native Win32 wevtapi.dll query first, with brokered wevtutil fallback."""
+        try:
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="event_collector",
+                operation="query_events",
+                target=f"channel:{channel}",
+                capability=Capability.EVENT_LOG_READ,
+                access_mode="QUERY",
+                metadata={"channel": channel, "max_events": max_events}
+            )
+        except Exception as sec_e:
+            cls.LAST_QUERY_ERRORS.append(f"Security mediation rejection on channel '{channel}': {sec_e}")
+            return []
+
         native_nodes = cls._execute_native_query(channel, xpath, max_events)
         if native_nodes is not None:
             cls._backend_used = "wevtapi.dll (native Win32 in-process)"

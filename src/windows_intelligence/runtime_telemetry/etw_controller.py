@@ -199,3 +199,101 @@ class EtwController:
             "registered_providers_count": len(cls.CATALOG_DIAGNOSTIC_PROVIDERS),
             "providers": cls.CATALOG_DIAGNOSTIC_PROVIDERS
         }
+
+    @classmethod
+    def capture_bounded_session(
+        cls,
+        session_name: str = "REA_Diagnostic_Trace",
+        duration_sec: float = 2.0,
+        provider_name: str = "Microsoft-Windows-Kernel-Process",
+        workspace_dir: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Attempts to create and collect a bounded, target-specific ETW trace session.
+        Uses Win32 StartTraceW and ControlTraceW via advapi32.dll with strict maximum file size constraints.
+        Enforces fail-closed elevation checking: returns structured elevation requirement if unprivileged.
+        """
+        if os.name != "nt":
+            return {"status": "error", "error": "ETW capture requires Windows NT"}
+
+        advapi32 = ctypes.windll.advapi32
+        out_dir = workspace_dir or os.path.abspath("./workspace")
+        os.makedirs(out_dir, exist_ok=True)
+        etl_path = os.path.join(out_dir, f"{session_name}.etl")
+
+        s_name_bytes = (session_name + "\0").encode("utf-16le")
+        log_path_bytes = (etl_path + "\0").encode("utf-16le")
+
+        header_size = ctypes.sizeof(EVENT_TRACE_PROPERTIES)
+        total_size = header_size + len(s_name_bytes) + len(log_path_bytes) + 64
+
+        buf = ctypes.create_string_buffer(total_size)
+        prop_ptr = ctypes.cast(buf, ctypes.POINTER(EVENT_TRACE_PROPERTIES))
+        prop = prop_ptr.contents
+
+        prop.Wnode.BufferSize = total_size
+        prop.Wnode.Flags = 0x00020000  # WNODE_FLAG_TRACED_GUID
+        prop.Wnode.ClientContext = 1  # QPC
+        prop.LogFileMode = 0x00000002  # EVENT_TRACE_FILE_MODE_SEQUENTIAL
+        prop.MaximumFileSize = 10  # 10 MB strict limit to prevent disk exhaustion
+
+        name_offset = header_size
+        file_offset = header_size + len(s_name_bytes)
+
+        prop.LoggerNameOffset = name_offset
+        prop.LogFileNameOffset = file_offset
+
+        ctypes.memmove(ctypes.byref(buf, name_offset), s_name_bytes, len(s_name_bytes))
+        ctypes.memmove(ctypes.byref(buf, file_offset), log_path_bytes, len(log_path_bytes))
+
+        trace_handle = ctypes.c_uint64(0)
+        advapi32.StartTraceW.argtypes = [ctypes.POINTER(ctypes.c_uint64), wintypes.LPCWSTR, ctypes.POINTER(EVENT_TRACE_PROPERTIES)]
+        advapi32.StartTraceW.restype = wintypes.ULONG
+
+        status = advapi32.StartTraceW(ctypes.byref(trace_handle), session_name, prop_ptr)
+
+        if status == 5:
+            return {
+                "status": "elevation_required",
+                "session_name": session_name,
+                "error_code": 5,
+                "error": "ERROR_ACCESS_DENIED",
+                "diagnostic_explanation": (
+                    "Live ETW trace session creation requires administrative privileges (SE_SYSTEM_PROFILE_NAME) "
+                    "or membership in the Windows 'Performance Log Users' group."
+                ),
+                "safe_alternatives": [
+                    "Query existing active trace sessions via EtwController.query_trace_session()",
+                    "Audit high-value provider schemas via EtwController.audit_etw_providers()",
+                    "Collect empirical crash telemetry via MiniDumpParser and EventLogCollector"
+                ]
+            }
+        elif status == 0:
+            import time
+            time.sleep(min(duration_sec, 5.0))
+            advapi32.ControlTraceW.argtypes = [ctypes.c_uint64, wintypes.LPCWSTR, ctypes.POINTER(EVENT_TRACE_PROPERTIES), wintypes.ULONG]
+            advapi32.ControlTraceW.restype = wintypes.ULONG
+            advapi32.ControlTraceW(trace_handle.value, session_name, prop_ptr, 1)  # EVENT_TRACE_CONTROL_STOP = 1
+            return {
+                "status": "success",
+                "session_name": session_name,
+                "etl_file": etl_path,
+                "duration_seconds": duration_sec,
+                "buffers_written": prop.BuffersWritten,
+                "events_lost": prop.EventsLost
+            }
+        elif status == 183:  # ERROR_ALREADY_EXISTS
+            return {
+                "status": "already_active",
+                "session_name": session_name,
+                "error_code": 183,
+                "error": "Session already active on host"
+            }
+        else:
+            return {
+                "status": "failed",
+                "session_name": session_name,
+                "error_code": status,
+                "error": cls.ERROR_CODES.get(status, f"Win32_Error_{status}")
+            }
+

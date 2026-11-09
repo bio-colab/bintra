@@ -213,6 +213,15 @@ def _dispatch_cli():
             parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
             args = parser.parse_args()
 
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="wer-inspect",
+                target=args.binary or "SystemEventLog",
+                capability=Capability.EVENT_LOG_READ,
+                access_mode="QUERY"
+            )
+
             report = WindowsCrashAnalyzer.collect_crash_evidence(args.binary)
             if args.format == "md":
                 lines = [
@@ -401,6 +410,15 @@ def _dispatch_cli():
             parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
             args = parser.parse_args()
 
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="dmp-inspect",
+                target=args.file or "AllCrashDumps",
+                capability=Capability.MINIDUMP_READ,
+                access_mode="QUERY"
+            )
+
             if args.file:
                 report = MiniDumpParser.parse_minidump(args.file)
             else:
@@ -458,6 +476,14 @@ def _dispatch_cli():
             parser = argparse.ArgumentParser(prog="rea file-locks", description="Detect processes locking a target file")
             parser.add_argument("--file", required=True, help="Path to file to inspect")
             args = parser.parse_args(sys.argv[2:])
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="file-locks",
+                target=args.file,
+                capability=Capability.PROCESS_QUERY,
+                access_mode="QUERY"
+            )
             from windows_intelligence.process_intelligence import FileUsageInspector
             res = FileUsageInspector.inspect_file_locks(args.file)
             print(json.dumps(res, indent=2, ensure_ascii=False))

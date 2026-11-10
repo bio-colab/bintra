@@ -340,14 +340,36 @@ class MiniDumpParser:
                     (rax,) = struct.unpack("<Q", ctx_bytes[120:128])
                     (rcx,) = struct.unpack("<Q", ctx_bytes[128:136])
                     (rdx,) = struct.unpack("<Q", ctx_bytes[136:144])
+                    (rbx,) = struct.unpack("<Q", ctx_bytes[144:152])
+                    (rsi,) = struct.unpack("<Q", ctx_bytes[168:176])
+                    (rdi,) = struct.unpack("<Q", ctx_bytes[176:184])
+                    (r8,) = struct.unpack("<Q", ctx_bytes[184:192])
+                    (r9,) = struct.unpack("<Q", ctx_bytes[192:200])
+                    (r10,) = struct.unpack("<Q", ctx_bytes[200:208])
+                    (r11,) = struct.unpack("<Q", ctx_bytes[208:216])
+                    (r12,) = struct.unpack("<Q", ctx_bytes[216:224])
+                    (r13,) = struct.unpack("<Q", ctx_bytes[224:232])
+                    (r14,) = struct.unpack("<Q", ctx_bytes[232:240])
+                    (r15,) = struct.unpack("<Q", ctx_bytes[240:248])
                     info["thread_registers"] = {
                         "arch": "x64",
                         "rip": hex(rip),
                         "rsp": hex(rsp),
                         "rbp": hex(rbp),
                         "rax": hex(rax),
+                        "rbx": hex(rbx),
                         "rcx": hex(rcx),
-                        "rdx": hex(rdx)
+                        "rdx": hex(rdx),
+                        "rsi": hex(rsi),
+                        "rdi": hex(rdi),
+                        "r8": hex(r8),
+                        "r9": hex(r9),
+                        "r10": hex(r10),
+                        "r11": hex(r11),
+                        "r12": hex(r12),
+                        "r13": hex(r13),
+                        "r14": hex(r14),
+                        "r15": hex(r15),
                     }
                     info["thread_context"] = dict(info["thread_registers"])
                 elif len(ctx_bytes) >= 716:

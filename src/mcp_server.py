@@ -438,6 +438,102 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
+        "name": "rea_vad_inspect",
+        "description": "Inspects passive virtual memory (VAD) layout and classifies pointer addresses for a target Windows process (identifies PE modules, private heaps, thread stacks, mapped views, and null-page dereference traps).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pid": {
+                    "type": "integer",
+                    "description": "Target process ID (PID) to inspect"
+                },
+                "address": {
+                    "type": "string",
+                    "description": "Optional 64-bit or 32-bit virtual memory address to classify (e.g. '0x7fff12340000')"
+                },
+                "include_regions": {
+                    "type": "boolean",
+                    "description": "If true, includes full listing of contiguous memory regions"
+                }
+            },
+            "required": ["pid"]
+        }
+    },
+    {
+        "name": "rea_crash_rca",
+        "description": "Performs automated root cause analysis (RCA) on a Windows MiniDump (.dmp): extracts ExceptionRecord, classifies violated memory address (Null-trap, heap, unmapped), disassembles the faulting instruction window using Capstone, identifies the culprit register (e.g. RCX=0x0), and provides actionable developer remediation.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "dmp_path": {
+                    "type": "string",
+                    "description": "Path to MiniDump (.dmp) file on disk"
+                },
+                "binary_path": {
+                    "type": "string",
+                    "description": "Optional path to target executable for local instruction disassembly"
+                }
+            },
+            "required": ["dmp_path"]
+        }
+    },
+    {
+        "name": "rea_etw_capture",
+        "description": "Establishes a passive real-time ETW capture session (or queries active telemetry stream), enables kernel/graphics diagnostic providers (Kernel-Process, Kernel-Memory, Direct3D11, DXGI), and synthesizes a chronological timeline of events leading up to faults.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session_name": {
+                    "type": "string",
+                    "description": "Name for ETW trace session (default: 'REA_Diagnostic_Trace')"
+                },
+                "pid": {
+                    "type": "integer",
+                    "description": "Optional target PID to filter events"
+                },
+                "duration_seconds": {
+                    "type": "number",
+                    "description": "Duration in seconds to sample real-time events (default: 1.0)"
+                }
+            }
+        }
+    },
+    {
+        "name": "rea_ghidra_live_bridge",
+        "description": "Bidirectional localhost JSON-RPC 2.0 IPC bridge connecting REA-Neural to Ghidra. Enables starting/stopping the bridge server, querying client connection status, and injecting Phase 1 VAD memory maps, Phase 2 Crash RCA annotations, and Phase 3 ETW timelines directly into Ghidra's Program Database.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "Action to perform: 'start', 'status', 'inject_crash_rca', 'inject_vad', 'inject_etw', or 'stop'",
+                    "enum": ["start", "status", "inject_crash_rca", "inject_vad", "inject_etw", "stop"]
+                },
+                "port": {
+                    "type": "integer",
+                    "description": "Port number for bridge server (default: 41718)"
+                },
+                "auth_token": {
+                    "type": "string",
+                    "description": "Optional authentication token"
+                },
+                "crash_dmp_path": {
+                    "type": "string",
+                    "description": "Path to MiniDump (.dmp) file for 'inject_crash_rca'"
+                },
+                "pid": {
+                    "type": "integer",
+                    "description": "Target Process ID for 'inject_vad'"
+                },
+                "timeline_report": {
+                    "type": "object",
+                    "description": "Optional timeline report dictionary for 'inject_etw'"
+                }
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "rea_evidence_graph",
         "description": "Generates a formal directed Evidence Graph G = (V, E) and Mermaid flowchart connecting target binary PE sections, imported DLLs, Ghidra AST functions/blocks, host OS build, PnP hardware devices, kernel drivers, and empirical crash telemetry.",
         "inputSchema": {
@@ -622,6 +718,10 @@ class ReaMcpServer:
         "rea_service_audit": ("cap.service.query", "QUERY", None),
         "rea_dmp_inspect": ("cap.minidump.read", "READ", "dump_path"),
         "rea_etw_audit": ("cap.event_log.read", "READ", "session_name"),
+        "rea_etw_capture": ("cap.event_log.read", "READ", "session_name"),
+        "rea_vad_inspect": ("cap.process.query", "QUERY", "pid"),
+        "rea_crash_rca": ("cap.minidump.read", "READ", "dmp_path"),
+        "rea_ghidra_live_bridge": ("cap.file.read", "READ", None),
         "rea_evidence_graph": ("cap.file.read", "READ", "binary_path"),
         "rea_wsp_audit": ("cap.file.read", "READ", "model_path"),
         "rea_patch_weights": ("cap.workspace.write", "WRITE", "output_path"),
@@ -913,6 +1013,107 @@ class ReaMcpServer:
             if sname:
                 return EtwController.query_trace_session(sname)
             return EtwController.audit_telemetry_system()
+
+        elif name == "rea_etw_capture":
+            s_name = args.get("session_name", "REA_Diagnostic_Trace")
+            t_pid = args.get("pid")
+            dur = float(args.get("duration_seconds", 1.0))
+            import time
+            from windows_intelligence import EtwLiveCaptureSession, EtwTimelineCorrelator
+            session = EtwLiveCaptureSession(session_name=s_name, target_pid=t_pid)
+            s_info = session.start_session()
+            time.sleep(min(dur, 5.0))
+            stop_info = session.stop_session()
+            timeline = session.get_timeline(pid=t_pid)
+            report = EtwTimelineCorrelator.correlate_crash_timeline(timeline)
+            report["session_info"] = s_info
+            report["stop_info"] = stop_info
+            return report
+
+        elif name == "rea_ghidra_live_bridge":
+            from ghidra_live_bridge import (
+                GhidraLiveBridgeServer, GhidraLiveBridgeClient,
+                get_or_create_bridge, get_active_bridge, stop_active_bridge
+            )
+            act = args.get("action", "status")
+            port = int(args.get("port", 41718))
+            token = args.get("auth_token")
+
+            if act == "start":
+                server = get_or_create_bridge(port=port, auth_token=token)
+                st = server.dispatch_rpc_method("get_status", {})
+                st["marker_file"] = getattr(server, "_marker_path", None)
+                return st
+            elif act == "stop":
+                return stop_active_bridge()
+            elif act == "status":
+                server = get_active_bridge()
+                if server and server.is_running:
+                    return server.dispatch_rpc_method("get_status", {})
+                client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
+                try:
+                    return client.call_rpc("get_status")
+                except Exception as e:
+                    return {"is_running": False, "error": str(e)}
+            elif act == "inject_crash_rca":
+                dmp = args.get("crash_dmp_path")
+                if not dmp:
+                    raise ValueError("'crash_dmp_path' is required for action 'inject_crash_rca'")
+                from windows_intelligence import CrashRootCauseAnalyzer
+                rca = CrashRootCauseAnalyzer.analyze_crash(dmp)
+                server = get_active_bridge()
+                if server and server.is_running:
+                    return server.inject_crash_rca(rca)
+                client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
+                return client.call_rpc("rea.inject_crash_rca", {"rca_report": rca})
+            elif act == "inject_vad":
+                pid = int(args.get("pid", 0))
+                if pid <= 0:
+                    raise ValueError("Valid 'pid' (> 0) is required for action 'inject_vad'")
+                from windows_intelligence import VirtualMemoryInspector
+                snap = VirtualMemoryInspector.inspect_process(pid)
+                server = get_active_bridge()
+                if server and server.is_running:
+                    return server.inject_vad_snapshot(snap.to_dict())
+                client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
+                return client.call_rpc("rea.inject_vad_snapshot", {"vad_snapshot": snap.to_dict()})
+            elif act == "inject_etw":
+                tl = args.get("timeline_report")
+                if not tl:
+                    import time
+                    from windows_intelligence import EtwLiveCaptureSession, EtwTimelineCorrelator
+                    sess = EtwLiveCaptureSession(session_name="QuickProbe")
+                    sess.start_session()
+                    time.sleep(0.5)
+                    sess.stop_session()
+                    tl = EtwTimelineCorrelator.correlate_crash_timeline(sess.get_timeline())
+                server = get_active_bridge()
+                if server and server.is_running:
+                    return server.inject_etw_timeline(tl)
+                client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
+                return client.call_rpc("rea.inject_etw_timeline", {"timeline_report": tl})
+            else:
+                raise ValueError(f"Unknown ghidra_live_bridge action: '{act}'")
+
+        elif name == "rea_vad_inspect":
+            pid = int(args.get("pid", 0))
+            if pid <= 0:
+                raise ValueError("Valid 'pid' (> 0) is required.")
+            from windows_intelligence import VirtualMemoryInspector
+            snapshot = VirtualMemoryInspector.inspect_process(pid)
+            addr_str = args.get("address")
+            if addr_str:
+                addr = int(addr_str, 0)
+                return snapshot.classify_address(addr)
+            return snapshot.to_dict(include_regions=bool(args.get("include_regions", False)))
+
+        elif name == "rea_crash_rca":
+            dmp_p = args.get("dmp_path")
+            if not dmp_p:
+                raise ValueError("'dmp_path' is required.")
+            b_path = args.get("binary_path")
+            from windows_intelligence import CrashRootCauseAnalyzer
+            return CrashRootCauseAnalyzer.analyze_crash(dump_target=dmp_p, binary_path=b_path)
 
         elif name == "rea_evidence_graph":
             from windows_intelligence import CausalitySynthesizer, MiniDumpParser

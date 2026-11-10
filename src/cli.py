@@ -9,6 +9,7 @@ or Metaphorical Sensory Cortex (sense / sensory-audit).
 
 import sys
 import os
+import time
 import json
 import argparse
 
@@ -39,8 +40,8 @@ WEIGHT_COMMANDS = {
 }
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
-GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless"}
-WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match"}
+GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless", "ghidra-bridge"}
+WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture"}
 
 
 def print_help():
@@ -82,6 +83,7 @@ Ghidra P-Code & Symbolic Integration Commands:
   ghidra-plan       Generate type-safe Ghidra database mutation and annotation plans
   ghidra-analyze    Batch-analyze exported Ghidra P-Code JSON and generate database mutation plan
   ghidra-headless   Launch Ghidra analyzeHeadless with REA-Neural bridge script to auto-deobfuscate
+  ghidra-bridge     Run localhost JSON-RPC 2.0 live bridge daemon connecting to Ghidra
 
 Windows System Intelligence & Failure Diagnostic Commands:
   win-audit         Profile host Windows OS build, WOW64 mode, and AppCompatFlags layers
@@ -98,6 +100,9 @@ Windows System Intelligence & Failure Diagnostic Commands:
   file-locks        Detect processes and services holding active locks on a file via Restart Manager
   proc-modules      Locate running processes that have loaded a specific module or DLL
   dev-match         Match Plug and Play (PnP) hardware IDs against driver INF store and problem codes
+  vad-inspect       Inspect passive virtual memory map (VAD) and classify addresses (Heap/Stack/Image)
+  crash-rca         Automated Crash Root Cause Analysis (MiniDump + Disassembly + Culprit Register)
+  etw-capture       Establish real-time ETW capture session and stream diagnostic timeline events
 
 Agent-Native MCP (Model Context Protocol):
   mcp               Launch native JSON-RPC 2.0 stdio MCP server for AI models (Claude, Antigravity, Cursor)
@@ -162,7 +167,8 @@ def _dispatch_cli():
             CommandCatalog, CommandExecutor, PowerShellExecutor,
             RegistryCatalog, WindowsRegistryReader, WindowsRegistryAnalyzer,
             NativeDeviceInspector, KernelDriverInspector, ServiceManagerInspector, ProcessMitigationInspector,
-            MiniDumpParser, EventLogCollector, EtwController
+            MiniDumpParser, EventLogCollector, EtwController, VirtualMemoryInspector, CrashRootCauseAnalyzer,
+            EtwLiveCaptureSession, EtwTimelineCorrelator
         )
         if cmd == "win-audit":
             parser = argparse.ArgumentParser(description="Profile host Windows OS, devices, and security context")
@@ -540,6 +546,88 @@ def _dispatch_cli():
             print(json.dumps(res, indent=2, ensure_ascii=False))
             return
 
+        elif cmd == "vad-inspect":
+            parser = argparse.ArgumentParser(prog="rea vad-inspect", description="Inspect passive virtual memory map (VAD) and classify addresses")
+            parser.add_argument("--pid", type=int, required=True, help="Target process PID to inspect")
+            parser.add_argument("--address", default=None, help="Optional virtual memory address to classify (e.g. '0x7fff12340000')")
+            parser.add_argument("--regions", action="store_true", help="Include full listing of contiguous memory regions")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args(sys.argv[2:])
+
+            snapshot = VirtualMemoryInspector.inspect_process(args.pid)
+            if args.address is not None:
+                parsed_addr = int(args.address, 0)
+                res = snapshot.classify_address(parsed_addr)
+            else:
+                res = snapshot.to_dict(include_regions=args.regions)
+
+            if args.format == "md":
+                if args.address is not None:
+                    lines = [
+                        f"# Address Classification: `{res['address']}`",
+                        f"- **Category:** `{res.get('category')}`",
+                        f"- **Status:** `{res.get('status')}`",
+                        f"- **Protection:** `{res.get('protect')}`",
+                    ]
+                    if res.get("module_name"):
+                        lines.append(f"- **Module:** `{res.get('module_name')}` (RVA: `{res.get('rva')}`)")
+                    if res.get("description"):
+                        lines.append(f"- **Description:** {res.get('description')}")
+                    print("\n".join(lines))
+                else:
+                    sum_data = res["summary"]
+                    lines = [
+                        f"# Virtual Memory (VAD) Map for PID {args.pid} (`{res['process_name']}`)",
+                        f"- **Committed Memory:** {sum_data['commit_mb']} MB ({sum_data['commit_bytes']} bytes)",
+                        f"- **Image Sections (DLL/EXE):** {sum_data['image_mb']} MB",
+                        f"- **Private Heap:** {sum_data['heap_mb']} MB",
+                        f"- **Thread Stacks:** {sum_data['stack_kb']} KB",
+                        f"- **W^X Violations (Writable+Executable):** {sum_data['wx_regions_count']}",
+                        f"- **Total Contiguous Regions:** {sum_data['total_regions']}",
+                    ]
+                    print("\n".join(lines))
+            else:
+                print(json.dumps(res, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "crash-rca":
+            parser = argparse.ArgumentParser(prog="rea crash-rca", description="Automated Crash Root Cause Analysis (MiniDump + Disassembly)")
+            parser.add_argument("--dmp", "--file", dest="dmp_path", required=True, help="Path to Windows MiniDump (.dmp) file")
+            parser.add_argument("--binary", default=None, help="Optional path to target executable for machine code disassembly")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args(sys.argv[2:])
+
+            report = CrashRootCauseAnalyzer.analyze_crash(dump_target=args.dmp_path, binary_path=args.binary)
+            if args.format == "md":
+                print(CrashRootCauseAnalyzer.format_markdown(report))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "etw-capture":
+            parser = argparse.ArgumentParser(prog="rea etw-capture", description="Start real-time ETW capture session and inspect timeline")
+            parser.add_argument("--session-name", default="REA_Diagnostic_Trace", help="Name for real-time ETW trace session")
+            parser.add_argument("--pid", type=int, default=None, help="Optional target PID to filter events")
+            parser.add_argument("--duration", type=float, default=2.0, help="Duration in seconds to capture live trace (default: 2.0s)")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args(sys.argv[2:])
+
+            session = EtwLiveCaptureSession(session_name=args.session_name, target_pid=args.pid)
+            start_res = session.start_session()
+            time.sleep(args.duration)
+            stop_res = session.stop_session()
+
+            timeline = session.get_timeline(pid=args.pid)
+            correlation = EtwTimelineCorrelator.correlate_crash_timeline(timeline)
+            correlation["session_info"] = start_res
+            correlation["stop_info"] = stop_res
+
+            if args.format == "md":
+                print(EtwTimelineCorrelator.format_markdown(correlation))
+            else:
+                print(json.dumps(correlation, indent=2, ensure_ascii=False))
+            return
+
         elif cmd == "etw-audit":
             parser = argparse.ArgumentParser(description="Audit ETW trace sessions and diagnostic providers")
             parser.add_argument("command")
@@ -703,6 +791,88 @@ def _dispatch_cli():
             print(f"[REA-Neural] Script: {script_dir / 'ReaNeuralGhidraBridge.java'}")
             res = subprocess.run(cmd_args)
             sys.exit(res.returncode)
+
+        elif cmd == "ghidra-bridge":
+            parser = argparse.ArgumentParser(prog="rea ghidra-bridge", description="REA-Neural Ghidra Live Bidirectional Bridge Daemon")
+            parser.add_argument("--start", action="store_true", help="Start the bridge server daemon")
+            parser.add_argument("--stop", action="store_true", help="Stop the running bridge server daemon")
+            parser.add_argument("--status", action="store_true", help="Check status of the bridge daemon")
+            parser.add_argument("--port", type=int, default=41718, help="Bridge port (default: 41718)")
+            parser.add_argument("--token", default=None, help="Optional authentication token")
+            parser.add_argument("--annotate-crash", default=None, help="MiniDump (.dmp) file to analyze and inject into Ghidra")
+            parser.add_argument("--annotate-vad", type=int, default=None, help="Process ID to inspect VAD layout and inject into Ghidra")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args(sys.argv[2:])
+
+            from ghidra_live_bridge import (
+                GhidraLiveBridgeServer, GhidraLiveBridgeClient,
+                get_or_create_bridge, get_active_bridge, stop_active_bridge
+            )
+
+            if args.stop:
+                res = stop_active_bridge()
+                print(json.dumps(res, indent=2))
+                return
+
+            if args.status:
+                try:
+                    client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
+                    st = client.call_rpc("get_status")
+                    print(json.dumps(st, indent=2, ensure_ascii=False))
+                except Exception as e:
+                    print(json.dumps({"is_running": False, "error": str(e)}, indent=2))
+                return
+
+            if args.annotate_crash:
+                from windows_intelligence import CrashRootCauseAnalyzer
+                rca = CrashRootCauseAnalyzer.analyze_crash(args.annotate_crash)
+                client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
+                try:
+                    inj = client.call_rpc("rea.inject_crash_rca", {"rca_report": rca})
+                    print(json.dumps(inj, indent=2, ensure_ascii=False))
+                except Exception as e:
+                    act = get_active_bridge()
+                    if act and act.is_running:
+                        inj = act.inject_crash_rca(rca)
+                        print(json.dumps(inj, indent=2, ensure_ascii=False))
+                    else:
+                        print(json.dumps({"status": "error", "message": f"Bridge communication error: {e}"}, indent=2))
+                return
+
+            if args.annotate_vad:
+                from windows_intelligence import VirtualMemoryInspector
+                snap = VirtualMemoryInspector.inspect_process(args.annotate_vad)
+                client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
+                try:
+                    inj = client.call_rpc("rea.inject_vad_snapshot", {"vad_snapshot": snap.to_dict()})
+                    print(json.dumps(inj, indent=2, ensure_ascii=False))
+                except Exception as e:
+                    act = get_active_bridge()
+                    if act and act.is_running:
+                        inj = act.inject_vad_snapshot(snap.to_dict())
+                        print(json.dumps(inj, indent=2, ensure_ascii=False))
+                    else:
+                        print(json.dumps({"status": "error", "message": f"Bridge communication error: {e}"}, indent=2))
+                return
+
+            # Default / --start: start bridge server
+            server = get_or_create_bridge(port=args.port, auth_token=args.token)
+            print(f"[*] REA-Neural Ghidra Live Bridge running on http://127.0.0.1:{server.port}")
+            print(f"[*] Auth Token: {server.auth_token}")
+            print(f"[*] Marker File: {getattr(server, '_marker_path', 'None')}")
+            if not args.start:
+                print("[*] Bridge started. Exiting immediate mode.")
+                return
+
+            print("[*] Press Ctrl+C to shutdown bridge server...")
+            try:
+                while server.is_running:
+                    time.sleep(1.0)
+            except KeyboardInterrupt:
+                print("\n[*] Stopping Ghidra Live Bridge...")
+                server.stop()
+                print("[+] Bridge stopped cleanly.")
+            return
 
     # MCP Server Command
     if cmd in ("mcp", "mcp-server"):

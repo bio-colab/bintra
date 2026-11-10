@@ -65,13 +65,13 @@ class EtwController:
             "guid": "{EDD08927-9CC4-4E65-B970-C2560F5C4C82}",
             "category": "File I/O & Storage",
             "keywords": ["FILE_IO", "FILENAME"],
-            "diagnostic_value": "Audits missing game assets, read locks, and storage contention."
+            "diagnostic_value": "Audits missing application assets, read locks, and storage contention."
         },
         "Microsoft-Windows-Kernel-Network": {
             "guid": "{7DD42A49-5329-4832-8DFD-43D979153A88}",
             "category": "Networking & Sockets",
             "keywords": ["TCPIP", "UDP"],
-            "diagnostic_value": "Diagnoses multiplayer handshake drops and socket binding errors."
+            "diagnostic_value": "Diagnoses client-server handshake drops and socket binding errors."
         },
         "Microsoft-Windows-Direct3D11": {
             "guid": "{DB6F6DDB-AC77-4E88-8E81-8B010C2C31E9}",

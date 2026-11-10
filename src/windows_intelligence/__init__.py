@@ -44,7 +44,14 @@ from .system_introspection import (
 from .runtime_telemetry import (
     MiniDumpParser,
     EventLogCollector,
-    EtwController
+    EtwController,
+    VirtualMemoryInspector,
+    ProcessMemoryMapSnapshot,
+    ProcessMemoryRegion,
+    CrashRootCauseAnalyzer,
+    EtwLiveCaptureSession,
+    EtwEventRecord,
+    EtwTimelineCorrelator
 )
 
 # Evidence Graph & Causality Engine Submodule (Phase 4)
@@ -84,6 +91,13 @@ __all__ = [
     "MiniDumpParser",
     "EventLogCollector",
     "EtwController",
+    "VirtualMemoryInspector",
+    "ProcessMemoryMapSnapshot",
+    "ProcessMemoryRegion",
+    "CrashRootCauseAnalyzer",
+    "EtwLiveCaptureSession",
+    "EtwEventRecord",
+    "EtwTimelineCorrelator",
     # Evidence Graph & Causality (Phase 4)
     "EvidenceGraph",
     "EvidenceNode",

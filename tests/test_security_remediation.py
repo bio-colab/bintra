@@ -39,11 +39,11 @@ class TestSecurityRemediation(unittest.TestCase):
     """Rigorous verification of the 6 security & Windows intelligence remediation guarantees."""
 
     def test_complete_mediation_all_27_mcp_tools(self):
-        """Guarantee 1: All 27 MCP tools are registered in security metadata and mediated fail-closed."""
+        """Guarantee 1: All 31 MCP tools are registered in security metadata and mediated fail-closed."""
         server = ReaMcpServer()
         tools_list = server.handle_tools_list({})["tools"]
         tool_names = [t["name"] for t in tools_list]
-        self.assertEqual(len(tool_names), 27, f"Expected exactly 27 tools, found {len(tool_names)}")
+        self.assertEqual(len(tool_names), 31, f"Expected exactly 31 tools, found {len(tool_names)}")
 
         for t_name in tool_names:
             self.assertIn(t_name, server.TOOL_SECURITY_METADATA, f"Tool '{t_name}' missing from TOOL_SECURITY_METADATA")

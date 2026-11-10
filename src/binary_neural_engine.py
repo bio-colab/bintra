@@ -1149,11 +1149,21 @@ class SemanticFunctionMatcher:
                 interpretation = "Functions exhibit divergent computational patterns or non-code noise."
 
         is_match = similarity >= 0.85
+        has_branch_1 = bool(v1[1] > 0.01)
+        has_branch_2 = bool(v2[1] > 0.01)
+        is_branch_topology_divergent = (has_branch_1 != has_branch_2)
+
+        if is_branch_topology_divergent:
+            is_match = False
+            similarity = min(similarity, 0.72)
+            interpretation = "Functions diverge in branch/loop topology (branching/looping vs branchless straight-line code); semantic match rejected."
 
         return {
             "cosine_similarity": round(similarity, 4),
             "is_semantic_match": is_match,
-            "confidence": "HIGH" if similarity > 0.92 else ("MODERATE" if similarity >= 0.85 else "LOW / NO MATCH"),
+            "confidence": "HIGH" if (similarity > 0.92 and is_match) else ("MODERATE" if (similarity >= 0.85 and is_match) else "LOW / NO MATCH"),
+            "granularity_type": "OPERATIONAL_MIX_HISTOGRAM",
+            "branch_topology_congruent": not is_branch_topology_divergent,
             "interpretation": interpretation
         }
 
@@ -1335,6 +1345,11 @@ class SurgicalBinaryPatcher:
                 raise TargetMutationError(
                     f"TARGET_WRITE_FORBIDDEN: In-place binary modification is strictly forbidden by REA Safety Policy. Destination '{out_abs}' matches source."
                 )
+            scope = ExecutionGuard.get_current_scope()
+            if scope and scope.is_target_directory(out_abs):
+                raise TargetMutationError(
+                    f"TARGET_DIRECTORY_WRITE_FORBIDDEN: Output patch cannot be placed in the target's original directory '{os.path.dirname(out_abs)}'."
+                )
 
             # Mandatory Reference Monitor Mediation: Enforce workspace confinement & target immutability
             ExecutionGuard.request_access(
@@ -1434,8 +1449,8 @@ class SurgicalBinaryPatcher:
                 pain_hazards.append("DEP_NON_EXECUTABLE_SECTION_HAZARD")
                 pain_score += 0.35
 
-            if enforce_nociception and pain_score >= 0.6:
-                raise RuntimeError(f"Nociceptive Reflex blocked destructive binary patch: {reason}")
+        if enforce_nociception and pain_score >= 0.6:
+            raise RuntimeError(f"Nociceptive Reflex blocked destructive binary patch: {reason}")
 
         data[file_offset:file_offset + len(patch_bytes)] = patch_bytes
 

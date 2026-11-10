@@ -203,5 +203,96 @@ class TestSecurityRemediation(unittest.TestCase):
             self.assertIn("cryptographic catalog signature validation was not executed", binding.get("whql_verification_note", ""))
 
 
+    def test_mcp_output_path_cannot_auto_derive_workspace(self):
+        """GAP-2: MCP server cannot auto-derive workspace from output_path to escape confinement."""
+        server = ReaMcpServer()
+        with tempfile.TemporaryDirectory() as tgt_dir, tempfile.TemporaryDirectory() as ws_dir, tempfile.TemporaryDirectory() as foreign_dir:
+            pe_path = os.path.join(tgt_dir, "victim.exe")
+            with open(pe_path, "wb") as f:
+                f.write(b"MZ" + b"\x00" * 512)
+            foreign_out = os.path.join(foreign_dir, "mcp_escape.exe")
+
+            # Call without explicit workspace_dir - output in foreign_dir must be REJECTED fail-closed
+            res = server.handle_tools_call({
+                "name": "rea_patch_binary",
+                "arguments": {
+                    "file_path": pe_path,
+                    "output_path": foreign_out,
+                    "offset": 0x10,
+                    "patch_hex": "90 90"
+                }
+            })
+            self.assertTrue(res.get("isError"))
+            err_msg = res.get("content", [{}])[0].get("text", "")
+            self.assertIn("WRITE_OUTSIDE_WORKSPACE", err_msg)
+            self.assertFalse(os.path.exists(foreign_out))
+
+    def test_target_directory_write_forbidden(self):
+        """LIM-8: Writing patch directly into target's original directory returns TARGET_DIRECTORY_WRITE_FORBIDDEN."""
+        with tempfile.TemporaryDirectory() as tgt_dir:
+            pe_path = os.path.join(tgt_dir, "victim.exe")
+            with open(pe_path, "wb") as f:
+                f.write(b"MZ" + b"\x00" * 512)
+            same_dir_out = os.path.join(tgt_dir, "patched_victim.exe")
+
+            with ExecutionGuard.scoped_session(target_binary_path=pe_path, workspace_dir=tgt_dir):
+                with self.assertRaises(TargetMutationError) as ctx:
+                    SurgicalBinaryPatcher.patch_file(pe_path, same_dir_out, 0x10, "90")
+                self.assertIn("TARGET_DIRECTORY_WRITE_FORBIDDEN", str(ctx.exception))
+
+    def test_sycophancy_auditor_scale_adaptive_detection(self):
+        """LIM-3: Scale-adaptive sycophancy decision fires on small-norm weight matrices."""
+        from rea_neural_engine import AttentionPatternAuditor
+        import numpy as np
+
+        d = 64
+        q_ans = np.zeros(d, dtype=np.float32)
+        q_ans[0] = 0.5
+        k_quest = np.zeros((5, d), dtype=np.float32)
+        k_sugg = np.zeros((5, d), dtype=np.float32)
+        # Small unnormalized projection matrix with suggestion preference
+        qk = np.zeros((d, d), dtype=np.float32)
+        qk[0, 1] = 2.0  # Suggestion preference
+        k_sugg[:, 1] = 0.5
+
+        res = AttentionPatternAuditor.audit_sycophancy_attention(qk, k_quest, k_sugg, q_ans)
+        self.assertTrue(res["is_sycophantic_head"])
+        self.assertIn("mean_question_logit", res)
+        self.assertIn("logit_difference", res)
+
+    def test_amenability_scale_recommendation(self):
+        """LIM-5: Amenability diagnostic outputs recommended_num_columns and pathology_distribution."""
+        from rea_neural_engine import AmenabilityDiagnostic
+        import numpy as np
+
+        # Concentrated attractor: a few dominant columns
+        mat_conc = np.zeros((64, 64), dtype=np.float32)
+        mat_conc[:, :4] = 10.0
+        res_conc = AmenabilityDiagnostic.evaluate_surgical_amenability(mat_conc, observed_loop_rate=0.90)
+        self.assertTrue(res_conc["is_amenable_to_weight_surgery"])
+        self.assertEqual(res_conc["pathology_distribution"], "CONCENTRATED_COLUMN_BOTTLENECK")
+        self.assertEqual(res_conc["recommended_num_columns"], 64)
+
+        # Diffuse attractor: spread across all columns
+        mat_diff = np.ones((64, 64), dtype=np.float32) * 2.0
+        res_diff = AmenabilityDiagnostic.evaluate_surgical_amenability(mat_diff, observed_loop_rate=0.90)
+        self.assertTrue(res_diff["is_amenable_to_weight_surgery"])
+        self.assertEqual(res_diff["pathology_distribution"], "DIFFUSE_UNIFORM_ATTRACTOR")
+        self.assertEqual(res_diff["recommended_num_columns"], 256)
+
+    def test_semantic_matcher_rejects_branch_topology_divergence(self):
+        """LIM-2: SemanticFunctionMatcher rejects false-positive matching between looping and branchless functions."""
+        from binary_neural_engine import SemanticFunctionMatcher
+
+        # Branchless function: return 42
+        ret42_hex = "55 48 89 e5 b8 2a 00 00 00 5d c3"
+        # Function with loop/jumps: loop counter
+        loop_hex = "55 48 89 e5 31 c0 83 c0 01 83 f8 0a 75 f8 5d c3"
+
+        res = SemanticFunctionMatcher.match_functions(ret42_hex, loop_hex)
+        self.assertFalse(res["is_semantic_match"])
+        self.assertFalse(res["branch_topology_congruent"])
+
+
 if __name__ == "__main__":
     unittest.main()

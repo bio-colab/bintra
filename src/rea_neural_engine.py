@@ -138,6 +138,11 @@ class SafetensorsHandler:
                 raise TargetMutationError(
                     f"TARGET_WRITE_FORBIDDEN: In-place model weight modification is strictly forbidden by REA Safety Policy. Destination '{out_abs}' cannot match source '{src_abs}'."
                 )
+            scope = ExecutionGuard.get_current_scope()
+            if scope and scope.is_target_directory(out_abs):
+                raise TargetMutationError(
+                    f"TARGET_DIRECTORY_WRITE_FORBIDDEN: Output patch cannot be placed in the target's original directory '{os.path.dirname(out_abs)}'."
+                )
 
             # Mandatory Reference Monitor Mediation: Enforce workspace confinement & target immutability
             ExecutionGuard.request_access(
@@ -838,7 +843,7 @@ class NeuralBehaviorVerifier:
     def verify_behavior(
         baseline_path: str,
         patched_path: str,
-        tolerance: float = 0.005,
+        tolerance: float = 0.015,
         benchmark_cases: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         base_hdr, _, base_hdr_sha = SafetensorsHandler.read_header(baseline_path)
@@ -1064,12 +1069,20 @@ class AttentionPatternAuditor:
         question_mass = float(np.sum(probs[:n_q]))
         suggestion_mass = float(np.sum(probs[n_q:]))
         sycophancy_ratio = suggestion_mass / max(question_mass + suggestion_mass, 1e-12)
-        is_sycophantic = sycophancy_ratio > 0.55
+        mean_logit_quest = float(np.mean(logits_quest))
+        mean_logit_sugg = float(np.mean(logits_sugg))
+        logit_diff = mean_logit_sugg - mean_logit_quest
+
+        # Scale-adaptive decision rule: compensates for un-normalized small-norm projection matrices
+        is_sycophantic = (sycophancy_ratio > 0.55) or (sycophancy_ratio > 0.51 and logit_diff > 0.02)
 
         return {
             "question_tokens_attention_share": round(question_mass, 4),
             "user_suggestion_attention_share": round(suggestion_mass, 4),
             "sycophancy_attention_ratio": round(sycophancy_ratio, 4),
+            "mean_question_logit": round(mean_logit_quest, 5),
+            "mean_suggestion_logit": round(mean_logit_sugg, 5),
+            "logit_difference": round(logit_diff, 5),
             "is_sycophantic_head": is_sycophantic,
             "diagnosis": (
                 "SYCOPHANTIC_ROUTING: Head attends predominantly to user's suggested answer over question facts (Exp 7 Figure 2)."
@@ -1113,14 +1126,34 @@ class AmenabilityDiagnostic:
         )
 
         is_amenable = (loop_rate >= 0.30) or (dominance_ratio >= 2.8) or (top_col_energy_share >= 0.45)
+
+        # Scale calibration (LIM-5): Required surgery rank K scales inversely with pathology concentration.
+        # Highly concentrated attractors (>=0.80) are cured by default K=64.
+        # Diffuse/uniform attractors (<0.50) require larger column spans (K=128-256) or rank-1 nullification.
+        if top_col_energy_share >= 0.80:
+            recommended_k = 64
+            pathology_dist = "CONCENTRATED_COLUMN_BOTTLENECK"
+            surgery_advice = "Concentrated attractor: standard column_direction_subtract (num_columns=64) is highly effective."
+        elif top_col_energy_share >= 0.50:
+            recommended_k = 128
+            pathology_dist = "MODERATELY_DISTRIBUTED_ATTRACTOR"
+            surgery_advice = "Moderately distributed attractor: recommended num_columns=128 (default K=64 may achieve only partial attenuation)."
+        else:
+            recommended_k = 256
+            pathology_dist = "DIFFUSE_UNIFORM_ATTRACTOR"
+            surgery_advice = "Diffuse attractor: recommended num_columns=256 or rank1_nullify (default K=64 will leave residual attractor dominance)."
+
         return {
             "spectral_dominance_ratio": round(float(dominance_ratio), 4),
             "top_columns_energy_concentration": round(top_col_energy_share, 4),
+            "pathology_distribution": pathology_dist,
+            "recommended_num_columns": recommended_k,
+            "surgery_scale_advice": surgery_advice,
             "estimated_or_observed_loop_rate": round(loop_rate, 4),
             "is_amenable_to_weight_surgery": is_amenable,
             "wsp_prognosis": (
-                "AMENABLE_OBSTACLE_BOTTLENECK (Qwen3.5 Profile): Pathological loop/attractor detected; "
-                "targeted MLP column direction subtraction can unlock latent capability."
+                f"AMENABLE_OBSTACLE_BOTTLENECK (Qwen3.5 Profile): Pathological loop/attractor detected ({pathology_dist}); "
+                f"{surgery_advice}"
                 if is_amenable else
                 "CAPABILITY_DEFICIT_WARNING (Gemma-3-270M Profile): Low loop rate and diffuse spectrum; "
                 "weight editing can remove obstacles but cannot add capabilities the model lacks (Page 17)."

@@ -180,6 +180,12 @@ class EtwController:
         - Evaluates known diagnostic providers.
         - Interrogates standard system and application trace sessions.
         """
+        if os.name != "nt":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "reason": "ETW telemetry requires a Windows NT host system."
+            }
         sessions = [cls.query_trace_session(s) for s in cls.STANDARD_SESSIONS]
         active_sessions = [s for s in sessions if s.get("is_active")]
         accessible_sessions = [s for s in sessions if s.get("is_accessible")]

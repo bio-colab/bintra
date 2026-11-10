@@ -141,6 +141,12 @@ class KernelDriverInspector:
     @classmethod
     def audit_drivers(cls) -> Dict[str, Any]:
         """Runs complete kernel driver diagnostic audit."""
+        if os.name != "nt":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "reason": "KernelDriverInspector requires a Windows NT host system."
+            }
         drivers = cls.enumerate_loaded_drivers(max_drivers=512)
 
         graphics_drivers = [

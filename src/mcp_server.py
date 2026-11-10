@@ -650,8 +650,6 @@ class ReaMcpServer:
                 args.get("target_path") or args.get("dump_path")
             )
             workspace_dir = args.get("workspace_dir") or args.get("workspace")
-            if not workspace_dir and "output_path" in args:
-                workspace_dir = os.path.dirname(os.path.abspath(args["output_path"]))
 
             # Determine mediated target name
             effective_target = args.get(target_param) if target_param else (target_path or tool_name)

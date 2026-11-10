@@ -1128,7 +1128,11 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             from security import ExecutionGuard
             # Patching offset 0x3C (e_lfanew) should NOT be safe
             with ExecutionGuard.scoped_session(target_binary_path=src_tmp, workspace_dir=ws_dir):
-                res = SurgicalBinaryPatcher.patch_file(src_tmp, out_tmp, 0x3C, "90909090")
+                # Under default enforce_nociception=True, Nociceptive Reflex blocks PE header corruption
+                with self.assertRaises(RuntimeError):
+                    SurgicalBinaryPatcher.patch_file(src_tmp, out_tmp, 0x3C, "90909090", enforce_nociception=True)
+                # When enforce_nociception=False, it is recorded as unsafe PE_STRUCTURAL_HEADER_MUTATION
+                res = SurgicalBinaryPatcher.patch_file(src_tmp, out_tmp, 0x3C, "90909090", enforce_nociception=False)
             self.assertFalse(res["is_safe"])
             self.assertEqual(res["patch_type"], "PE_STRUCTURAL_HEADER_MUTATION")
             self.assertIn("PE_HEADER_CORRUPTION_HAZARD", res["pain_hazards"])

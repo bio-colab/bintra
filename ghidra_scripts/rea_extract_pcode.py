@@ -8,6 +8,48 @@ import json
 import subprocess
 import tempfile
 
+def serialize_varnode(vn, current_prog):
+    if vn is None:
+        return None
+    try:
+        size = vn.getSize()
+        offset = "0x%x" % vn.getOffset()
+        v_map = {"size": size, "offset": offset}
+
+        if vn.isConstant():
+            v_map["kind"] = "constant"
+            v_map["const_val"] = vn.getOffset()
+        elif vn.isRegister():
+            v_map["kind"] = "register"
+            reg = current_prog.getRegister(vn.getAddress(), vn.getSize())
+            v_map["name"] = reg.getName() if reg else "reg"
+        elif vn.isUnique():
+            v_map["kind"] = "unique"
+            v_map["unique_id"] = vn.getUniqueId()
+        elif vn.isAddress():
+            v_map["kind"] = "address"
+        else:
+            v_map["kind"] = "ram"
+
+        def_op = vn.getDef()
+        if def_op is not None:
+            def_addr = "0x" + def_op.getSeqnum().getTarget().toString()
+            def_time = def_op.getSeqnum().getTime()
+            v_map["def_addr"] = def_addr
+            v_map["def_seq"] = def_time
+            v_map["def_id"] = "%s:%s" % (def_addr, def_time)
+            v_map["def_opcode"] = def_op.getMnemonic()
+        else:
+            v_map["def_addr"] = None
+            v_map["def_seq"] = None
+            v_map["def_id"] = None
+            v_map["is_input"] = vn.isInput()
+
+        return v_map
+    except Exception:
+        return str(vn)
+
+
 def run():
     print("=================================================================")
     print(" [REA-Neural] Initiating Python Ghidra Bridge (v7.3.0)")
@@ -54,15 +96,20 @@ def run():
         op_iter = high_func.getPcodeOps()
         while op_iter.hasNext():
             op = op_iter.next()
+            op_addr = "0x" + op.getSeqnum().getTarget().toString()
+            op_seq = op.getSeqnum().getTime()
             inputs = []
             for i in range(op.getNumInputs()):
                 vn = op.getInput(i)
-                inputs.append(str(vn) if vn else "null")
+                inputs.append(serialize_varnode(vn, currentProgram))
             out_vn = op.getOutput()
             pcode_ops.append({
                 "opcode": op.getMnemonic(),
+                "address": op_addr,
+                "seq": op_seq,
+                "op_id": "%s:%s" % (op_addr, op_seq),
                 "inputs": inputs,
-                "output": str(out_vn) if out_vn else None
+                "output": serialize_varnode(out_vn, currentProgram)
             })
 
         funcs_data.append({

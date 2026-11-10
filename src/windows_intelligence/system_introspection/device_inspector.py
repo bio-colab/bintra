@@ -251,6 +251,12 @@ class NativeDeviceInspector:
         - Enumerates all live display adapters.
         - Identifies any PnP devices in error state (Code 10, Code 43, etc.).
         """
+        if os.name != "nt":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "reason": "NativeDeviceInspector requires a Windows NT host system."
+            }
         all_devs = cls.enumerate_devices(max_devices=512)
         problem_devs = [d for d in all_devs if d.get("has_problem") or d.get("problem_code", 0) > 0]
         display_devs = [d for d in all_devs if (d.get("class") or "").lower() == "display"]

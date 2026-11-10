@@ -123,6 +123,13 @@ class MiniDumpParser:
                         "rva": hex(rva)
                     })
 
+                if num_streams == 0:
+                    return {
+                        "status": "error",
+                        "error": "Corrupted or empty MiniDump: zero streams declared in header.",
+                        "file_path": dmp_path
+                    }
+
                 # 1. System Info Stream (Stream 7)
                 system_info = None
                 if 7 in stream_map:

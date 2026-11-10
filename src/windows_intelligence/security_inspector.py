@@ -136,6 +136,12 @@ class WindowsSecurityInspector:
     @classmethod
     def audit(cls, binary_path: Optional[str] = None) -> Dict[str, Any]:
         """Runs security and privilege audit for application context."""
+        if sys.platform != "win32":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "reason": "WindowsSecurityInspector requires a Windows host system."
+            }
         integrity = cls.get_token_integrity_level()
         elevated = cls.is_elevated()
         app_dir = os.path.dirname(os.path.abspath(binary_path)) if binary_path else None

@@ -216,6 +216,12 @@ class ServiceManagerInspector:
     @classmethod
     def audit_services(cls) -> Dict[str, Any]:
         """Runs complete Windows service health audit."""
+        if os.name != "nt":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "reason": "ServiceManagerInspector requires a Windows NT host system."
+            }
         all_services = cls.enumerate_services(include_drivers=False, max_services=512)
         running = [s for s in all_services if s.get("state") == "RUNNING"]
         stopped = [s for s in all_services if s.get("state") == "STOPPED"]

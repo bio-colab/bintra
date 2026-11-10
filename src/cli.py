@@ -115,16 +115,13 @@ def main():
                 break
 
     for flag in ("--workspace", "--workspace-dir"):
-        if flag in sys.argv:
+        while flag in sys.argv:
             idx = sys.argv.index(flag)
             if idx + 1 < len(sys.argv):
                 workspace_arg = sys.argv[idx + 1]
-                break
-
-    if "--output" in sys.argv and not workspace_arg:
-        idx = sys.argv.index("--output")
-        if idx + 1 < len(sys.argv):
-            workspace_arg = os.path.dirname(os.path.abspath(sys.argv[idx + 1]))
+                del sys.argv[idx:idx + 2]
+            else:
+                del sys.argv[idx]
 
     from security import ExecutionGuard
     with ExecutionGuard.scoped_session(target_binary_path=target_arg, workspace_dir=workspace_arg):
@@ -722,6 +719,10 @@ def _dispatch_cli():
                             "TARGET_WRITE_FORBIDDEN: Direct in-place modification of target binaries is strictly forbidden by REA Safety Policy. Specify a distinct --output file in the workspace."
                         )
                     scope = ExecutionGuard.get_current_scope()
+                    if scope and scope.is_target_directory(out_f):
+                        raise TargetMutationError(
+                            f"TARGET_DIRECTORY_WRITE_FORBIDDEN: Output patch cannot be placed in the target's original directory '{os.path.dirname(os.path.abspath(out_f))}'."
+                        )
                     if not scope.is_inside_workspace(out_f):
                         raise OutOfScopeError(
                             f"WRITE_OUTSIDE_WORKSPACE: Output path '{out_f}' is outside authorized workspace '{scope.workspace_dir}'."
@@ -783,6 +784,10 @@ def _dispatch_cli():
                             "TARGET_WRITE_FORBIDDEN: Direct in-place modification of model weights is strictly forbidden by REA Safety Policy. Specify a distinct --output file in the workspace."
                         )
                     scope = ExecutionGuard.get_current_scope()
+                    if scope and scope.is_target_directory(out_f):
+                        raise TargetMutationError(
+                            f"TARGET_DIRECTORY_WRITE_FORBIDDEN: Output patch cannot be placed in the target's original directory '{os.path.dirname(os.path.abspath(out_f))}'."
+                        )
                     if not scope.is_inside_workspace(out_f):
                         raise OutOfScopeError(
                             f"WRITE_OUTSIDE_WORKSPACE: Output path '{out_f}' is outside authorized workspace '{scope.workspace_dir}'."

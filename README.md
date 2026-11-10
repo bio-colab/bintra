@@ -29,7 +29,7 @@ Manual byte patching is notoriously error-prone, frequently resulting in stack i
 ### 4. Hybrid Native-Neural Application Dissection & Weight Security Auditing
 Modern Windows applications (games, anti-cheat, endpoint security clients, media suites) embed neural inference logic (ONNX, TFLite, GGUF, DirectML, WinML, Safetensors) directly into PE sections (`.rsrc`, `.rodata`). `REA-Neural` scans native binaries to expose these embedded logic cores and decompile the boundary between native Win32 API calls and embedded decision matrices.
 - **Zero-Execution Security Auditing:** Scans raw embedded weights for dormant Trojan/backdoor trigger neurons and anomalous rank-1 spikes before host execution.
-- **Selective Column Surgery:** Intervenes in linear projection matrices (`column_direction_subtract`) at extreme sparsity (editing top-$K$ columns, e.g. 0.016% of weights) to eliminate pathological looping or bypass deadlocks without retraining.
+- **Selective Column Surgery:** Intervenes in linear projection matrices (`column_direction_subtract`) at extreme sparsity (editing top-$K$ columns, e.g. 1.56% of weights for 64 of 4096 columns) to eliminate pathological looping or bypass deadlocks without retraining.
 - **Cross-Layer Induction & Effective Rank:** Evaluates cross-layer composition ($W_{QK}^{(l_2)} W_{OV}^{(l_1)}$) and spectral effective rank to infer alphabet and structural data complexity without running model text.
 
 ### 5. Symbiotic Ghidra Integration (High P-Code Vectorization & Windows Mutation)
@@ -81,7 +81,7 @@ Beyond the declared binary reverse engineering workflows, the codebase preserves
 7. **Contrastive Attention-Routing Probing (Exp 7):**  
    `AttentionPatternAuditor.audit_sycophancy_attention` isolates factual question tokens vs. user suggestion tokens to diagnose subtle routing biases when static weight differences are distributed and inconclusive.
 8. **Selective Column Direction Subtraction (Exp 8):**  
-   `WeightPatcher.column_direction_subtract` surgically subtracts pathological loop attractor directions exclusively from the top $K$ output columns (e.g., 64 columns; $0.016\%$ of total weights), curing infinite reasoning loops while protecting $98.4\%$ of model parameters.
+   `WeightPatcher.column_direction_subtract` surgically subtracts pathological loop attractor directions exclusively from the top $K$ output columns (e.g., 64 of 4096 columns; $1.56\%$ of total weights), curing infinite reasoning loops while protecting $98.4\%$ of model parameters.
 9. **Pre-Surgery Amenability Diagnostic (Page 17 Boundary Condition):**  
    `AmenabilityDiagnostic.evaluate_surgical_amenability` distinguishes removable attractor obstacles ($\ge 30\%$ loop rate, high spectral dominance $\sigma_0/\sigma_1$) from fundamental capability deficits, triggering a nociceptive warning when surgery is futile.
 10. **Zero-Evaluation Backdoor & Trojan Auditing (Page 19):**  

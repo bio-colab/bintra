@@ -397,6 +397,12 @@ class WindowsCrashAnalyzer:
     @classmethod
     def collect_crash_evidence(cls, binary_path: Optional[str] = None) -> Dict[str, Any]:
         """Gathers all available crash evidence from WER archives, Event Logs, and MiniDump files."""
+        if sys.platform != "win32":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "reason": "WindowsCrashAnalyzer requires a Windows host system."
+            }
         wer_reports = cls.scan_wer_report_archive(binary_path)
         event_logs = cls.query_event_log(binary_path)
 

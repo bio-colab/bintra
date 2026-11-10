@@ -75,7 +75,11 @@ class ProcessMitigationInspector:
         Defaults to inspecting the current process if both process_handle and pid are omitted.
         """
         if os.name != "nt":
-            return {"status": "error", "error": "Process mitigation inspection requires Windows NT."}
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "reason": "Process mitigation inspection requires Windows NT."
+            }
 
         kernel32 = ctypes.windll.kernel32
         kernel32.GetCurrentProcess.restype = ctypes.c_void_p

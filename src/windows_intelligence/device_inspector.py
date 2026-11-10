@@ -118,6 +118,12 @@ class WindowsDeviceInspector:
     @classmethod
     def audit(cls) -> Dict[str, Any]:
         """Runs complete graphics and hardware subsystem diagnosis."""
+        if sys.platform != "win32":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "reason": "WindowsDeviceInspector requires a Windows host system."
+            }
         return {
             "status": "success",
             "graphics_adapters": cls.get_graphics_adapters(),

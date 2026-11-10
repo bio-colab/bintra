@@ -148,6 +148,13 @@ class WindowsDependencyResolver:
         - Missing exported procedures (PROCEDURE_NOT_FOUND / 0xC0000139).
         - KnownDLLs priority enforcement.
         """
+        if sys.platform != "win32":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "reason": "WindowsDependencyResolver requires a Windows host system."
+            }
+
         if custom_imports is None and not os.path.isfile(binary_path):
             return {
                 "status": "error",

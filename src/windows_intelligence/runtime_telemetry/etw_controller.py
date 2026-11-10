@@ -7,6 +7,7 @@ Queries active ETW trace sessions and interrogates critical diagnostic providers
 
 import os
 import sys
+import struct
 import ctypes
 from ctypes import wintypes
 from typing import Dict, Any, List, Optional
@@ -166,6 +167,207 @@ class EtwController:
             return {"session_name": session_name, "is_active": False, "is_accessible": False, "is_system_protected": False, "error": str(e)}
 
     @classmethod
+    def enumerate_registered_providers(cls, query: Optional[str] = None, limit: int = 100) -> Dict[str, Any]:
+        """
+        Dynamically enumerates registered ETW providers on the host system via tdh.dll (TdhEnumerateProviders).
+        Supports case-insensitive keyword filtering by provider name or GUID.
+        """
+        if os.name != "nt":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "reason": "ETW provider enumeration requires Windows NT."
+            }
+
+        try:
+            tdh = ctypes.WinDLL("tdh.dll")
+
+            class GUID_STRUCT(ctypes.Structure):
+                _fields_ = [
+                    ("Data1", wintypes.DWORD),
+                    ("Data2", wintypes.WORD),
+                    ("Data3", wintypes.WORD),
+                    ("Data4", wintypes.BYTE * 8)
+                ]
+                def to_str(self) -> str:
+                    d4_1 = "".join(f"{b:02X}" for b in self.Data4[:2])
+                    d4_2 = "".join(f"{b:02X}" for b in self.Data4[2:])
+                    return f"{{{self.Data1:08X}-{self.Data2:04X}-{self.Data3:04X}-{d4_1}-{d4_2}}}"
+
+            class TRACE_PROVIDER_INFO(ctypes.Structure):
+                _fields_ = [
+                    ("ProviderGuid", GUID_STRUCT),
+                    ("SchemaSource", wintypes.ULONG),
+                    ("ProviderNameOffset", wintypes.ULONG)
+                ]
+
+            buf_size = wintypes.ULONG(0)
+            tdh.TdhEnumerateProviders(None, ctypes.byref(buf_size))
+            if buf_size.value == 0:
+                return {"status": "error", "message": "TdhEnumerateProviders returned 0 buffer size."}
+
+            buf = ctypes.create_string_buffer(buf_size.value)
+            res = tdh.TdhEnumerateProviders(ctypes.cast(buf, ctypes.c_void_p), ctypes.byref(buf_size))
+            if res != 0:
+                return {"status": "error", "error_code": res, "message": f"TdhEnumerateProviders failed with {res}."}
+
+            num_providers = wintypes.ULONG.from_buffer_copy(buf[:4]).value
+            item_size = ctypes.sizeof(TRACE_PROVIDER_INFO)
+            matches = []
+
+            q_lower = query.lower() if query else None
+
+            for i in range(num_providers):
+                off = 8 + (i * item_size)
+                item = TRACE_PROVIDER_INFO.from_buffer_copy(buf[off:off+item_size])
+                name_off = item.ProviderNameOffset
+                if name_off < buf_size.value:
+                    raw = buf[name_off:]
+                    idx = 0
+                    while idx < len(raw) - 1:
+                        if raw[idx] == 0 and raw[idx+1] == 0:
+                            break
+                        idx += 2
+                    name = raw[:idx].decode("utf-16le", errors="ignore")
+                else:
+                    name = "UNKNOWN"
+
+                guid_str = item.ProviderGuid.to_str()
+                if not q_lower or q_lower in name.lower() or q_lower in guid_str.lower():
+                    matches.append({
+                        "name": name,
+                        "guid": guid_str,
+                        "schema_source": "MANIFEST" if item.SchemaSource == 0 else "MOF"
+                    })
+
+            return {
+                "status": "success",
+                "total_system_providers": num_providers,
+                "matched_count": len(matches),
+                "filter": query,
+                "providers": matches[:limit],
+                "truncated": len(matches) > limit
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    @classmethod
+    def audit_active_kernel_providers(cls, limit: int = 50) -> Dict[str, Any]:
+        """
+        Enumerates all ETW providers actively registered with the Windows kernel via advapi32.dll EnumerateTraceGuidsEx.
+        """
+        if os.name != "nt":
+            return {"status": "not_applicable", "platform": sys.platform}
+
+        try:
+            advapi32 = ctypes.WinDLL("advapi32.dll")
+            ret_len = wintypes.ULONG(0)
+            res = advapi32.EnumerateTraceGuidsEx(0, None, 0, None, 0, ctypes.byref(ret_len))
+            if ret_len.value == 0:
+                return {"status": "error", "message": f"EnumerateTraceGuidsEx failed with code {res}."}
+
+            buf = ctypes.create_string_buffer(ret_len.value)
+            res2 = advapi32.EnumerateTraceGuidsEx(0, None, 0, ctypes.cast(buf, ctypes.c_void_p), ret_len.value, ctypes.byref(ret_len))
+            if res2 != 0:
+                return {"status": "error", "error_code": res2}
+
+            count = ret_len.value // 16
+            guids = []
+            for i in range(min(count, limit)):
+                off = i * 16
+                raw_g = buf[off:off+16]
+                d1, d2, d3 = struct.unpack_from("<IHH", raw_g, 0)
+                d4_1 = "".join(f"{b:02X}" for b in raw_g[8:10])
+                d4_2 = "".join(f"{b:02X}" for b in raw_g[10:16])
+                guids.append(f"{{{d1:08X}-{d2:04X}-{d3:04X}-{d4_1}-{d4_2}}}")
+
+            return {
+                "status": "success",
+                "active_kernel_providers_count": count,
+                "sample_guids": guids
+            }
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+    @classmethod
+    def query_provider_instances(cls, guid_str: str) -> Dict[str, Any]:
+        """
+        Interrogates live kernel registration of a specific ETW provider.
+        Identifies process IDs (PIDs) hosting the provider and their active enable status.
+        """
+        if os.name != "nt":
+            return {"status": "not_applicable", "platform": sys.platform}
+
+        try:
+            ole32 = ctypes.WinDLL("ole32.dll")
+            advapi32 = ctypes.WinDLL("advapi32.dll")
+
+            class GUID_STRUCT(ctypes.Structure):
+                _fields_ = [
+                    ("Data1", wintypes.DWORD),
+                    ("Data2", wintypes.WORD),
+                    ("Data3", wintypes.WORD),
+                    ("Data4", wintypes.BYTE * 8)
+                ]
+
+            class TRACE_PROVIDER_INSTANCE_INFO(ctypes.Structure):
+                _fields_ = [
+                    ("NextOffset", wintypes.ULONG),
+                    ("EnableCount", wintypes.ULONG),
+                    ("Pid", wintypes.ULONG),
+                    ("Flags", wintypes.ULONG)
+                ]
+
+            guid = GUID_STRUCT()
+            hr = ole32.CLSIDFromString(ctypes.c_wchar_p(guid_str), ctypes.byref(guid))
+            if hr != 0:
+                return {"status": "error", "error": f"Invalid GUID format: '{guid_str}'"}
+
+            ret_len = wintypes.ULONG(0)
+            res = advapi32.EnumerateTraceGuidsEx(1, ctypes.byref(guid), ctypes.sizeof(guid), None, 0, ctypes.byref(ret_len))
+            # 122 = ERROR_INSUFFICIENT_BUFFER (expected on size query)
+            if res not in (0, 122) or ret_len.value == 0:
+                return {
+                    "status": "dormant",
+                    "guid": guid_str,
+                    "is_active_in_kernel": False,
+                    "instance_count": 0,
+                    "instances": []
+                }
+
+            buf = ctypes.create_string_buffer(ret_len.value)
+            res2 = advapi32.EnumerateTraceGuidsEx(1, ctypes.byref(guid), ctypes.sizeof(guid), ctypes.cast(buf, ctypes.c_void_p), ret_len.value, ctypes.byref(ret_len))
+            if res2 != 0:
+                return {"status": "error", "guid": guid_str, "error_code": res2}
+
+            num_inst = wintypes.ULONG.from_buffer_copy(buf[:4]).value
+            instances = []
+            offset = 8
+            for _ in range(num_inst):
+                if offset + 16 > ret_len.value:
+                    break
+                inst = TRACE_PROVIDER_INSTANCE_INFO.from_buffer_copy(buf[offset:offset+16])
+                instances.append({
+                    "pid": inst.Pid,
+                    "enable_count": inst.EnableCount,
+                    "is_enabled": inst.EnableCount > 0,
+                    "flags": inst.Flags
+                })
+                if inst.NextOffset == 0:
+                    break
+                offset += inst.NextOffset
+
+            return {
+                "status": "active",
+                "guid": guid_str,
+                "is_active_in_kernel": True,
+                "instance_count": num_inst,
+                "instances": instances
+            }
+        except Exception as e:
+            return {"status": "error", "guid": guid_str, "error": str(e)}
+
+    @classmethod
     def audit_etw_providers(cls) -> Dict[str, Any]:
         """Returns curated catalog of known high-value Windows kernel and graphics ETW diagnostic providers."""
         return {
@@ -180,6 +382,7 @@ class EtwController:
         Runs comprehensive health audit of the host ETW telemetry infrastructure:
         - Evaluates known diagnostic providers.
         - Interrogates standard system and application trace sessions.
+        - Quantifies total registered and kernel-active ETW providers.
         """
         if os.name != "nt":
             return {
@@ -192,6 +395,27 @@ class EtwController:
         accessible_sessions = [s for s in sessions if s.get("is_accessible")]
         protected_sessions = [s for s in sessions if s.get("is_system_protected")]
 
+        system_total_providers = 0
+        active_kernel_guids = 0
+        try:
+            tdh = ctypes.WinDLL("tdh.dll")
+            buf_size = wintypes.ULONG(0)
+            tdh.TdhEnumerateProviders(None, ctypes.byref(buf_size))
+            if buf_size.value > 4:
+                buf = ctypes.create_string_buffer(buf_size.value)
+                if tdh.TdhEnumerateProviders(ctypes.cast(buf, ctypes.c_void_p), ctypes.byref(buf_size)) == 0:
+                    system_total_providers = wintypes.ULONG.from_buffer_copy(buf[:4]).value
+        except Exception:
+            pass
+
+        try:
+            adv = ctypes.WinDLL("advapi32.dll")
+            ret_len = wintypes.ULONG(0)
+            adv.EnumerateTraceGuidsEx(0, None, 0, None, 0, ctypes.byref(ret_len))
+            active_kernel_guids = ret_len.value // 16
+        except Exception:
+            pass
+
         return {
             "status": "success",
             "is_windows": os.name == "nt",
@@ -199,6 +423,8 @@ class EtwController:
             "active_sessions_count": len(active_sessions),
             "accessible_sessions_count": len(accessible_sessions),
             "system_protected_sessions_count": len(protected_sessions),
+            "system_total_registered_providers": system_total_providers,
+            "active_kernel_providers_count": active_kernel_guids,
             "active_sessions": [s["session_name"] for s in active_sessions],
             "accessible_sessions": [s["session_name"] for s in accessible_sessions],
             "system_protected_sessions": [s["session_name"] for s in protected_sessions],

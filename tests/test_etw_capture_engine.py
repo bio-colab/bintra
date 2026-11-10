@@ -125,6 +125,55 @@ class TestEtwCaptureEngine(unittest.TestCase):
         self.assertIn("temporal_verdict", res)
         self.assertIn("session_info", res)
 
+    def test_event_log_collector_generic_query(self):
+        """Verifies generic event query on Windows Event Log channels."""
+        from windows_intelligence.runtime_telemetry.event_log_collector import EventLogCollector
+        evs = EventLogCollector.query_events("Application", limit=5)
+        self.assertIsInstance(evs, list)
+        if evs:
+            e0 = evs[0]
+            self.assertIn("time_created", e0)
+            self.assertIn("provider_name", e0)
+            self.assertIn("event_id", e0)
+            self.assertIn("level", e0)
+
+    def test_etw_controller_dynamic_provider_enumeration(self):
+        """Verifies dynamic ETW provider enumeration via TDH."""
+        from windows_intelligence.runtime_telemetry.etw_controller import EtwController
+        res = EtwController.enumerate_registered_providers(limit=10)
+        self.assertIn(res["status"], ["success", "not_applicable"])
+        if res["status"] == "success":
+            self.assertGreater(res["total_system_providers"], 100)
+            self.assertGreaterEqual(len(res["providers"]), 1)
+
+    def test_etw_controller_active_kernel_providers(self):
+        """Verifies querying active kernel ETW provider GUIDs."""
+        from windows_intelligence.runtime_telemetry.etw_controller import EtwController
+        res = EtwController.audit_active_kernel_providers(limit=10)
+        self.assertIn(res["status"], ["success", "not_applicable"])
+        if res["status"] == "success":
+            self.assertGreater(res["active_kernel_providers_count"], 100)
+            self.assertGreaterEqual(len(res["sample_guids"]), 1)
+
+    def test_etw_controller_query_provider_instances(self):
+        """Verifies querying instance PIDs and enable counts for a specific provider."""
+        from windows_intelligence.runtime_telemetry.etw_controller import EtwController
+        res = EtwController.query_provider_instances("{E13C0D23-CCBC-4E12-931B-D9CC2EEE27E4}")
+        self.assertIn(res["status"], ["active", "dormant", "not_applicable"])
+
+    def test_timeline_correlator_extended_causality(self):
+        """Verifies detection of RestartManager file lock contention and GPU TDR resets."""
+        crash_t = time.time()
+        events = [
+            EtwEventRecord(crash_t - 2.0, "Microsoft-Windows-RestartManager", 10000, 1234, 10, "RESTART_MANAGER_LOCK").to_dict(),
+            EtwEventRecord(crash_t - 0.5, "Microsoft-Windows-DXGI", 1, 1234, 10, "DEVICE_REMOVED").to_dict(),
+        ]
+        report = EtwTimelineCorrelator.correlate_crash_timeline(events, crash_timestamp=crash_t)
+        self.assertIn(report["temporal_verdict"], ["GRAPHICS_PIPELINE_RESET_DETECTED", "FILE_LOCK_CONTENTION_DETECTED"])
+        cats = [f["category"] for f in report["causality_findings"]]
+        self.assertIn("RESOURCE_LOCK_CONTENTION", cats)
+        self.assertIn("GRAPHICS_TDR_DEVICE_REMOVAL", cats)
+
 
 if __name__ == "__main__":
     unittest.main()

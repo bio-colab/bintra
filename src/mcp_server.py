@@ -426,13 +426,32 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
     },
     {
         "name": "rea_etw_audit",
-        "description": "Inspects host Event Tracing for Windows (ETW) trace sessions and critical kernel/graphics diagnostic providers (Kernel-Process, Direct3D11, DXGI, DxgKrnl, Kernel-File).",
+        "description": "Inspects host Event Tracing for Windows (ETW) infrastructure: queries active/system-protected trace sessions, dynamically enumerates all registered system providers via TDH, and interrogates kernel provider registration and hosting PIDs.",
         "inputSchema": {
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "Inspection action: 'audit' (default health audit), 'providers' (dynamic TDH system provider enumeration), 'provider_info' (query live kernel instances/PIDs for a GUID), 'active_kernel' (enumerate active kernel-registered providers), 'session' (query specific trace session)",
+                    "enum": ["audit", "providers", "provider_info", "active_kernel", "session"],
+                    "default": "audit"
+                },
                 "session_name": {
                     "type": "string",
                     "description": "Optional trace session name to query specifically (e.g. 'Eventlog-Application', 'DiagLog')"
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Keyword filter for provider enumeration (e.g. 'Direct3D', 'Kernel', 'Memory')"
+                },
+                "guid": {
+                    "type": "string",
+                    "description": "Provider GUID string for provider_info query"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default: 50)",
+                    "default": 50
                 }
             }
         }
@@ -1113,9 +1132,17 @@ class ReaMcpServer:
 
         elif name == "rea_etw_audit":
             from windows_intelligence import EtwController
+            act = args.get("action", "audit")
             sname = args.get("session_name")
-            if sname:
-                return EtwController.query_trace_session(sname)
+            if sname or act == "session":
+                return EtwController.query_trace_session(sname or "Eventlog-Application")
+            if act == "providers":
+                return EtwController.enumerate_registered_providers(query=args.get("query"), limit=int(args.get("limit", 50)))
+            if act == "active_kernel":
+                return EtwController.audit_active_kernel_providers(limit=int(args.get("limit", 50)))
+            if act == "provider_info":
+                guid = args.get("guid") or "{22FB2CD6-0E7B-422B-A0C7-2FAD1FD0E716}"
+                return EtwController.query_provider_instances(guid)
             return EtwController.audit_telemetry_system()
 
         elif name == "rea_etw_capture":

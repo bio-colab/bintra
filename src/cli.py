@@ -834,21 +834,67 @@ def _dispatch_cli():
             parser = argparse.ArgumentParser(description="Audit ETW trace sessions and diagnostic providers")
             parser.add_argument("command")
             parser.add_argument("--session", default=None, help="Query specific session name")
+            parser.add_argument("--providers", action="store_true", help="Dynamically enumerate registered system ETW providers via TDH")
+            parser.add_argument("--query", default=None, help="Filter keyword for provider enumeration")
+            parser.add_argument("--provider-info", default=None, help="Query live kernel instances and hosting PIDs for a provider GUID")
+            parser.add_argument("--active-kernel", action="store_true", help="List active providers registered with the Windows kernel")
+            parser.add_argument("--limit", type=int, default=50, help="Maximum results to return")
             parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
             args = parser.parse_args()
 
             if args.session:
                 report = EtwController.query_trace_session(args.session)
+            elif args.provider_info:
+                report = EtwController.query_provider_instances(args.provider_info)
+            elif args.active_kernel:
+                report = EtwController.audit_active_kernel_providers(limit=args.limit)
+            elif args.providers or args.query:
+                report = EtwController.enumerate_registered_providers(query=args.query, limit=args.limit)
             else:
                 report = EtwController.audit_telemetry_system()
 
             if args.format == "md":
-                if "providers" in report:
+                if "providers" in report and isinstance(report["providers"], list):
+                    lines = [
+                        f"# ETW Registered Providers Enumeration",
+                        f"- **Total System Providers:** {report.get('total_system_providers')}",
+                        f"- **Matched Providers:** {report.get('matched_count')}",
+                        "",
+                        "| Provider Name | GUID | Schema |",
+                        "|---|---|---|"
+                    ]
+                    for p in report.get("providers", []):
+                        lines.append(f"| `{p.get('name')}` | `{p.get('guid')}` | {p.get('schema_source')} |")
+                    print("\n".join(lines))
+                elif "active_kernel_providers_count" in report and "sessions" not in report:
+                    lines = [
+                        "# Active Windows Kernel ETW Providers",
+                        f"- **Total Kernel Registered Providers:** {report.get('active_kernel_providers_count')}",
+                        "",
+                        "### Sample Registered GUIDs:"
+                    ]
+                    for g in report.get("sample_guids", []):
+                        lines.append(f"- `{g}`")
+                    print("\n".join(lines))
+                elif "instance_count" in report:
+                    lines = [
+                        f"# ETW Provider Instance Info: `{report.get('guid')}`",
+                        f"- **Status:** `{report.get('status')}`",
+                        f"- **Active Instances in Kernel:** {report.get('instance_count')}",
+                        "",
+                        "| PID | Enable Count | Is Enabled |",
+                        "|---|---|---|"
+                    ]
+                    for inst in report.get("instances", []):
+                        lines.append(f"| `{inst.get('pid')}` | {inst.get('enable_count')} | {inst.get('is_enabled')} |")
+                    print("\n".join(lines))
+                elif "sessions" in report:
                     lines = [
                         "# ETW Telemetry Infrastructure Audit",
                         f"- **Probed Sessions:** {report.get('standard_sessions_probed', 0)}",
                         f"- **Active Sessions:** {report.get('active_sessions_count', 0)} ({', '.join(report.get('active_sessions', []))})",
-                        f"- **Registered Diagnostic Providers:** {report.get('registered_providers_count', 0)}",
+                        f"- **System Registered Providers (TDH):** {report.get('system_total_registered_providers', 0)}",
+                        f"- **Active Kernel Providers:** {report.get('active_kernel_providers_count', 0)}",
                         "",
                         "## High-Value Diagnostic Providers:"
                     ]

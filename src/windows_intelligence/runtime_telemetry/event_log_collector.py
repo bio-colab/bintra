@@ -8,6 +8,8 @@ Extracts Event ID 1000 (Application Crash), 1001 (Windows Error Reporting),
 """
 
 import os
+import time
+import datetime
 import ctypes
 from ctypes import wintypes
 import subprocess
@@ -201,6 +203,98 @@ class EventLogCollector:
     def _execute_wevtutil_query(cls, channel: str, xpath: str, max_events: int = 20) -> List[ET.Element]:
         """Backwards-compatible wrapper delegating to _execute_event_query."""
         return cls._execute_event_query(channel, xpath, max_events)
+
+    @classmethod
+    def query_events(
+        cls,
+        channel: str = "Application",
+        xpath: str = "*",
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """
+        Generic diagnostic event reader for any Windows Event Log or ETW channel.
+        Extracts timestamp, provider name, event ID, level, message/data, process ID, and thread ID.
+        """
+        event_nodes = cls._execute_event_query(channel, xpath, limit)
+        if not event_nodes:
+            return []
+
+        parsed_events = []
+        for event_elem in event_nodes:
+            sys_elem = event_elem.find(".//{*}System")
+            time_created = None
+            provider_name = channel
+            event_id = 0
+            level_str = "INFO"
+            pid = 0
+            tid = 0
+
+            if sys_elem is not None:
+                prov_elem = sys_elem.find(".//{*}Provider")
+                if prov_elem is not None:
+                    provider_name = prov_elem.get("Name") or channel
+
+                id_elem = sys_elem.find(".//{*}EventID")
+                if id_elem is not None and id_elem.text:
+                    try:
+                        event_id = int(id_elem.text)
+                    except ValueError:
+                        pass
+
+                lvl_elem = sys_elem.find(".//{*}Level")
+                if lvl_elem is not None and lvl_elem.text:
+                    lvl_map = {"1": "CRITICAL", "2": "ERROR", "3": "WARNING", "4": "INFO", "5": "VERBOSE"}
+                    level_str = lvl_map.get(lvl_elem.text.strip(), "INFO")
+
+                time_elem = sys_elem.find(".//{*}TimeCreated")
+                if time_elem is not None:
+                    time_created = time_elem.get("SystemTime")
+
+                exec_elem = sys_elem.find(".//{*}Execution")
+                if exec_elem is not None:
+                    try:
+                        pid = int(exec_elem.get("ProcessID", 0))
+                    except (ValueError, TypeError):
+                        pass
+                    try:
+                        tid = int(exec_elem.get("ThreadID", 0))
+                    except (ValueError, TypeError):
+                        pass
+
+            data_elems = event_elem.findall(".//{*}Data")
+            details = {}
+            for i, d in enumerate(data_elems):
+                key = d.get("Name") or f"Param_{i}"
+                val = (d.text or "").strip()
+                if val:
+                    details[key] = val
+
+            ts_float = time.time()
+            if time_created:
+                try:
+                    clean_ts = time_created.rstrip("Z")
+                    if "." in clean_ts:
+                        base, frac = clean_ts.split(".", 1)
+                        clean_ts = f"{base}.{frac[:6]}"
+                    dt = datetime.datetime.fromisoformat(clean_ts).replace(tzinfo=datetime.timezone.utc)
+                    ts_float = dt.timestamp()
+                except Exception:
+                    ts_float = time.time()
+
+            summary_msg = "; ".join(f"{k}={v}" for k, v in list(details.items())[:3])
+            parsed_events.append({
+                "time_created": ts_float,
+                "time_str": time_created,
+                "provider_name": provider_name,
+                "event_id": event_id,
+                "level": level_str,
+                "process_id": pid,
+                "thread_id": tid,
+                "message": summary_msg,
+                "details": details
+            })
+
+        return parsed_events
 
     @classmethod
     def query_application_errors(cls, app_name_filter: Optional[str] = None, max_events: int = 20) -> List[Dict[str, Any]]:

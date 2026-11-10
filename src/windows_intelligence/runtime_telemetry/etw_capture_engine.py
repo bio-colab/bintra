@@ -261,23 +261,44 @@ class EtwLiveCaptureSession:
         """Starts asynchronous thread consuming system and diagnostic events."""
         def _consumer_loop():
             from .event_log_collector import EventLogCollector
+            seen_events = set()
             while not self._stop_event.is_set():
                 try:
-                    # Collect recent application and system diagnostic events
-                    app_evs = EventLogCollector.query_events("Application", limit=10)
-                    for ev in app_evs:
-                        ev_pid = ev.get("process_id", 0)
-                        if self.target_pid is None or ev_pid == 0 or ev_pid == self.target_pid:
-                            rec = EtwEventRecord(
-                                timestamp=ev.get("time_created", time.time()),
-                                provider_name=ev.get("provider_name", "Application"),
-                                event_id=ev.get("event_id", 0),
-                                pid=ev_pid,
-                                tid=ev.get("thread_id", 0),
-                                event_type=ev.get("level", "INFO"),
-                                details={"message": ev.get("message", "")[:120]}
-                            )
-                            self.record_event(rec)
+                    for channel in ("Application", "System"):
+                        evs = EventLogCollector.query_events(channel, limit=15)
+                        for ev in evs:
+                            ev_pid = ev.get("process_id", 0)
+                            key = (ev.get("provider_name"), ev.get("event_id"), ev.get("time_created"), ev_pid, ev.get("thread_id"))
+                            if key in seen_events:
+                                continue
+                            seen_events.add(key)
+                            if len(seen_events) > 5000:
+                                seen_events.clear()
+
+                            if self.target_pid is None or ev_pid == 0 or ev_pid == self.target_pid:
+                                ev_id = ev.get("event_id", 0)
+                                ev_type = ev.get("level", "INFO")
+                                if ev_id == 1000:
+                                    ev_type = "APPLICATION_ERROR"
+                                elif ev_id == 1001:
+                                    ev_type = "WER_REPORT"
+                                elif ev_id == 1002:
+                                    ev_type = "APPLICATION_HANG"
+                                elif ev_id in (10000, 10001):
+                                    ev_type = "RESTART_MANAGER_LOCK"
+                                elif ev_id in (41, 1001) and channel == "System":
+                                    ev_type = "KERNEL_POWER_OR_BUGCHECK"
+
+                                rec = EtwEventRecord(
+                                    timestamp=ev.get("time_created", time.time()),
+                                    provider_name=ev.get("provider_name", channel),
+                                    event_id=ev_id,
+                                    pid=ev_pid,
+                                    tid=ev.get("thread_id", 0),
+                                    event_type=ev_type,
+                                    details={"message": ev.get("message", "")[:120], **ev.get("details", {})}
+                                )
+                                self.record_event(rec)
                 except Exception:
                     pass
                 time.sleep(0.5)
@@ -404,11 +425,44 @@ class EtwTimelineCorrelator:
                 "description": f"{len(recent_frees)} deallocation event(s) occurred before crash. Potential Use-After-Free window."
             })
 
-        # 3. Overall verdict
+        # 3. Look for Restart Manager resource contention
+        rm_events = [e for e in timeline_events if e.get("event_type") == "RESTART_MANAGER_LOCK" or "RestartManager" in e.get("provider_name", "")]
+        if rm_events:
+            findings.append({
+                "category": "RESOURCE_LOCK_CONTENTION",
+                "significance": "MEDIUM",
+                "description": f"{len(rm_events)} Windows RestartManager event(s) detected. Another process attempted to inspect or lock files."
+            })
+
+        # 4. Look for previous application crashes
+        prev_faults = [e for e in timeline_events if e.get("event_type") == "APPLICATION_ERROR" or e.get("event_id") == 1000]
+        if prev_faults:
+            findings.append({
+                "category": "RECURRENT_APPLICATION_FAULT",
+                "significance": "HIGH",
+                "description": f"{len(prev_faults)} Application Crash event(s) recorded in timeline."
+            })
+
+        # 5. Look for graphics pipeline reset
+        gpu_resets = [e for e in timeline_events if any(p in e.get("provider_name", "") for p in ("Direct3D", "DXGI", "DxgKrnl")) and e.get("event_type") in ("ERROR", "CRITICAL", "DEVICE_REMOVED", "TDR")]
+        if gpu_resets:
+            findings.append({
+                "category": "GRAPHICS_TDR_DEVICE_REMOVAL",
+                "significance": "CRITICAL",
+                "description": f"{len(gpu_resets)} Graphics/DirectX driver reset event(s) detected."
+            })
+
+        # 6. Overall verdict
         if any(f["category"] == "MEMORY_DEALLOCATION" for f in findings):
             verdict = "TEMPORAL_MEMORY_CHURN_DETECTED"
         elif recent_dll_loads:
             verdict = "LATE_MODULE_INJECTION_DETECTED"
+        elif gpu_resets:
+            verdict = "GRAPHICS_PIPELINE_RESET_DETECTED"
+        elif rm_events:
+            verdict = "FILE_LOCK_CONTENTION_DETECTED"
+        elif prev_faults:
+            verdict = "RECURRENT_APPLICATION_FAULT_DETECTED"
         else:
             verdict = "STABLE_PRE_CRASH_TIMELINE"
 

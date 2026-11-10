@@ -123,6 +123,7 @@ class PcodeVectorizer:
         prev_cat_idx: Optional[int] = None
         unique_varnodes_count = 0
         total_inputs = 0
+        total_outputs = 0
         has_calls = 0
         has_returns = 0
 
@@ -138,6 +139,8 @@ class PcodeVectorizer:
 
             inputs = op.get("inputs", [])
             total_inputs += len(inputs) if isinstance(inputs, list) else 1
+            if op.get("output") is not None:
+                total_outputs += 1
             if cat == "CONTROL_CALL":
                 has_calls += 1
             elif cat == "CONTROL_RETURN":
@@ -196,6 +199,10 @@ class PcodeVectorizer:
         vec[57] = norm_hist[CAT_TO_INDEX["CONTROL_BRANCH_COND"]]
         vec[58] = norm_hist[CAT_TO_INDEX["SSA_PHI"]]
         vec[59] = norm_hist[CAT_TO_INDEX["SUBPIECE_CAST"]]
+        vec[60] = min((total_outputs / max(float(total_inputs), 1.0)), 1.0)
+        vec[61] = min((norm_hist[CAT_TO_INDEX["CONTROL_BRANCH_COND"]] + norm_hist[CAT_TO_INDEX["CONTROL_BRANCH_UNCOND"]]) * 5.0, 1.0)
+        vec[62] = min(norm_hist[CAT_TO_INDEX["ALU_ARITH"]] / max(norm_hist[CAT_TO_INDEX["ALU_LOGIC"]], 0.05) / 10.0, 1.0)
+        vec[63] = min((norm_hist[CAT_TO_INDEX["MEMORY_LOAD"]] + norm_hist[CAT_TO_INDEX["MEMORY_STORE"]]) * 3.0, 1.0)
 
         # Normalize to unit sphere
         norm = float(np.linalg.norm(vec))
@@ -249,6 +256,8 @@ class PcodeFunctionMatcher:
 
         ops_a = res_a["op_count"]
         ops_b = res_b["op_count"]
+        ops_ratio = (min(ops_a, ops_b) / max(ops_a, ops_b)) if max(ops_a, ops_b) > 0 else 0.0
+
         if ops_a < 5 or ops_b < 5:
             is_match = False
             confidence = "INSUFFICIENT_EVIDENCE"
@@ -256,17 +265,24 @@ class PcodeFunctionMatcher:
                 f"Insufficient P-code operations (func_a={ops_a}, func_b={ops_b}, minimum required: 5) "
                 "to evaluate semantic equivalence reliably without high false-positive risk."
             )
+        elif ops_ratio < 0.50 and max(ops_a, ops_b) >= 10:
+            is_match = False
+            confidence = "LOW_DIVERGENT_SCALE"
+            interpretation = (
+                f"P-code operation scale diverges significantly (ratio {round(ops_ratio, 2)} < 0.50); "
+                "functions represent different structural scales and cannot be considered equivalent."
+            )
         else:
             is_match = cosine >= cls.MATCH_THRESHOLD
-            confidence = (
-                "HIGH" if cosine >= cls.HIGH_CONFIDENCE_THRESHOLD else
-                ("MODERATE" if is_match else "LOW")
-            )
-            interpretation = (
-                "High statistical correlation in P-code operation distribution and transition topology."
-                if is_match else
-                "Substantial divergence in intermediate P-code operations or control flow."
-            )
+            if is_match:
+                confidence = "HIGH" if cosine >= cls.HIGH_CONFIDENCE_THRESHOLD else "MODERATE"
+                interpretation = "High statistical correlation in P-code operation distribution and transition topology."
+            elif cosine >= 0.80:
+                confidence = "LOW"
+                interpretation = "P-code routines share opcode category proportions but diverge in graph structure or instruction scale."
+            else:
+                confidence = "LOW"
+                interpretation = "Substantial divergence in intermediate P-code operations or control flow."
 
         return {
             "pcode_cosine_similarity": round(cosine, 5),

@@ -2335,7 +2335,7 @@ class SensoryCortex:
 
         scores = [s["efficiency_score"] for s in senses_output.values()]
         return {
-            "engine": "REA-Neural Sensory Cortex v7.1",
+            "engine": "REA-Neural Sensory Cortex v7.4.0",
             "platform_target": "Windows 10 / 11 / Server (PE32/PE32+ & Safetensors)",
             "active_senses_count": len(senses_output),
             "overall_sensory_efficiency": round(float(np.mean(scores)), 4),
@@ -2459,7 +2459,7 @@ SENSORY_COMMANDS = {"sense", "sensory-audit"}
 
 def print_help():
     print("""
-REA-Neural Unified CLI v7.1.0-neural (Windows-Native & 10-Sense Edition)
+REA-Neural Unified CLI v7.4.0-neural (Windows-Native & 10-Sense Edition)
 Autonomous Continuous Semantic Reverse Engineering & Binary Analysis
 
 Usage:
@@ -2547,7 +2547,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rea-neural"
-version = "7.1.0"
+version = "7.4.0"
 authors = [
   { name="bio-colab", email="contact@bio-colab.org" },
 ]

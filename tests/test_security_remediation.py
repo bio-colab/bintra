@@ -298,10 +298,101 @@ class TestSecurityRemediation(unittest.TestCase):
     def test_self_update_check_command(self):
         """Verifies that 'rea-neural update --check' executes cleanly and verifies remote HEAD."""
         import subprocess
-        res = subprocess.run([sys.executable, "-m", "cli", "update", "--check"], capture_output=True, text=True)
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        src_dir = os.path.join(repo_root, "src")
+        env = os.environ.copy()
+        existing_pythonpath = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else src_dir
+        res = subprocess.run([sys.executable, "-m", "cli", "update", "--check"], cwd=repo_root, env=env, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0)
         self.assertIn("Checking remote repository for updates", res.stdout)
         self.assertIn("REA-Neural is already at the latest commit", res.stdout)
+
+    def test_breakout_policy_network_behavioral_rule_consistency(self):
+        """Verifies H3 Fix: WeightSpaceCompiler Breakout policy network implements genuine behavioral steering."""
+        import numpy as np
+        from rea_neural_engine import WeightSpaceCompiler
+        tensors = WeightSpaceCompiler.compile_breakout_policy_network(input_dim=32, hidden_dim=16, action_dim=3)
+        w1 = tensors["policy.layer1.weight"]
+        b1 = tensors["policy.layer1.bias"]
+        w2 = tensors["policy.layer2.weight"]
+        b2 = tensors["policy.layer2.bias"]
+
+        # Test across offsets from -8 to +8 (paddle at 0, ball at 16)
+        actions = []
+        for offset in range(-8, 9):
+            x = np.zeros(32, dtype=np.float32)
+            # paddle_x at 0, ball_x at 16
+            if offset > 0:
+                x[16] = float(offset)
+            elif offset < 0:
+                x[0] = float(-offset)
+
+            # ReLU readout
+            h = np.maximum(0.0, w1 @ x + b1)
+            logits = w2 @ h + b2
+            act = int(np.argmax(logits))
+            actions.append(act)
+
+            if offset < 0:
+                self.assertEqual(act, 0, f"Expected LEFT (0) for offset {offset}, got {act}")
+            elif offset == 0:
+                self.assertEqual(act, 1, f"Expected STAY (1) for offset 0, got {act}")
+            else:
+                self.assertEqual(act, 2, f"Expected RIGHT (2) for offset {offset}, got {act}")
+
+        # Assert output is not invariant across inputs
+        self.assertEqual(actions[0], 0)  # LEFT
+        self.assertEqual(actions[8], 1)  # STAY (offset 0)
+        self.assertEqual(actions[-1], 2) # RIGHT
+
+    def test_mcp_json_rpc_batch_and_null_id(self):
+        """Verifies L2 Fix: MCP server handles batch array and id: null per JSON-RPC 2.0 specification."""
+        from mcp_server import ReaMcpServer
+        server = ReaMcpServer()
+
+        # id: null must receive a response with id: null
+        req_null = {"jsonrpc": "2.0", "id": None, "method": "ping", "params": {}}
+        resp = server._handle_single_request(req_null)
+        self.assertIsNotNone(resp)
+        self.assertIn("result", resp)
+        self.assertIsNone(resp["id"])
+
+        # Notification (no id field) must receive None
+        notif = {"jsonrpc": "2.0", "method": "ping", "params": {}}
+        resp_notif = server._handle_single_request(notif)
+        self.assertIsNone(resp_notif)
+
+    def test_safetensors_json_array_header_typed_error(self):
+        """Verifies L8 Fix: Safetensors with JSON-array root raises ValueError, not AttributeError."""
+        import tempfile, struct
+        from rea_neural_engine import SafetensorsHandler
+        with tempfile.NamedTemporaryFile(suffix=".safetensors", delete=False) as tf:
+            tf_path = tf.name
+            raw_json = b"[]"
+            tf.write(struct.pack("<Q", len(raw_json)) + raw_json)
+
+        try:
+            with self.assertRaises(ValueError) as ctx:
+                SafetensorsHandler.read_header(tf_path)
+            self.assertIn("JSON", str(ctx.exception))
+        finally:
+            if os.path.exists(tf_path):
+                os.remove(tf_path)
+
+    def test_control_flow_flattening_specificity_on_linear_code(self):
+        """Verifies H2 Fix: Dispersed cmp instructions across wide spans are not falsely flagged as CFF."""
+        from binary_neural_engine import ContinuousDeobfuscator
+        # Construct linear code with 10 dispersed comparisons spaced > 2000 bytes apart
+        linear_code = bytearray()
+        for i in range(5):
+            linear_code.extend(b"\x83\xF8\x00\x74\x05")  # cmp eax, 0; jz +5
+            linear_code.extend(b"\x90" * 2500)          # 2.5 KB padding
+            linear_code.extend(b"\xB8\x01\x00\x00\x00")  # mov eax, 1
+            linear_code.extend(b"\x90" * 2500)
+
+        res = ContinuousDeobfuscator.detect_control_flow_flattening(bytes(linear_code))
+        self.assertFalse(res["has_control_flow_flattening"])
 
 
 if __name__ == "__main__":

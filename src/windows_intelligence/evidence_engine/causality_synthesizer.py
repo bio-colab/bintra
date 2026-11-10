@@ -483,7 +483,12 @@ class CausalitySynthesizer:
 
         # 3. Static Binary Mapping with Strict Epistemic Module Attribution
         pe_info = BinaryFormatInspector.inspect(norm_path)
-        binary_mapping = None
+        binary_mapping = {
+            "status": "not_applicable" if not crash_record else "unmapped",
+            "is_internal_fault": False,
+            "target_module": bin_name,
+            "attribution": "NO_CRASH_RECORD" if not crash_record else "NON_PE_BINARY"
+        }
         target_name = bin_name.lower()
 
         is_internal_fault = False

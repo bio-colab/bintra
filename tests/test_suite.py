@@ -1474,6 +1474,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertTrue(res["view_32"]["exists"])
         self.assertIn("CurrentBuild", res["view_64"]["values"])
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_registry_analyzer_critical_policies(self):
         """Verifies rule-based evaluation of SafeDllSearchMode, UAC, and KnownDLLs."""
         from windows_intelligence import WindowsRegistryAnalyzer
@@ -1490,6 +1491,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertEqual(domain_res["domain"], "OPERATING_SYSTEM")
         self.assertGreater(domain_res["keys_inspected"], 0)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_mcp_server_catalog_and_registry_dispatch(self):
         """Verifies MCP server protocol dispatch for win_catalog_cmd and registry_audit."""
         from mcp_server import ReaMcpServer
@@ -1551,6 +1553,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("display_name", svc)
         self.assertIn("state", svc)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_process_mitigation_inspector_live(self):
         """Verifies ProcessMitigationInspector DEP, ASLR, token integrity, and memory counters."""
         from windows_intelligence import ProcessMitigationInspector
@@ -1742,6 +1745,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         finally:
             shutil.rmtree(ws_tmp, ignore_errors=True)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_mcp_server_telemetry_dispatch(self):
         """Verifies MCP server protocol dispatch for rea_dmp_inspect and rea_etw_audit."""
         from mcp_server import ReaMcpServer
@@ -1789,6 +1793,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("CRASH: STATUS_ACCESS_VIOLATION", mermaid)
         self.assertIn("ROOT: WRITE @ 0x0", mermaid)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_causality_synthesizer_end_to_end(self):
         """Verifies CausalitySynthesizer builds complete graph and synthesizes dossier."""
         from windows_intelligence.evidence_engine import CausalitySynthesizer
@@ -1840,6 +1845,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertGreater(len(dossier["epistemic_classification"]["facts"]), 0)
         self.assertGreater(len(dossier["epistemic_classification"]["hypotheses"]), 0)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_mcp_server_evidence_graph_dispatch(self):
         """Verifies MCP server protocol dispatch for rea_evidence_graph."""
         from mcp_server import ReaMcpServer
@@ -1894,6 +1900,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             "EXPLICIT_ENABLED", "EXPLICIT_DISABLED", "NOT_CONFIGURED (OS_DEFAULT_ENABLED)"
         ))
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_command_executor_privilege_and_output_guards(self):
         """Verifies CommandExecutor administrative privilege gating and output limit."""
         from windows_intelligence.command_engine import CommandExecutor, CommandCatalog
@@ -1905,6 +1912,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
                 self.assertEqual(res["status"], "error")
                 self.assertIn("requires elevated administrative privileges", res["error"])
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_command_executor_output_truncation_5mb(self):
         """Verifies 5MB output truncation guard in CommandExecutor."""
         from windows_intelligence.command_engine import CommandExecutor

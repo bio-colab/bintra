@@ -140,6 +140,11 @@ def _dispatch_cli():
             cmd = "patch-binary"
         elif "--alpha" in sys.argv or "--mode-index" in sys.argv or "--tensor" in sys.argv or "--operation" in sys.argv:
             cmd = "patch-weights"
+        elif "-h" in sys.argv or "--help" in sys.argv or "help" in sys.argv:
+            print("REA-Neural Patch Commands:")
+            print("  Binary patching:  rea-neural patch-binary --binary <path> --offset <offset> --patch-hex <hex>")
+            print("  Weight patching:  rea-neural patch-weights --model <path> --tensor <name> --operation <op>")
+            sys.exit(0)
         else:
             print("Ambiguous command 'patch'. Please specify 'patch-binary' for PE files or 'patch-weights' for model tensors.")
             sys.exit(1)
@@ -651,7 +656,8 @@ def _dispatch_cli():
             parser = argparse.ArgumentParser(description="Run Ghidra headless analysis with REA-Neural bridge script")
             parser.add_argument("command")
             parser.add_argument("--binary", "--file", "--input", dest="binary", required=True, help="Path to target executable (PE/ELF)")
-            parser.add_argument("--ghidra-path", default=os.environ.get("GHIDRA_INSTALL_DIR", r"C:\ghidra"), help="Ghidra installation directory")
+            default_ghidra = os.environ.get("GHIDRA_INSTALL_DIR", r"C:\ghidra" if os.name == "nt" else "/opt/ghidra")
+            parser.add_argument("--ghidra-path", default=default_ghidra, help="Ghidra installation directory")
             parser.add_argument("--project-dir", default=None, help="Ghidra project directory (default: temp)")
             parser.add_argument("--project-name", default="REANeuralHeadless", help="Ghidra project name")
             parser.add_argument("--apply", action="store_true", help="Automatically commit mutations to Ghidra database")
@@ -660,10 +666,16 @@ def _dispatch_cli():
             import subprocess, tempfile
             from pathlib import Path as P
             ghidra_dir = P(args.ghidra_path)
-            headless_bat = ghidra_dir / "support" / "analyzeHeadless.bat"
-            if not headless_bat.exists():
-                print(f"Error: analyzeHeadless.bat not found at: {headless_bat}")
-                sys.exit(1)
+            headless_name = "analyzeHeadless.bat" if os.name == "nt" else "analyzeHeadless"
+            headless_cmd = ghidra_dir / "support" / headless_name
+            if not headless_cmd.exists():
+                alt_name = "analyzeHeadless" if os.name == "nt" else "analyzeHeadless.bat"
+                alt_cmd = ghidra_dir / "support" / alt_name
+                if alt_cmd.exists():
+                    headless_cmd = alt_cmd
+                else:
+                    print(f"Error: {headless_name} not found at: {headless_cmd}")
+                    sys.exit(1)
 
             repo_root = P(__file__).resolve().parent.parent
             script_dir = repo_root / "ghidra_scripts"
@@ -671,7 +683,7 @@ def _dispatch_cli():
             script_args = ["apply"] if args.apply else []
 
             cmd_args = [
-                str(headless_bat),
+                str(headless_cmd),
                 proj_dir,
                 args.project_name,
                 "-import", args.binary,
@@ -832,6 +844,11 @@ def _handle_update() -> None:
     parser.add_argument("--branch", default="main", help="Target git branch (default: main)")
     args = parser.parse_args(sys.argv[2:])
 
+    import re
+    if not re.match(r"^[a-zA-Z0-9_\./]+[a-zA-Z0-9_\-\./]*$", args.branch) or args.branch.startswith("-"):
+        print(f"[-] Invalid branch refname: '{args.branch}'")
+        sys.exit(1)
+
     import subprocess
     repo_dir = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
     git_dir = os.path.join(repo_dir, ".git")
@@ -840,7 +857,7 @@ def _handle_update() -> None:
         try:
             print(f"[*] Checking remote repository for updates (branch: '{args.branch}')...")
             fetch_res = subprocess.run(
-                ["git", "fetch", "origin", args.branch],
+                ["git", "fetch", "origin", "--", args.branch],
                 cwd=repo_dir,
                 capture_output=True,
                 text=True
@@ -850,7 +867,7 @@ def _handle_update() -> None:
                 sys.exit(1)
 
             local_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_dir, text=True).strip()
-            remote_hash = subprocess.check_output(["git", "rev-parse", f"origin/{args.branch}"], cwd=repo_dir, text=True).strip()
+            remote_hash = subprocess.check_output(["git", "rev-parse", "--verify", f"origin/{args.branch}"], cwd=repo_dir, text=True).strip()
 
             if local_hash == remote_hash:
                 commit_title = subprocess.check_output(["git", "log", "-1", "--format=%s"], cwd=repo_dir, text=True).strip()
@@ -873,14 +890,14 @@ def _handle_update() -> None:
 
             print(f"[*] Pulling latest commits from origin/{args.branch}...")
             pull_res = subprocess.run(
-                ["git", "pull", "--ff-only", "origin", args.branch],
+                ["git", "pull", "--ff-only", "origin", "--", args.branch],
                 cwd=repo_dir,
                 capture_output=True,
                 text=True
             )
             if pull_res.returncode != 0:
                 print(f"[-] Fast-forward pull failed, trying standard merge: {pull_res.stderr.strip()}")
-                subprocess.run(["git", "pull", "origin", args.branch], cwd=repo_dir, check=True)
+                subprocess.run(["git", "pull", "origin", "--", args.branch], cwd=repo_dir, check=True)
 
             print("[*] Refreshing package entry points and dependencies...")
             subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], cwd=repo_dir, check=True)

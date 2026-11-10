@@ -858,11 +858,13 @@ class ReaMcpServer:
         elif name == "rea_hardware_audit":
             from windows_intelligence import NativeDeviceInspector
             report = NativeDeviceInspector.audit_hardware_health()
+            if report.get("status") == "not_applicable":
+                return report
             if args.get("problems_only", False):
                 return {
-                    "is_hardware_healthy": report["is_hardware_healthy"],
-                    "problem_devices_count": report["problem_devices_count"],
-                    "problem_devices": report["problem_devices"]
+                    "is_hardware_healthy": report.get("is_hardware_healthy", True),
+                    "problem_devices_count": report.get("problem_devices_count", 0),
+                    "problem_devices": report.get("problem_devices", [])
                 }
             return report
 
@@ -1013,6 +1015,59 @@ class ReaMcpServer:
         else:
             raise ValueError(f"Unknown tool name: '{name}'")
 
+    def _handle_single_request(self, msg: Any) -> Optional[Dict[str, Any]]:
+        """Processes a single JSON-RPC 2.0 request or notification according to specification."""
+        if not isinstance(msg, dict):
+            return {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {
+                    "code": -32600,
+                    "message": "Invalid Request: message must be a JSON object"
+                }
+            }
+
+        is_notification = ("id" not in msg)
+        msg_id = msg.get("id")
+        method = msg.get("method")
+        params = msg.get("params", {})
+
+        if not isinstance(params, (dict, list)):
+            params = {}
+
+        if method not in self.handlers:
+            if not is_notification:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": msg_id,
+                    "error": {
+                        "code": -32601,
+                        "message": f"Method not found: '{method}'"
+                    }
+                }
+            return None
+
+        try:
+            handler = self.handlers[method]
+            result = handler(params)
+            if not is_notification:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": msg_id,
+                    "result": result
+                }
+        except Exception as ex:
+            if not is_notification:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": msg_id,
+                    "error": {
+                        "code": -32603,
+                        "message": f"Internal error: {ex}"
+                    }
+                }
+        return None
+
     def run_stdio(self):
         """Standard JSON-RPC 2.0 loop reading from stdin and writing to stdout."""
         # Ensure utf-8 stdio
@@ -1034,36 +1089,32 @@ class ReaMcpServer:
                     continue
 
                 msg = json.loads(line)
-                msg_id = msg.get("id")
-                method = msg.get("method")
-                params = msg.get("params", {})
-
-                if method not in self.handlers:
-                    if msg_id is not None:
+                if isinstance(msg, list):
+                    if len(msg) == 0:
                         err_resp = {
                             "jsonrpc": "2.0",
-                            "id": msg_id,
+                            "id": None,
                             "error": {
-                                "code": -32601,
-                                "message": f"Method not found: '{method}'"
+                                "code": -32600,
+                                "message": "Invalid Request: empty batch"
                             }
                         }
                         sys.stdout.write(json.dumps(err_resp, ensure_ascii=False) + "\n")
                         sys.stdout.flush()
-                    continue
-
-                handler = self.handlers[method]
-                result = handler(params)
-
-                # Notifications don't receive replies
-                if msg_id is not None:
-                    resp = {
-                        "jsonrpc": "2.0",
-                        "id": msg_id,
-                        "result": result
-                    }
-                    sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\n")
-                    sys.stdout.flush()
+                    else:
+                        batch_resps = []
+                        for item in msg:
+                            r = self._handle_single_request(item)
+                            if r is not None:
+                                batch_resps.append(r)
+                        if batch_resps:
+                            sys.stdout.write(json.dumps(batch_resps, ensure_ascii=False) + "\n")
+                            sys.stdout.flush()
+                else:
+                    r = self._handle_single_request(msg)
+                    if r is not None:
+                        sys.stdout.write(json.dumps(r, ensure_ascii=False) + "\n")
+                        sys.stdout.flush()
 
             except json.JSONDecodeError as jde:
                 err_resp = {

@@ -58,6 +58,8 @@ class SafetensorsHandler:
     def _validate_header(cls, header: Dict[str, Any], base_offset: int, file_size: Optional[int] = None) -> None:
         """Validates safetensors header schema, dtypes, shapes, and offset ranges according to format specification."""
         import math
+        if not isinstance(header, dict):
+            raise ValueError(f"Invalid safetensors header: root must be a JSON object/dictionary, got {type(header).__name__}.")
         tensors_by_offset = []
 
         for name, meta in header.items():
@@ -141,6 +143,8 @@ class SafetensorsHandler:
             if len(header_json_bytes) < header_len:
                 raise ValueError("Truncated safetensors header.")
             header_dict = json.loads(header_json_bytes.decode("utf-8"))
+            if not isinstance(header_dict, dict):
+                raise ValueError(f"Invalid safetensors header: root must be a JSON object, got {type(header_dict).__name__}.")
             header_sha256 = hashlib.sha256(header_json_bytes).hexdigest()
             base_offset = 8 + header_len
             cls._validate_header(header_dict, base_offset, file_size)
@@ -968,6 +972,22 @@ class NeuralBehaviorVerifier:
 
             b_f32 = b_arr.astype(np.float32)
             p_f32 = p_arr.astype(np.float32)
+
+            if not np.all(np.isfinite(b_f32)) or not np.all(np.isfinite(p_f32)):
+                all_within_bound = False
+                max_rel_shift = float("inf")
+                max_lipschitz_bound = float("inf")
+                tensor_reports.append({
+                    "tensor_name": t_name,
+                    "changed_elements": int(b_f32.size),
+                    "total_elements": int(b_f32.size),
+                    "frobenius_relative_shift": float("inf"),
+                    "lipschitz_perturbation_bound": float("inf"),
+                    "within_tolerance": False,
+                    "error": "Non-finite values (NaN or Inf) detected in tensor payload."
+                })
+                continue
+
             diff = p_f32 - b_f32
             diff_norm = float(np.linalg.norm(diff))
             base_norm = float(np.linalg.norm(b_f32))
@@ -1292,14 +1312,6 @@ class WeightSpaceCompiler:
         b2 = np.zeros((action_dim,), dtype=np.float32)
 
         half = max(input_dim // 2, 2)
-        # Channel 0 (first half): paddle horizontal coordinates
-        # Channel 1 (second half): ball horizontal coordinates & velocity
-        for i in range(min(hidden_dim, 8)):
-            paddle_col = min(i, half - 1)
-            ball_col = min(half + i, input_dim - 1)
-            # Unit computes (ball_x - paddle_x) directional offset
-            w1[i, ball_col] = 3.5
-            w1[i, paddle_col] = -3.5
 
         # Trajectory direction detectors (Units 0..3 as in Page 11)
         if hidden_dim >= 4 and input_dim >= 4:
@@ -1308,13 +1320,39 @@ class WeightSpaceCompiler:
             w1[2, 2:4] = [2.0, 2.0]   # velocity magnitude
             w1[3, -2:] = [4.0, -4.0]  # bottom-row paddle alignment (Page 5)
 
-        # Output layer routes negative offset -> LEFT (0), zero -> STAY (1), positive -> RIGHT (2)
-        for i in range(min(hidden_dim, 8)):
-            direction_sign = 1.0 if (i % 2 == 0) else -1.0
-            w2[0, i] = -2.8 * direction_sign  # Move Left
-            w2[1, i] = -0.5                   # Stay
-            w2[2, i] = 2.8 * direction_sign   # Move Right
-        b2[1] = 0.25  # Slight stability bias for STAY when aligned
+        # Landing error detectors (Units 4..7):
+        # Unit 4: Positive error detector (ball_x > paddle_x -> steer RIGHT)
+        # Unit 5: Negative error detector (ball_x < paddle_x -> steer LEFT)
+        # Maps coordinates whether supplied as scalar offsets or spatial coordinate channels
+        if hidden_dim >= 6:
+            # Scalar coordinate indices: paddle at 0, ball at half
+            w1[4, half] = 3.5
+            w1[4, 0] = -3.5
+            w2[2, 4] = 3.0
+            w2[0, 4] = -3.0
+
+            w1[5, 0] = 3.5
+            w1[5, half] = -3.5
+            w2[0, 5] = 3.0
+            w2[2, 5] = -3.0
+
+            # Multi-channel coordinate mapping across remaining units
+            for i in range(6, min(hidden_dim, 8)):
+                p_col = min(i - 4, half - 1)
+                b_col = min(half + (i - 4), input_dim - 1)
+                if i % 2 == 0:
+                    w1[i, b_col] = 3.5
+                    w1[i, p_col] = -3.5
+                    w2[2, i] = 2.0
+                    w2[0, i] = -2.0
+                else:
+                    w1[i, p_col] = 3.5
+                    w1[i, b_col] = -3.5
+                    w2[0, i] = 2.0
+                    w2[2, i] = -2.0
+
+        # Baseline stability bias for STAY (Action 1) when aligned (error = 0)
+        b2[1] = 0.5
 
         return {
             "policy.layer1.weight": w1,
@@ -1566,27 +1604,28 @@ def main():
 
     # Subspace command
     sub_p = subparsers.add_parser("subspace", help="Extract SVD/Extreme/Slice subspace of a tensor")
-    sub_p.add_argument("--model", required=True, help="Safetensors model path")
+    sub_p.add_argument("--model", "--source", "--file", dest="model", required=True, help="Safetensors model path")
     sub_p.add_argument("--tensor", required=True, help="Tensor name")
     sub_p.add_argument("--mode", choices=["svd_modes", "sparse_extremes", "coordinate_slice"], default="svd_modes")
     sub_p.add_argument("--top-k", type=int, default=8, help="Top-k singular modes or extremes")
 
     # Decompile command
     dec_p = subparsers.add_parser("decompile", help="Decompile neural circuit to pseudocode")
-    dec_p.add_argument("--model", required=True, help="Safetensors model path")
+    dec_p.add_argument("--model", "--source", "--file", dest="model", required=True, help="Safetensors model path")
     dec_p.add_argument("--tensor", required=True, help="Tensor name to decompile")
     dec_p.add_argument("--layer", type=int, default=0, help="Layer index")
     dec_p.add_argument("--head", type=int, default=0, help="Head index")
     dec_p.add_argument("--num-heads", type=int, default=16, help="Total number of attention heads (default 16)")
     dec_p.add_argument(
-        "--circuit-type",
+        "--circuit-type", "--kind",
+        dest="circuit_type",
         choices=["attention_head", "mlp_projection", "layer_norm_drift"],
         default="attention_head"
     )
 
     # Patch command
     patch_p = subparsers.add_parser("patch", help="Apply surgical weight-space patch")
-    patch_p.add_argument("--source", required=True, help="Source safetensors model")
+    patch_p.add_argument("--source", "--model", "--file", dest="source", required=True, help="Source safetensors model")
     patch_p.add_argument("--output", required=True, help="Output patched safetensors model")
     patch_p.add_argument("--tensor", required=True, help="Tensor to patch")
     patch_p.add_argument(
@@ -1608,7 +1647,7 @@ def main():
 
     # Probe-trace command (Temporal Hearing)
     probe_p = subparsers.add_parser("probe-trace", help="Probe dynamic activation trace over time")
-    probe_p.add_argument("--model", required=True, help="Safetensors model path")
+    probe_p.add_argument("--model", "--source", "--file", dest="model", required=True, help="Safetensors model path")
     probe_p.add_argument("--prompt", required=True, help="Diagnostic prompt")
     probe_p.add_argument("--max-tokens", type=int, default=32, help="Number of temporal steps")
 
@@ -1620,7 +1659,7 @@ def main():
 
     # WSP-Audit command (Experiments 1, 2, 3, 7, 8 & Gemma-3 Amenability + Backdoor Audit)
     wsp_p = subparsers.add_parser("wsp-audit", help="Comprehensive MIT CSAIL WSP audit on a safetensors model")
-    wsp_p.add_argument("--model", required=True, help="Safetensors model path")
+    wsp_p.add_argument("--model", "--source", "--file", dest="model", required=True, help="Safetensors model path")
     wsp_p.add_argument("--tensor", default=None, help="Optional primary tensor name")
 
     # Synthesize-Weights command (Experiments 5 & 6: Zero-Shot Weight Compilation from Scratch)

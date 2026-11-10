@@ -573,33 +573,40 @@ class ContinuousDeobfuscator:
                         is_zero = True
                         desc = f"{m.upper()} {ops[0].upper()}, {ops[1].upper()}"
 
-                    if is_zero and idx + 1 < len(instructions):
-                        next_insn = instructions[idx + 1]
-                        next_m = next_insn.mnemonic.lower()
-                        total_len = insn.size + next_insn.size
-
-                        if next_m in ("jz", "je"):
-                            findings.append({
-                                "type": "OPAQUE_PREDICATE_ALWAYS_TRUE",
-                                "offset": insn.address,
-                                "length": total_len,
-                                "zeroing_instruction": desc,
-                                "jump_type": f"{next_m.upper()} (Zero Flag set by zeroing)",
-                                "description": f"{desc} guarantees ZF=1. {next_m.upper()} is ALWAYS taken. Fallthrough branch is dead code.",
-                                "target_rel_offset": next_insn.op_str,
-                                "suggested_simplification": f"JMP to target ({next_insn.op_str}) or NOP fallthrough"
-                            })
-                        elif next_m in ("jnz", "jne"):
-                            findings.append({
-                                "type": "OPAQUE_PREDICATE_ALWAYS_FALSE",
-                                "offset": insn.address,
-                                "length": total_len,
-                                "zeroing_instruction": desc,
-                                "jump_type": f"{next_m.upper()} (Zero Flag set by zeroing)",
-                                "description": f"{desc} guarantees ZF=1. {next_m.upper()} is NEVER taken. Jump target is dead code.",
-                                "target_rel_offset": next_insn.op_str,
-                                "suggested_simplification": f"Replace {next_m.upper()} with NOPs"
-                            })
+                    if is_zero:
+                        # Look ahead through flag-safe instructions (mov, movzx, movsx, movsxd, lea, nop)
+                        for next_idx in range(idx + 1, min(idx + 4, len(instructions))):
+                            next_insn = instructions[next_idx]
+                            next_m = next_insn.mnemonic.lower()
+                            if next_m in ("jz", "je", "jnz", "jne"):
+                                total_len = (next_insn.address + next_insn.size) - insn.address
+                                if next_m in ("jz", "je"):
+                                    findings.append({
+                                        "type": "OPAQUE_PREDICATE_ALWAYS_TRUE",
+                                        "offset": insn.address,
+                                        "length": total_len,
+                                        "zeroing_instruction": desc,
+                                        "jump_type": f"{next_m.upper()} (Zero Flag set by zeroing)",
+                                        "description": f"{desc} guarantees ZF=1. {next_m.upper()} is ALWAYS taken. Fallthrough branch is dead code.",
+                                        "target_rel_offset": next_insn.op_str,
+                                        "suggested_simplification": f"JMP to target ({next_insn.op_str}) or NOP fallthrough"
+                                    })
+                                else:
+                                    findings.append({
+                                        "type": "OPAQUE_PREDICATE_ALWAYS_FALSE",
+                                        "offset": insn.address,
+                                        "length": total_len,
+                                        "zeroing_instruction": desc,
+                                        "jump_type": f"{next_m.upper()} (Zero Flag set by zeroing)",
+                                        "description": f"{desc} guarantees ZF=1. {next_m.upper()} is NEVER taken. Jump target is dead code.",
+                                        "target_rel_offset": next_insn.op_str,
+                                        "suggested_simplification": f"Replace {next_m.upper()} with NOPs"
+                                    })
+                                break
+                            elif next_m in ("mov", "movzx", "movsx", "movsxd", "lea", "nop"):
+                                continue
+                            else:
+                                break
                 return findings
             except Exception:
                 pass
@@ -610,52 +617,86 @@ class ContinuousDeobfuscator:
         while i < n - 3:
             rex_prefix: Optional[int] = None
             insn_start = i
-            if 0x40 <= code_bytes[i] <= 0x4F and i + 4 < n:
+            if 0x40 <= code_bytes[i] <= 0x4F and i + 2 < n:
                 rex_prefix = code_bytes[i]
                 op_idx = i + 1
             else:
                 op_idx = i
 
-            if op_idx + 2 >= n:
+            if op_idx + 1 >= n:
                 break
 
+            prefix_len = 1 if rex_prefix is not None else 0
+            b0 = code_bytes[op_idx]
+            b1 = code_bytes[op_idx + 1]
+            is_arith = b0 in (0x31, 0x33, 0x29, 0x2B)
+            insn_len = prefix_len + 2
+
             is_zero, desc = ContinuousDeobfuscator.is_register_zeroing(
-                code_bytes[op_idx], code_bytes[op_idx + 1], rex_prefix=rex_prefix
+                b0, b1, rex_prefix=rex_prefix
             )
             if is_zero:
-                jcc_idx = op_idx + 2
-                b_jcc = code_bytes[jcc_idx]
-                prefix_len = 1 if rex_prefix is not None else 0
+                # Lookahead through flag-preserving instructions (NOP, MOV)
+                cur_pos = op_idx + 2
+                lookahead_steps = 0
+                found_jcc = False
+                while cur_pos < n and lookahead_steps < 3:
+                    b_cur = code_bytes[cur_pos]
+                    if b_cur == 0x90:  # NOP
+                        cur_pos += 1
+                        lookahead_steps += 1
+                        continue
+                    elif 0xB8 <= b_cur <= 0xBF and cur_pos + 5 <= n:  # MOV reg32, imm32
+                        cur_pos += 5
+                        lookahead_steps += 1
+                        continue
+                    elif b_cur in (0x89, 0x8B) and cur_pos + 2 <= n:  # MOV reg, reg (Mod=11)
+                        if (code_bytes[cur_pos + 1] >> 6) == 3:
+                            cur_pos += 2
+                            lookahead_steps += 1
+                            continue
+                        break
+                    elif b_cur == 0x74 and cur_pos + 1 < n:  # JZ / JE rel8
+                        offset = struct.unpack("b", bytes([code_bytes[cur_pos + 1]]))[0]
+                        total_len = (cur_pos + 2) - insn_start
+                        findings.append({
+                            "type": "OPAQUE_PREDICATE_ALWAYS_TRUE",
+                            "offset": insn_start,
+                            "length": total_len,
+                            "zeroing_instruction": desc,
+                            "jump_type": "JZ (Zero Flag set by zeroing)",
+                            "description": f"{desc} guarantees ZF=1. JZ is ALWAYS taken. Fallthrough branch is dead code.",
+                            "target_rel_offset": offset,
+                            "suggested_simplification": f"JMP to target offset (+{offset}) or NOP fallthrough"
+                        })
+                        i = cur_pos + 2
+                        found_jcc = True
+                        break
+                    elif b_cur == 0x75 and cur_pos + 1 < n:  # JNZ / JNE rel8
+                        total_len = (cur_pos + 2) - insn_start
+                        findings.append({
+                            "type": "OPAQUE_PREDICATE_ALWAYS_FALSE",
+                            "offset": insn_start,
+                            "length": total_len,
+                            "zeroing_instruction": desc,
+                            "jump_type": "JNZ (Zero Flag set by zeroing)",
+                            "description": f"{desc} guarantees ZF=1. JNZ is NEVER taken. Jump target is dead code.",
+                            "suggested_simplification": "Replace JNZ with 2x NOP (0x90)"
+                        })
+                        i = cur_pos + 2
+                        found_jcc = True
+                        break
+                    else:
+                        break
 
-                if b_jcc == 0x74 and jcc_idx + 1 < n:
-                    offset = struct.unpack("b", bytes([code_bytes[jcc_idx + 1]]))[0]
-                    total_len = prefix_len + 4
-                    findings.append({
-                        "type": "OPAQUE_PREDICATE_ALWAYS_TRUE",
-                        "offset": insn_start,
-                        "length": total_len,
-                        "zeroing_instruction": desc,
-                        "jump_type": "JZ (Zero Flag set by zeroing)",
-                        "description": f"{desc} guarantees ZF=1. JZ is ALWAYS taken. Fallthrough branch is dead code.",
-                        "target_rel_offset": offset,
-                        "suggested_simplification": f"JMP to target offset (+{offset}) or NOP fallthrough"
-                    })
-                    i = insn_start + total_len
+                if found_jcc:
                     continue
-                elif b_jcc == 0x75 and jcc_idx + 1 < n:
-                    total_len = prefix_len + 4
-                    findings.append({
-                        "type": "OPAQUE_PREDICATE_ALWAYS_FALSE",
-                        "offset": insn_start,
-                        "length": total_len,
-                        "zeroing_instruction": desc,
-                        "jump_type": "JNZ (Zero Flag set by zeroing)",
-                        "description": f"{desc} guarantees ZF=1. JNZ is NEVER taken. Jump target is dead code.",
-                        "suggested_simplification": "Replace JNZ with 2x NOP (0x90)"
-                    })
-                    i = insn_start + total_len
-                    continue
-            i += 1
+
+            # Advance by instruction length if valid arithmetic instruction was inspected, avoiding misaligned rescan
+            if is_arith:
+                i = insn_start + insn_len
+            else:
+                i += 1
 
         return findings
 
@@ -790,33 +831,71 @@ class ContinuousDeobfuscator:
                 return ("reg", entry.get("register_id"))
             return ("unknown", None)
 
-        cmps_by_var = {}
+        cmps_by_var_entries: Dict[tuple, List[dict]] = {}
         for c in state_comparisons:
             key = _resolve_var_identity(c)
-            if key not in cmps_by_var:
-                cmps_by_var[key] = set()
-            cmps_by_var[key].add(c["state_value"])
+            if key[0] != "unknown":
+                cmps_by_var_entries.setdefault(key, []).append(c)
 
-        assigns_by_var = {}
+        assigns_by_var_offsets: Dict[tuple, List[int]] = {}
         for a in state_assignments:
             key = _resolve_var_identity(a)
-            assigns_by_var[key] = assigns_by_var.get(key, 0) + 1
+            if key[0] != "unknown":
+                assigns_by_var_offsets.setdefault(key, []).append(a["offset"])
 
         has_cff = False
-        for var_key, states in cmps_by_var.items():
-            if len(states) >= 3 and assigns_by_var.get(var_key, 0) >= 2:
-                has_cff = True
+        detected_states = set()
+        best_cadence = 0.0
+
+        for var_key, entries in cmps_by_var_entries.items():
+            if len(entries) < 3:
+                continue
+            offsets = sorted([e["offset"] for e in entries])
+            # Slide window to find localized dispatcher loop within 1024 bytes
+            for start_idx in range(len(offsets)):
+                window_entries = [
+                    e for e in entries
+                    if offsets[start_idx] <= e["offset"] <= offsets[start_idx] + 1024
+                ]
+                win_states = set(e["state_value"] for e in window_entries)
+                if len(win_states) >= 3:
+                    win_offsets = sorted([e["offset"] for e in window_entries])
+                    intervals = np.diff(win_offsets).astype(np.float32)
+                    if len(intervals) >= 2:
+                        mean_int = float(np.mean(intervals))
+                        std_int = float(np.std(intervals))
+                        reg = float(1.0 / (1.0 + (std_int / max(mean_int, 1.0))))
+                        best_cadence = max(best_cadence, reg)
+
+                        var_assigns = assigns_by_var_offsets.get(var_key, [])
+                        nearby_assigns = [
+                            ao for ao in var_assigns
+                            if abs(ao - win_offsets[0]) <= 2048 or abs(ao - win_offsets[-1]) <= 2048
+                        ]
+                        if len(var_assigns) >= 2 and len(nearby_assigns) >= 1 and reg >= 0.35:
+                            has_cff = True
+                            for ws in win_states:
+                                detected_states.add(ws)
+                            break
+                if has_cff:
+                    break
+            if has_cff:
                 break
 
-        # Sense of Rhythm: compute dispatcher cadence regularity
-        cmp_offsets = [c["offset"] for c in state_comparisons]
-        if len(cmp_offsets) >= 2:
-            intervals = np.diff(cmp_offsets).astype(np.float32)
-            mean_interval = float(np.mean(intervals))
-            std_interval = float(np.std(intervals))
-            cadence_regularity = float(1.0 / (1.0 + (std_interval / max(mean_interval, 1.0))))
+        # Fallback cadence computation for overall rhythm reporting
+        if best_cadence > 0.0:
+            cadence_regularity = best_cadence
         else:
-            cadence_regularity = 0.0
+            cmp_offsets = [c["offset"] for c in state_comparisons]
+            if len(cmp_offsets) >= 2:
+                intervals = np.diff(cmp_offsets).astype(np.float32)
+                mean_interval = float(np.mean(intervals))
+                std_interval = float(np.std(intervals))
+                cadence_regularity = float(1.0 / (1.0 + (std_interval / max(mean_interval, 1.0))))
+            else:
+                cadence_regularity = 0.0
+
+        all_detected = sorted(list(detected_states if detected_states else set(c["state_value"] for c in state_comparisons)))
 
         return {
             "has_control_flow_flattening": has_cff,
@@ -1130,6 +1209,12 @@ class SemanticFunctionMatcher:
 
     @staticmethod
     def match_functions(hex1: str, hex2: str) -> Dict[str, Any]:
+        raw1 = bytes.fromhex(hex1.replace(" ", "").replace("\n", ""))
+        raw2 = bytes.fromhex(hex2.replace(" ", "").replace("\n", ""))
+        len1 = len(raw1)
+        len2 = len(raw2)
+        len_ratio = (min(len1, len2) / max(len1, len2)) if max(len1, len2) > 0 else 0.0
+
         v1 = SemanticFunctionMatcher.vectorize_function(hex1)
         v2 = SemanticFunctionMatcher.vectorize_function(hex2)
 
@@ -1141,29 +1226,43 @@ class SemanticFunctionMatcher:
         else:
             similarity = float(np.dot(v1, v2))
             similarity = max(min(similarity, 1.0), 0.0)
-            if similarity >= 0.85:
+            if similarity >= 0.90:
                 interpretation = "Functions exhibit equivalent behavioral control and operational topology."
+            elif similarity >= 0.80:
+                interpretation = "Functions share similar opcode category distributions, but lack strict operational equivalence."
             elif similarity >= 0.50:
                 interpretation = "Functions share moderate operational characteristics but differ in branch/register topology."
             else:
                 interpretation = "Functions exhibit divergent computational patterns or non-code noise."
 
-        is_match = similarity >= 0.85
         has_branch_1 = bool(v1[1] > 0.01)
         has_branch_2 = bool(v2[1] > 0.01)
         is_branch_topology_divergent = (has_branch_1 != has_branch_2)
+        is_length_divergent = (len_ratio < 0.60 and min(len1, len2) >= 4)
+
+        is_match = (similarity >= 0.90) and (not is_branch_topology_divergent) and (not is_length_divergent)
 
         if is_branch_topology_divergent:
-            is_match = False
             similarity = min(similarity, 0.72)
             interpretation = "Functions diverge in branch/loop topology (branching/looping vs branchless straight-line code); semantic match rejected."
+            confidence = "LOW / DIVERGENT_TOPOLOGY"
+        elif is_length_divergent:
+            interpretation = f"Functions diverge significantly in instruction scale (length ratio {round(len_ratio, 2)} < 0.60); semantic equivalence rejected."
+            confidence = "LOW / DIVERGENT_SCALE"
+        elif is_match:
+            confidence = "HIGH" if similarity >= 0.94 else "MODERATE"
+        elif similarity >= 0.80:
+            confidence = "LOW / SIMILAR_OPCODE_DISTRIBUTION (NON_EQUIVALENT)"
+        else:
+            confidence = "LOW / NO MATCH"
 
         return {
             "cosine_similarity": round(similarity, 4),
             "is_semantic_match": is_match,
-            "confidence": "HIGH" if (similarity > 0.92 and is_match) else ("MODERATE" if (similarity >= 0.85 and is_match) else "LOW / NO MATCH"),
+            "confidence": confidence,
             "granularity_type": "OPERATIONAL_MIX_HISTOGRAM",
             "branch_topology_congruent": not is_branch_topology_divergent,
+            "scale_ratio": round(len_ratio, 4),
             "interpretation": interpretation
         }
 
@@ -2009,7 +2108,7 @@ class SensoryCortex:
 
         scores = [s["efficiency_score"] for s in senses_output.values()]
         return {
-            "engine": "REA-Neural Sensory Cortex v7.1",
+            "engine": "REA-Neural Sensory Cortex v7.4.0",
             "platform_target": "Windows 10 / 11 / Server (PE32/PE32+ & Safetensors)",
             "active_senses_count": len(senses_output),
             "overall_sensory_efficiency": round(float(np.mean(scores)), 4),

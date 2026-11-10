@@ -5,6 +5,7 @@ Correlates PnP device Hardware IDs and Compatible IDs against installed driver p
 to determine matching fidelity, Driver Rank, and whether a generic fallback driver is bound.
 """
 
+import os
 from typing import Dict, Any, List, Optional
 from ..system_introspection.device_inspector import NativeDeviceInspector
 from .device_identity import DeviceIdentity
@@ -39,6 +40,15 @@ class DriverMatcher:
         Conducts a unified compatibility audit linking PnP devices to their active drivers,
         evaluating driver rank, and detecting missing driver packages.
         """
+        if os.name != "nt":
+            return {
+                "status": "not_applicable",
+                "reason": "Device and driver matching requires Windows NT platform with SetupAPI/CfgMgr32.",
+                "total_evaluated": 0,
+                "problem_devices_count": 0,
+                "results": []
+            }
+
         try:
             from security import ExecutionGuard, Capability
             ExecutionGuard.request_access(

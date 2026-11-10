@@ -98,6 +98,13 @@ class BinaryFormatInspector:
                 "error": f"Target file does not exist: {file_path}",
                 "file_path": file_path
             }
+        if os.path.getsize(file_path) == 0:
+            return {
+                "format": "EMPTY_FILE",
+                "size": 0,
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "error": "File is empty (0 bytes)."
+            }
         with open(file_path, "rb") as f:
             magic = f.read(4)
 
@@ -955,6 +962,10 @@ class ContinuousDeobfuscator:
         res = ContinuousDeobfuscator.deobfuscate_cfg(code_bytes)
         res["source_file"] = file_path
         res["analysis_file_offset"] = hex(actual_offset)
+        res["analysis_window_size"] = len(code_bytes)
+        res["total_file_size"] = file_sz
+        res["is_truncated"] = (actual_offset + len(code_bytes)) < file_sz
+        res["truncated"] = res["is_truncated"]
         return res
 
 

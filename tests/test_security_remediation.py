@@ -275,12 +275,18 @@ class TestSecurityRemediation(unittest.TestCase):
         self.assertEqual(res_conc["pathology_distribution"], "CONCENTRATED_COLUMN_BOTTLENECK")
         self.assertEqual(res_conc["recommended_num_columns"], 64)
 
-        # Diffuse attractor: spread across all columns
+        # Diffuse attractor: spread across 512 columns -> nominal K=256 fits within dims
+        mat_diff_wide = np.ones((64, 512), dtype=np.float32) * 2.0
+        res_diff_wide = AmenabilityDiagnostic.evaluate_surgical_amenability(mat_diff_wide, observed_loop_rate=0.90)
+        self.assertTrue(res_diff_wide["is_amenable_to_weight_surgery"])
+        self.assertEqual(res_diff_wide["pathology_distribution"], "DIFFUSE_UNIFORM_ATTRACTOR")
+        self.assertEqual(res_diff_wide["recommended_num_columns"], 256)
+
+        # Bounded check: a 64-column diffuse matrix must clamp recommended_num_columns to <= 64
         mat_diff = np.ones((64, 64), dtype=np.float32) * 2.0
         res_diff = AmenabilityDiagnostic.evaluate_surgical_amenability(mat_diff, observed_loop_rate=0.90)
-        self.assertTrue(res_diff["is_amenable_to_weight_surgery"])
         self.assertEqual(res_diff["pathology_distribution"], "DIFFUSE_UNIFORM_ATTRACTOR")
-        self.assertEqual(res_diff["recommended_num_columns"], 256)
+        self.assertEqual(res_diff["recommended_num_columns"], 64)
 
     def test_semantic_matcher_rejects_branch_topology_divergence(self):
         """LIM-2: SemanticFunctionMatcher rejects false-positive matching between looping and branchless functions."""

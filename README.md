@@ -42,7 +42,7 @@ Traditional function matching algorithms rely on exact opcode hashes or structur
 - **High P-Code SSA IR Vectorizer (`ghidra_pcode_vectorizer.py`):** When paired with Ghidra decompilation, High P-Code SSA operations are lifted into complete 64-dimensional semantic vectors encoding transition topology, def-use edge density, cyclomatic loop complexity, and memory intensity (>95% cross-architecture matching on evaluated functions).
 
 ### 3. Goal-Driven Surgical Binary Patching
-Manual byte patching is notoriously error-prone, frequently resulting in stack imbalance (`RSP`/`RBP` misalignment) or PE checksum violations. `REA-Neural` computes minimal perturbation vectors ($\Delta \text{State} \le \epsilon$), automatically recalculates PE integrity checksums, and guarantees stack frame stability.
+Manual byte patching is notoriously error-prone, frequently resulting in stack imbalance (`RSP`/`RBP` misalignment) or PE checksum violations. `REA-Neural` computes minimal perturbation vectors ($\Delta \text{State} \le \epsilon$), automatically recalculates PE integrity checksums, and enforces a heuristic nociception guard against stack frame balance violations (`RET`/frame-altering opcode checks).
 
 ### 4. Hybrid Native-Neural Application Dissection & Weight Security Auditing
 Modern Windows applications (games, anti-cheat, endpoint security clients, media suites) embed neural inference logic (ONNX, TFLite, GGUF, DirectML, WinML, Safetensors) directly into PE sections (`.rsrc`, `.rodata`). `REA-Neural` scans native binaries to expose these embedded logic cores and decompile the boundary between native Win32 API calls and embedded decision matrices.
@@ -149,7 +149,7 @@ rea-neural/
 ├── README.md                      # Comprehensive guide
 ├── src/
 │   ├── cli.py                     # Unified CLI entry point (`rea-neural`) with self-update
-│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`rea-mcp`, 27 tools)
+│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`rea-mcp`, 34 tools)
 │   ├── binary_neural_engine.py    # PE binary analysis, deobfuscator & patcher
 │   ├── rea_neural_engine.py       # Weight-space SVD & circuit decompiler
 │   ├── sensory_cortex.py          # 10 Metaphorical Senses evaluation cortex
@@ -159,7 +159,7 @@ rea-neural/
 ├── skills/
 │   └── reverse-engineer-anything/ # Agent-native skill specification
 ├── schemas/                       # Agent MCP tool definitions
-├── tests/                         # 139 automated unit, sensory & security tests (100% CI pass)
+├── tests/                         # 180 automated unit, sensory, telemetry & security tests
 └── docs/                          # Architecture, Roadmap & mathematical foundations
     ├── architecture.md            # Master architecture & formal model
     └── ROADMAP.md                 # Strategic direction, tech evaluation & roadmap
@@ -235,7 +235,7 @@ rea-neural sense --hex "55 48 89 e5 90 5d c3"
 
 ## Agent-Native MCP (Model Context Protocol) Integration
 
-`REA-Neural` ships with a production-ready **JSON-RPC 2.0 stdio MCP server** (`rea-mcp`) offering **27 mediated reverse engineering and Windows intelligence tools** to AI agents (Claude Desktop, Cursor, Antigravity, Windsurf).
+`REA-Neural` ships with a production-ready **JSON-RPC 2.0 stdio MCP server** (`rea-mcp`) offering **34 mediated reverse engineering and Windows intelligence tools** to AI agents (Claude Desktop, Cursor, Antigravity, Windsurf).
 
 ### 1. Claude Desktop Configuration
 Add the `rea` server to your `%APPDATA%\Claude\claude_desktop_config.json`:
@@ -349,7 +349,7 @@ rea-neural update
 
 ### Running the Test Suite
 ```powershell
-# Run the complete test suite (135 unit, sensory, and security remediation tests)
+# Run the complete test suite (180 unit, sensory, runtime telemetry, and security remediation tests)
 python -m unittest discover -s tests -p "test_*.py"
 ```
 

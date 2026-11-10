@@ -181,6 +181,7 @@ class TestVirtualMemoryInspector(unittest.TestCase):
         # Net growth = 0x10000 - 0x8000 = 0x8000 = 32768 bytes
         self.assertEqual(delta["net_commit_delta_bytes"], 32768)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_live_process_memory_inspection(self):
         """Verifies passive live memory inspection on the active Python process under ExecutionGuard."""
         snapshot = VirtualMemoryInspector.inspect_process(self.pid)
@@ -215,6 +216,7 @@ class TestVirtualMemoryInspector(unittest.TestCase):
         null_res = server.dispatch_tool("rea_vad_inspect", {"pid": self.pid, "address": "0x0"})
         self.assertEqual(null_res["status"], "FAULT_NULL_DEREFERENCE")
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_read_process_memory_safe_chunking(self):
         """Verifies safe, read-only memory reading via kernel32.ReadProcessMemory."""
         import ctypes
@@ -227,6 +229,7 @@ class TestVirtualMemoryInspector(unittest.TestCase):
         (recovered_int,) = struct.unpack("<i", raw)
         self.assertEqual(recovered_int, 133742)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_process_memory_scanner_first_and_next_scan(self):
         """Verifies First Scan and Next Scan differential value filtering."""
         import ctypes
@@ -258,6 +261,7 @@ class TestVirtualMemoryInspector(unittest.TestCase):
         surv_addrs = [c["address_int"] for c in res_next["candidates_sample"]]
         self.assertIn(val_addr, surv_addrs)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_structure_dissector_inferred_types(self):
         """Verifies runtime structure dissection and C struct generation."""
         import ctypes
@@ -293,6 +297,7 @@ class TestVirtualMemoryInspector(unittest.TestCase):
         self.assertEqual(diff["mutated_regions"][0]["mutations"]["new_size"], 0x2000)
         self.assertEqual(diff["mutated_regions"][0]["mutations"]["old_size"], 0x1000)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_pointer_scanner_resolution(self):
         """Verifies multi-level static/dynamic pointer resolution."""
         import ctypes

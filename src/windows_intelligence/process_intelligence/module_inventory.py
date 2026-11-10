@@ -107,6 +107,17 @@ class ModuleInventory:
         Scans running processes to identify which ones have loaded a specific DLL into memory.
         Solves the question: 'Is this DLL loaded inside another program?'
         """
+        if os.name != "nt":
+            return {
+                "status": "not_applicable",
+                "notice": "Windows Toolhelp32 process enumeration is unavailable on non-Windows NT platforms.",
+                "query": module_name_or_path,
+                "processes_scanned": 0,
+                "access_denied_processes": 0,
+                "hosting_processes_count": 0,
+                "hosting_processes": []
+            }
+
         norm_query = os.path.normpath(module_name_or_path).lower()
         query_basename = os.path.basename(norm_query)
 
@@ -142,8 +153,11 @@ class ModuleInventory:
                     })
                     break
 
+        status = "access_denied" if (len(procs) > 0 and access_denied_count == len(procs)) else (
+            "partial_success" if access_denied_count > 0 else "success"
+        )
         return {
-            "status": "success",
+            "status": status,
             "query": module_name_or_path,
             "processes_scanned": len(procs),
             "access_denied_processes": access_denied_count,

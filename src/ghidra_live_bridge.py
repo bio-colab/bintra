@@ -150,8 +150,14 @@ class GhidraLiveBridgeServer:
         }
         for m_path in (target_marker, self._temp_marker_path):
             try:
-                with open(m_path, "w", encoding="utf-8") as f:
+                flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+                fd = os.open(m_path, flags, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
                     json.dump(marker_payload, f, indent=2)
+                try:
+                    os.chmod(m_path, 0o600)
+                except Exception:
+                    pass
             except Exception:
                 pass
 

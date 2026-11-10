@@ -541,6 +541,11 @@ class CircuitDecompiler:
             "circuit_type": "attention_head",
             "circuit_classification": classification,
             "is_anomaly": is_anomaly,
+            "classification_confidence": "HEURISTIC_SPECTRAL_RATIO",
+            "heuristic_note": (
+                "Classified from a single spectral singular value ratio (s0/s1); "
+                "small or rank-deficient test tensors can trigger elevated dominance without runtime looping."
+            ),
             "dominance_ratio": ratio,
             "pseudocode": pseudocode
         }
@@ -871,7 +876,9 @@ class ActivationTraceProber:
         if not selected_tensors:
             selected_tensors = tensor_names[:min(len(tensor_names), 4)]
 
-        steps = min(max(int(max_tokens), 4), 128)
+        if int(max_tokens) < 1:
+            raise ValueError(f"max_tokens must be >= 1 (got {max_tokens}).")
+        steps = min(int(max_tokens), 128)
         prompt_digest = hashlib.sha256(prompt.encode("utf-8")).digest()
 
         layer_traces = []
@@ -935,6 +942,8 @@ class ActivationTraceProber:
         return {
             "model_path": file_path,
             "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+            "analysis_mode": "SEEDED_SPECTRAL_OPERATOR_SIMULATION",
+            "disclaimer": "Deterministic spectral SVD operator iteration seeded from SHA-256(prompt); does not execute tokenized LLM transformer forward inference.",
             "steps_simulated": steps,
             "loop_attractor_detected": loop_attractor_detected,
             "traces": layer_traces
@@ -1254,25 +1263,32 @@ class AmenabilityDiagnostic:
         # Scale calibration (LIM-5): Required surgery rank K scales inversely with pathology concentration.
         # Highly concentrated attractors (>=0.80) are cured by default K=64.
         # Diffuse/uniform attractors (<0.50) require larger column spans (K=128-256) or rank-1 nullification.
+        num_cols_available = matrix.shape[1] if matrix.ndim >= 2 else matrix.shape[0]
         if top_col_energy_share >= 0.80:
-            recommended_k = 64
+            raw_k = 64
+            recommended_k = max(1, min(raw_k, num_cols_available))
             pathology_dist = "CONCENTRATED_COLUMN_BOTTLENECK"
-            surgery_advice = "Concentrated attractor: standard column_direction_subtract (num_columns=64) is highly effective."
+            surgery_advice = f"Concentrated attractor: standard column_direction_subtract (num_columns={recommended_k}) is highly effective."
         elif top_col_energy_share >= 0.50:
-            recommended_k = 128
+            raw_k = 128
+            recommended_k = max(1, min(raw_k, num_cols_available))
             pathology_dist = "MODERATELY_DISTRIBUTED_ATTRACTOR"
-            surgery_advice = "Moderately distributed attractor: recommended num_columns=128 (default K=64 may achieve only partial attenuation)."
+            surgery_advice = f"Moderately distributed attractor: recommended num_columns={recommended_k} (default K=64 may achieve only partial attenuation)."
         else:
-            recommended_k = 256
+            raw_k = 256
+            recommended_k = max(1, min(raw_k, num_cols_available))
             pathology_dist = "DIFFUSE_UNIFORM_ATTRACTOR"
-            surgery_advice = "Diffuse attractor: recommended num_columns=256 or rank1_nullify (default K=64 will leave residual attractor dominance)."
+            surgery_advice = f"Diffuse attractor: recommended num_columns={recommended_k} or rank1_nullify (default K=64 will leave residual attractor dominance)."
 
         return {
+            "analysis_mode": "OBSERVED_LOOP_TELEMETRY" if observed_loop_rate is not None else "SPECTRAL_HEURISTIC_ESTIMATE",
+            "loop_rate_source": "observed" if observed_loop_rate is not None else "spectral_heuristic_estimate",
             "spectral_dominance_ratio": round(float(dominance_ratio), 4),
             "top_columns_energy_concentration": round(top_col_energy_share, 4),
             "pathology_distribution": pathology_dist,
             "recommended_num_columns": recommended_k,
             "surgery_scale_advice": surgery_advice,
+            "estimated_loop_rate": round(loop_rate, 4),
             "estimated_or_observed_loop_rate": round(loop_rate, 4),
             "is_amenable_to_weight_surgery": is_amenable,
             "wsp_prognosis": (

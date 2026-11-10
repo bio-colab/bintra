@@ -1070,7 +1070,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             with open(skill_file, "r", encoding="utf-8") as sf:
                 skill_content = sf.read()
                 self.assertIn('version: "7.4.0"', skill_content)
-                self.assertIn('tool_count: 27', skill_content)
+                self.assertIn('tool_count: 34', skill_content)
 
 
     def test_ssa_analyzer_negative_same_seq_different_address(self):
@@ -1575,6 +1575,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("working_set_bytes", proc["memory"])
         self.assertGreater(proc["memory"]["working_set_bytes"], 0)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_mcp_server_system_introspection_dispatch(self):
         """Verifies MCP server dispatch for hardware_audit, driver_audit, and service_audit."""
         from mcp_server import ReaMcpServer
@@ -1869,18 +1870,30 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         """Verifies no presumptive fallback when fault_module is missing from crash record."""
         from windows_intelligence.evidence_engine import CausalitySynthesizer
         cmd_path = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "System32", "cmd.exe")
-        crash_no_mod = {
-            "source": "WER_REPORT",
-            "exception_code": "0xc0000005",
-            "exception_name": "STATUS_ACCESS_VIOLATION",
-            "fault_offset": "0x1000"
-            # fault_module explicitly omitted
-        }
-        dossier = CausalitySynthesizer.synthesize_dossier(cmd_path, crash_record=crash_no_mod)
-        self.assertEqual(dossier["status"], "success")
-        self.assertFalse(dossier["binary_mapping"]["is_internal_fault"])
-        self.assertEqual(dossier["binary_mapping"]["external_fault_module"], "UNKNOWN_MODULE")
-        self.assertEqual(dossier["binary_mapping"]["attribution"], "ATTRIBUTION_UNKNOWN")
+        cleanup_path = None
+        if not os.path.isfile(cmd_path):
+            pe_bytes = _create_synthetic_pe64()
+            tf = tempfile.NamedTemporaryFile(suffix=".exe", delete=False)
+            tf.write(pe_bytes)
+            tf.close()
+            cmd_path = tf.name
+            cleanup_path = tf.name
+        try:
+            crash_no_mod = {
+                "source": "WER_REPORT",
+                "exception_code": "0xc0000005",
+                "exception_name": "STATUS_ACCESS_VIOLATION",
+                "fault_offset": "0x1000"
+                # fault_module explicitly omitted
+            }
+            dossier = CausalitySynthesizer.synthesize_dossier(cmd_path, crash_record=crash_no_mod)
+            self.assertEqual(dossier["status"], "success")
+            self.assertFalse(dossier["binary_mapping"]["is_internal_fault"])
+            self.assertEqual(dossier["binary_mapping"]["external_fault_module"], "UNKNOWN_MODULE")
+            self.assertEqual(dossier["binary_mapping"]["attribution"], "ATTRIBUTION_UNKNOWN")
+        finally:
+            if cleanup_path and os.path.exists(cleanup_path):
+                os.unlink(cleanup_path)
 
     @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_registry_subkeys_and_three_state_policies(self):

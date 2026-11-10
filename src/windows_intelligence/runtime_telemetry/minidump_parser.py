@@ -102,12 +102,29 @@ class MiniDumpParser:
 
                 sig, ver, num_streams, stream_dir_rva, checksum, time_date = struct.unpack("<IIIIII", header[:24])
 
+                if num_streams == 0:
+                    return {
+                        "status": "error",
+                        "error": "Corrupted or empty MiniDump: zero streams declared in header.",
+                        "file_path": dmp_path
+                    }
+                if num_streams > 4096 or stream_dir_rva >= file_size:
+                    return {
+                        "status": "error",
+                        "error": (
+                            f"Corrupted MiniDump header: invalid stream directory "
+                            f"(streams={num_streams}, dir_rva={hex(stream_dir_rva)}, file_size={file_size})."
+                        ),
+                        "file_path": dmp_path
+                    }
+
                 f.seek(stream_dir_rva)
-                dir_bytes = f.read(num_streams * 12)
+                max_dir_bytes = min(num_streams * 12, max(0, file_size - stream_dir_rva))
+                dir_bytes = f.read(max_dir_bytes)
 
                 streams_detected = []
                 stream_map: Dict[int, tuple] = {}
-                for i in range(num_streams):
+                for i in range(len(dir_bytes) // 12):
                     entry = dir_bytes[i * 12 : (i + 1) * 12]
                     if len(entry) < 12:
                         break
@@ -122,13 +139,6 @@ class MiniDumpParser:
                         "data_size": data_size,
                         "rva": hex(rva)
                     })
-
-                if num_streams == 0:
-                    return {
-                        "status": "error",
-                        "error": "Corrupted or empty MiniDump: zero streams declared in header.",
-                        "file_path": dmp_path
-                    }
 
                 # 1. System Info Stream (Stream 7)
                 system_info = None
@@ -182,7 +192,12 @@ class MiniDumpParser:
                     "modules_sample": [m["name"] for m in modules[:10]]
                 }
         except Exception as e:
-            return {"status": "error", "error": f"Failed to parse minidump: {e}", "file_path": dmp_path}
+            err_detail = str(e).strip() or type(e).__name__
+            return {
+                "status": "error",
+                "error": f"Failed to parse minidump ({type(e).__name__}): {err_detail}",
+                "file_path": dmp_path,
+            }
 
     @classmethod
     def _parse_system_info_stream(cls, f, rva: int, size: int, file_size: int = 0) -> Optional[Dict[str, Any]]:
@@ -420,10 +435,14 @@ class MiniDumpParser:
         if fault_module:
             exception_info["fault_module"] = fault_module
             exception_info["fault_offset"] = fault_offset
+            exception_info["fault_rva"] = fault_offset
+            exception_info["fault_virtual_address"] = hex(exc_addr)
             exception_info["is_unloaded_or_unmapped"] = False
         else:
             exception_info["fault_module"] = "UNKNOWN_MODULE"
             exception_info["fault_offset"] = hex(exc_addr)
+            exception_info["fault_rva"] = "0x0"
+            exception_info["fault_virtual_address"] = hex(exc_addr)
             exception_info["is_unloaded_or_unmapped"] = True
 
         del exception_info["exception_address_int"]

@@ -219,6 +219,15 @@ class PcodeVectorizer:
             "category_histogram": hist_dict,
         }
 
+    @classmethod
+    def vectorize_high_function(
+        cls,
+        pcode_ops: List[Dict[str, Any]],
+        basic_blocks: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """Alias for vectorize_pcode_ops supporting optional basic_blocks parameter."""
+        return cls.vectorize_pcode_ops(pcode_ops)
+
 
 # ============================================================================
 # 3. P-CODE SEMANTIC MATCHER (CROSS-ARCHITECTURE EQUIVALENCE)
@@ -232,6 +241,41 @@ class PcodeFunctionMatcher:
 
     MATCH_THRESHOLD = 0.90
     HIGH_CONFIDENCE_THRESHOLD = 0.95
+
+    @classmethod
+    def match_vectors(
+        cls,
+        v1: Any,
+        v2: Any
+    ) -> Dict[str, Any]:
+        """Matches either vector dictionaries, numeric arrays, or pcode op sequences."""
+        if isinstance(v1, dict) and "vector" in v1:
+            arr1 = np.array(v1["vector"], dtype=np.float32)
+            arr2 = np.array(v2["vector"], dtype=np.float32) if (isinstance(v2, dict) and "vector" in v2) else np.array(v2, dtype=np.float32)
+            n1 = float(np.linalg.norm(arr1))
+            n2 = float(np.linalg.norm(arr2))
+            cos = float(np.dot(arr1, arr2) / (n1 * n2)) if (n1 > 1e-12 and n2 > 1e-12) else 0.0
+            cos = max(-1.0, min(1.0, cos))
+            return {
+                "similarity": round(cos, 4),
+                "is_match": cos >= cls.MATCH_THRESHOLD,
+                "confidence": "HIGH" if cos >= cls.HIGH_CONFIDENCE_THRESHOLD else ("MEDIUM" if cos >= cls.MATCH_THRESHOLD else "NO_MATCH")
+            }
+        elif isinstance(v1, list) and v1 and isinstance(v1[0], dict) and "opcode" in v1[0]:
+            return cls.match(v1, v2)
+        elif isinstance(v1, (list, np.ndarray)):
+            arr1 = np.array(v1, dtype=np.float32)
+            arr2 = np.array(v2, dtype=np.float32)
+            n1 = float(np.linalg.norm(arr1))
+            n2 = float(np.linalg.norm(arr2))
+            cos = float(np.dot(arr1, arr2) / (n1 * n2)) if (n1 > 1e-12 and n2 > 1e-12) else 0.0
+            cos = max(-1.0, min(1.0, cos))
+            return {
+                "similarity": round(cos, 4),
+                "is_match": cos >= cls.MATCH_THRESHOLD,
+                "confidence": "HIGH" if cos >= cls.HIGH_CONFIDENCE_THRESHOLD else ("MEDIUM" if cos >= cls.MATCH_THRESHOLD else "NO_MATCH")
+            }
+        return cls.match(v1, v2)
 
     @classmethod
     def match(
@@ -635,6 +679,15 @@ class PcodeDeobfuscator:
             "prunable_operations": sorted(list(dead_op_indices)),
             "is_obfuscated": len(detected_predicates) > 0
         }
+
+    @classmethod
+    def analyze_function(
+        cls,
+        pcode_ops: List[Dict[str, Any]],
+        basic_blocks: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """Analyzes a P-code function for opaque predicates, dead code, and dispatcher cascades."""
+        return cls.detect_opaque_predicates(pcode_ops, basic_blocks)
 
 
 # ============================================================================

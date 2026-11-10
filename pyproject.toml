@@ -31,7 +31,7 @@ rea-mcp = "mcp_server:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = ["cli", "binary_neural_engine", "rea_neural_engine", "sensory_cortex", "ghidra_pcode_vectorizer", "mcp_server"]
+py-modules = ["cli", "binary_neural_engine", "rea_neural_engine", "sensory_cortex", "ghidra_pcode_vectorizer", "ghidra_live_bridge", "mcp_server"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

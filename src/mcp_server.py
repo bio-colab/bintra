@@ -32,6 +32,7 @@ try:
         SensoryCortex,
     )
     from rea_neural_engine import (
+        SafetensorsHandler,
         SubspaceAnalyzer,
         CircuitDecompiler,
         WeightPatcher,
@@ -801,6 +802,35 @@ class ReaMcpServer:
             "tools/call": self.handle_tools_call,
             "ping": self.handle_ping,
         }
+        self._tool_schemas = {
+            t["name"]: t.get("inputSchema", {})
+            for t in TOOLS_REGISTRY
+        }
+
+    def _validate_tool_arguments(self, tool_name: str, args: Any) -> None:
+        """Validates tool arguments against the declared JSON inputSchema."""
+        if args is None:
+            args = {}
+        if not isinstance(args, dict):
+            raise ValueError(f"Invalid arguments for '{tool_name}': expected JSON object matching inputSchema.")
+        schema = self._tool_schemas.get(tool_name)
+        if not schema:
+            return
+        required = schema.get("required", [])
+        missing = [req for req in required if req not in args or args[req] is None]
+        if missing:
+            raise ValueError(
+                f"Missing required parameter(s) for '{tool_name}': {', '.join(missing)}."
+            )
+        props = schema.get("properties", {})
+        for key, val in args.items():
+            if key in props and val is not None:
+                allowed = props[key].get("enum")
+                if allowed and val not in allowed:
+                    raise ValueError(
+                        f"Invalid value for parameter '{key}' in '{tool_name}': "
+                        f"expected one of {allowed}, got {val!r}."
+                    )
 
     def handle_initialize(self, params: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -908,6 +938,7 @@ class ReaMcpServer:
                     metadata=req_metadata
                 )
 
+                self._validate_tool_arguments(tool_name, args)
                 result_data = self.dispatch_tool(tool_name, args)
                 return {
                     "content": [
@@ -920,10 +951,11 @@ class ReaMcpServer:
                 }
         except Exception as exc:
             tb = traceback.format_exc()
+            err_msg = f"Missing required parameter: {exc}" if isinstance(exc, KeyError) else str(exc)
             err_payload = {
                 "status": "error",
                 "tool": tool_name,
-                "error": str(exc),
+                "error": err_msg,
             }
             if os.environ.get("REA_DEBUG") == "1":
                 err_payload["traceback"] = tb
@@ -947,7 +979,8 @@ class ReaMcpServer:
         elif name == "rea_deobfuscate_binary":
             code_hex = args.get("code_hex")
             file_path = args.get("file_path")
-            offset = args.get("offset")
+            raw_off = args.get("offset")
+            offset = int(str(raw_off), 0) if raw_off is not None else None
             length = int(args.get("length", 4096))
             if code_hex:
                 raw_bytes = bytes.fromhex(code_hex.replace(" ", "").replace("\n", ""))
@@ -959,7 +992,7 @@ class ReaMcpServer:
 
         elif name == "rea_dump_bytes":
             path = args["file_path"]
-            offset = int(args["offset"])
+            offset = int(str(args["offset"]), 0)
             length = int(args.get("length", 64))
             return SurgicalBinaryPatcher.read_bytes(path, offset, length)
 
@@ -986,7 +1019,7 @@ class ReaMcpServer:
                 access_mode="WRITE"
             )
 
-            offset = int(args["offset"])
+            offset = int(str(args["offset"]), 0)
             patch_hex = args["patch_hex"]
             force = bool(args.get("force", False))
             return SurgicalBinaryPatcher.patch_file(
@@ -1285,7 +1318,6 @@ class ReaMcpServer:
             if pid <= 0:
                 raise ValueError("Valid 'pid' (> 0) is required.")
             from windows_intelligence import ProcessMemoryScanner
-            scanner = ProcessMemoryScanner(pid=pid)
             val_type = args.get("value_type", "int32")
             mode = args.get("scan_mode", "exact")
             mode_map = {
@@ -1404,7 +1436,31 @@ class ReaMcpServer:
 
         elif name == "rea_wsp_audit":
             path = args["model_path"]
-            return WeightSecurityAuditor.audit_weights_without_evaluation(path)
+            hdr, _, hdr_sha = SafetensorsHandler.read_header(path)
+            t_names = [k for k in hdr.keys() if k != "__metadata__"]
+            if not t_names:
+                raise ValueError("No tensor weights found in safetensors model file.")
+            req_t = args.get("tensor")
+            primary_t = req_t if (req_t and req_t in t_names) else t_names[0]
+            arr, _ = SafetensorsHandler.read_tensor(path, primary_t)
+            eff_rank = CrossLayerCircuitAnalyzer.compute_effective_rank(arr)
+            amenability = AmenabilityDiagnostic.evaluate_surgical_amenability(arr)
+            sec_audit = WeightSecurityAuditor.audit_weights_without_evaluation(arr)
+            induction_report = None
+            if len(t_names) >= 2:
+                arr2, _ = SafetensorsHandler.read_tensor(path, t_names[1])
+                induction_report = CrossLayerCircuitAnalyzer.analyze_cross_layer_induction(arr, arr2, num_heads=4)
+            return {
+                "status": "success",
+                "model_path": path,
+                "header_sha256": hdr_sha,
+                "primary_tensor": primary_t,
+                "tensor_count": len(t_names),
+                "effective_rank_analysis": eff_rank,
+                "surgical_amenability": amenability,
+                "zero_eval_security_audit": sec_audit,
+                "cross_layer_induction": induction_report,
+            }
 
         elif name == "rea_patch_weights":
             src = args["source_path"]

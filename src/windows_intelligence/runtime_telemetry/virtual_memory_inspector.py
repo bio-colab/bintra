@@ -209,11 +209,12 @@ class ProcessMemoryRegion:
 class ProcessMemoryMapSnapshot:
     """Complete in-memory spatial representation of a process's virtual memory layout."""
 
-    def __init__(self, pid: int, process_name: str, architecture: str = "x86-64"):
+    def __init__(self, pid: int, process_name: str, architecture: str = "x86-64", is_simulated: bool = False):
         self.pid = pid
         self.process_name = process_name
         self.architecture = architecture
         self.timestamp = time.time()
+        self.is_simulated = is_simulated
         self.regions: List[ProcessMemoryRegion] = []
         self.modules: List[Dict[str, Any]] = []
 
@@ -336,6 +337,9 @@ class ProcessMemoryMapSnapshot:
 
     def to_dict(self, include_regions: bool = False) -> Dict[str, Any]:
         res = {
+            "status": "simulated" if self.is_simulated else "live",
+            "source": "synthetic" if self.is_simulated else "live",
+            "is_simulated": self.is_simulated,
             "pid": self.pid,
             "process_name": self.process_name,
             "architecture": self.architecture,
@@ -343,6 +347,8 @@ class ProcessMemoryMapSnapshot:
             "summary": self.compute_summary(),
             "module_count": len(self.modules),
         }
+        if self.is_simulated:
+            res["notice"] = "Non-Windows NT or unprivileged host environment; memory layout is synthetic/simulated."
         if include_regions:
             res["regions"] = [r.to_dict() for r in self.regions]
         return res
@@ -374,7 +380,12 @@ class VirtualMemoryInspector:
 
         if not cls._is_windows():
             # Graceful cross-platform synthetic fallback for CI/Linux
-            snapshot = ProcessMemoryMapSnapshot(pid=pid, process_name=f"simulated_{pid}.exe", architecture="x86-64")
+            snapshot = ProcessMemoryMapSnapshot(
+                pid=pid,
+                process_name=f"simulated_{pid}.exe",
+                architecture="x86-64",
+                is_simulated=True
+            )
             # Synthesize standard PE image + heap + stack regions for clean testing
             snapshot.add_region(ProcessMemoryRegion(0x140000000, 0x140000000, 0x1000, MEM_COMMIT, PAGE_READONLY, PAGE_READONLY, MEM_IMAGE, "IMAGE_HEADER", "target.exe"))
             snapshot.add_region(ProcessMemoryRegion(0x140001000, 0x140000000, 0x5000, MEM_COMMIT, PAGE_EXECUTE_READ, PAGE_EXECUTE_READ, MEM_IMAGE, "IMAGE_TEXT", "target.exe", section_name=".text"))
@@ -686,11 +697,12 @@ class VirtualMemoryInspector:
         pid: int,
         address: int,
         size: int
-    ) -> bytes:
+    ) -> Optional[bytes]:
         """
         Safely reads virtual memory bytes from a target process.
         Uses kernel32.ReadProcessMemory in bounded chunked blocks.
         Strictly read-only (PROCESS_VM_READ); governed by Capability.PROCESS_QUERY.
+        Returns None on non-Windows platforms or unmapped read failures, and raises PermissionError if OpenProcess fails.
         """
         ExecutionGuard.request_access(
             component="virtual_memory_inspector",
@@ -699,15 +711,18 @@ class VirtualMemoryInspector:
             capability=Capability.PROCESS_QUERY,
             access_mode="READ"
         )
-        if not cls._is_windows() or size <= 0:
+        if size <= 0:
             return b""
+        if not cls._is_windows():
+            return None
 
         k32 = ctypes.windll.kernel32
         h_proc = k32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
         if not h_proc:
             h_proc = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, False, pid)
         if not h_proc:
-            return b""
+            err = ctypes.GetLastError()
+            raise PermissionError(f"Failed to open process PID {pid} with PROCESS_VM_READ (Win32 Error: {err})")
 
         try:
             CHUNK_SIZE = 64 * 1024
@@ -736,6 +751,8 @@ class VirtualMemoryInspector:
                     ctypes.byref(bytes_read)
                 )
                 if not ok or bytes_read.value == 0:
+                    if len(out_buf) == 0:
+                        return None
                     out_buf.extend(b"\x00" * to_read)
                 else:
                     out_buf.extend(c_buf.raw[:bytes_read.value])
@@ -779,6 +796,26 @@ class ProcessMemoryScanner:
             access_mode="READ"
         )
         snap = VirtualMemoryInspector.inspect_process(pid)
+        if snap.is_simulated:
+            session_id = str(uuid.uuid4())[:8]
+            cls._ACTIVE_SESSIONS[session_id] = {
+                "session_id": session_id,
+                "pid": pid,
+                "data_type": data_type,
+                "candidates": [],
+                "created_at": time.time()
+            }
+            return {
+                "status": "not_applicable",
+                "is_simulated": True,
+                "notice": "Process memory scanning requires a live Windows NT host with PROCESS_VM_READ access.",
+                "session_id": session_id,
+                "pid": pid,
+                "data_type": data_type,
+                "scan_type": scan_type,
+                "total_candidates": 0,
+                "candidates_sample": []
+            }
         candidates: List[Dict[str, Any]] = []
 
         type_map = {
@@ -907,7 +944,7 @@ class ProcessMemoryScanner:
             addr = cand["address_int"]
             old_val = cand["value"]
             raw = VirtualMemoryInspector.read_process_memory(pid, addr, step)
-            if len(raw) < step:
+            if not raw or len(raw) < step:
                 continue
             (new_val,) = struct.unpack(fmt, raw)
             if isinstance(new_val, float):
@@ -968,6 +1005,16 @@ class PointerScanner:
             access_mode="READ"
         )
         snap = VirtualMemoryInspector.inspect_process(pid)
+        if snap.is_simulated:
+            return {
+                "status": "not_applicable",
+                "is_simulated": True,
+                "notice": "Pointer path resolution requires a live Windows NT process with PROCESS_VM_READ access.",
+                "pid": pid,
+                "target_address": f"0x{target_address:016X}",
+                "paths_count": 0,
+                "paths": []
+            }
         arch = snap.architecture
         ptr_size = 4 if arch == "x86-32" else 8
         fmt = "<I" if ptr_size == 4 else "<Q"
@@ -1078,6 +1125,18 @@ class StructureDissector:
             access_mode="READ"
         )
         snap = VirtualMemoryInspector.inspect_process(pid)
+        if snap.is_simulated:
+            return {
+                "status": "not_applicable",
+                "is_simulated": True,
+                "notice": "Structure dissection requires a live Windows NT process with PROCESS_VM_READ access.",
+                "pid": pid,
+                "base_address": f"0x{base_address:016X}",
+                "architecture": snap.architecture,
+                "fields_count": 0,
+                "fields": [],
+                "c_struct_definition": f"// Structure dissection unavailable on non-Windows environment for PID {pid}"
+            }
         arch = snap.architecture
         ptr_size = 4 if arch == "x86-32" else 8
         fmt = "<I" if ptr_size == 4 else "<Q"

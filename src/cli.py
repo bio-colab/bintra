@@ -61,7 +61,7 @@ Usage:
 Binary / Windows Executable Commands:
   inspect           Inspect PE32/PE32+/ELF headers, mitigations (ASLR/DEP/CFG), and sections
   deobfuscate       Detect and prune REX-aware opaque predicates & CFF dispatcher loops
-  match             Semantically match functions across compilers / architectures (x86-64 / ARM64)
+  match             Semantically match functions via raw hex bytes (--func1 / --func2 hex) across architectures (x86-64 / ARM64)
   patch-binary      Surgically patch a binary file on disk with stack proprioception & PE checksum
   scan-hybrid       Scan an executable for embedded neural logic (DirectML, WinML, ONNX, GGUF, TFLite)
 
@@ -70,7 +70,7 @@ Weight-Space / Neural Commands:
   decompile         Decompile attention heads, MLP projections, or LayerNorm drift into pseudocode
   patch-weights     Surgically patch a safetensors weight tensor without gradients
   diff-weights      Compare baseline and patched models with Frobenius diff
-  probe-trace       Probe temporal activation traces across token steps (Temporal Hearing)
+  probe-trace       Run seeded spectral SVD operator trace simulation across weight layers (Temporal Hearing)
   verify-behavior      Verify neural equilibrium and Lipschitz bounds (Vestibular Balance)
   wsp-audit            Run MIT CSAIL WSP audit (Effective Rank, Cross-Layer Induction, Amenability, Backdoors)
 
@@ -140,9 +140,25 @@ def main():
             else:
                 del sys.argv[idx]
 
-    from security import ExecutionGuard
-    with ExecutionGuard.scoped_session(target_binary_path=target_arg, workspace_dir=workspace_arg):
-        _dispatch_cli()
+    try:
+        from security import ExecutionGuard
+        with ExecutionGuard.scoped_session(target_binary_path=target_arg, workspace_dir=workspace_arg):
+            _dispatch_cli()
+    except SystemExit:
+        raise
+    except Exception as e:
+        err_payload = {
+            "status": "error",
+            "command": sys.argv[1] if len(sys.argv) > 1 else None,
+            "error_type": type(e).__name__,
+            "error": str(e),
+            "message": str(e)
+        }
+        if os.environ.get("REA_DEBUG") == "1":
+            import traceback
+            err_payload["traceback"] = traceback.format_exc()
+        print(json.dumps(err_payload, indent=2, ensure_ascii=False))
+        sys.exit(1)
 
 
 def _dispatch_cli():

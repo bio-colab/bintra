@@ -4,7 +4,7 @@ description: Master agent skill for REA-Neural v7.4.0. Autonomous, continuous se
 metadata:
   framework: rea-neural
   version: "7.4.0"
-  tool_count: 27
+  tool_count: 34
   subskills:
     - rea-binary-dissection
     - rea-safe-binary-patching
@@ -33,7 +33,7 @@ Depending on what the user asks for in natural language, navigate to the special
 
 ## 2. Global Safety Kernel Guardrails (Complete Mediation)
 
-All 27 MCP tools and CLI commands are strictly governed by the **Safety Kernel & ExecutionGuard**:
+All 34 MCP tools and CLI commands are strictly governed by the **Safety Kernel & ExecutionGuard**:
 
 1. **Target Immutability:** Never modify source binaries in-place. Passing identical source and destination paths raises `TargetMutationError(TARGET_WRITE_FORBIDDEN)`.
 2. **Workspace Confinement:** All outputs must be written inside a designated workspace directory (e.g. `./workspace/...`). Writing into the target's original directory raises `TARGET_DIRECTORY_WRITE_FORBIDDEN`.
@@ -42,9 +42,9 @@ All 27 MCP tools and CLI commands are strictly governed by the **Safety Kernel &
 
 ---
 
-## 3. Tool Matrix: The 27 Native MCP Tools
+## 3. Tool Matrix: The 34 Native MCP Tools
 
-REA-Neural exposes 27 type-safe tools over JSON-RPC 2.0 stdio (`rea-mcp`):
+REA-Neural exposes 34 type-safe tools over JSON-RPC 2.0 stdio (`rea-mcp`):
 
 ### Tier 1: Core Binary & Disassembly (13 Tools)
 - `rea_inspect_binary`: PE32/PE32+ headers, ASLR/DEP/CFG mitigations, sections, entropy.
@@ -76,6 +76,15 @@ REA-Neural exposes 27 type-safe tools over JSON-RPC 2.0 stdio (`rea-mcp`):
 - `rea_evidence_graph`: Formal directed Evidence Graph connecting binary, OS, and crash telemetry.
 - `rea_device_driver_intelligence`: Driver Store package matching and estimated driver rank.
 - `rea_process_resource_audit`: Restart Manager file locks, module holders, and process tree.
+
+### Tier 3: Runtime Telemetry, Crash RCA & Live Ghidra Bridge (7 Tools)
+- `rea_vad_inspect`: Passive virtual memory map (VAD) layout and address classification.
+- `rea_memory_scan`: Read-only First/Next Scan across process memory with `PROCESS_VM_READ`.
+- `rea_pointer_scan`: Multi-level backward pointer chain resolver to static module roots.
+- `rea_struct_dissect`: Runtime data structure field dissection and C struct reconstruction.
+- `rea_crash_rca`: Automated Crash Root Cause Analysis (MiniDump + Capstone + Register blame).
+- `rea_etw_capture`: Live ETW trace session capture and causal timeline correlation.
+- `rea_ghidra_live_bridge`: Localhost JSON-RPC bridge for bidirectional Ghidra annotation & P-Code analysis.
 
 ---
 

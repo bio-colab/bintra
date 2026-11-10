@@ -83,11 +83,14 @@ class CrashRootCauseAnalyzer:
 
         exc_name = exc_info.get("exception_name", "UNKNOWN_EXCEPTION")
         fault_module = exc_info.get("fault_module", "Unknown")
+        is_unmapped = bool(exc_info.get("is_unloaded_or_unmapped")) or fault_module in ("UNKNOWN_MODULE", "UNKNOWN_OR_UNLOADED_MODULE")
         fault_offset_str = exc_info.get("fault_offset", "0x0")
         try:
-            fault_rva = int(fault_offset_str, 16) if isinstance(fault_offset_str, str) else int(fault_offset_str)
+            parsed_offset = int(fault_offset_str, 16) if isinstance(fault_offset_str, str) else int(fault_offset_str)
         except ValueError:
-            fault_rva = 0
+            parsed_offset = 0
+        fault_rva = 0 if is_unmapped else parsed_offset
+        fault_va_str = exc_info.get("exception_address") or exc_info.get("fault_virtual_address") or hex(parsed_offset)
 
         registers = exc_info.get("thread_registers") or {}
         arch = registers.get("arch", "x64")
@@ -134,6 +137,8 @@ class CrashRootCauseAnalyzer:
             "exception_name": exc_name,
             "fault_module": fault_module,
             "fault_rva": f"0x{fault_rva:X}",
+            "fault_virtual_address": fault_va_str,
+            "is_unmapped_fault_address": is_unmapped,
             "architecture": arch,
             "access_type": access_type,
             "target_address": f"0x{target_vaddr:016X}",

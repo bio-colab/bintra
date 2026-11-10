@@ -21,9 +21,10 @@ Launch the native zero-dependency MCP server via stdio:
   }
 }
 ```
-Exposes **27 type-safe tools**:
+Exposes **34 type-safe tools**:
 - **Core Binary & Decompilation (13 Tools):** `rea_inspect_binary`, `rea_dump_bytes`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_scan_hybrid`, `rea_sensory_audit`, `rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`, `rea_wsp_audit`, `rea_patch_weights`.
 - **Windows System Intelligence & Forensics (14 Tools):** `rea_windows_env_audit`, `rea_resolve_dependencies`, `rea_inspect_crash_reports`, `rea_correlate_failure_evidence`, `rea_win_catalog_cmd`, `rea_registry_audit`, `rea_hardware_audit`, `rea_driver_audit`, `rea_service_audit`, `rea_dmp_inspect`, `rea_etw_audit`, `rea_evidence_graph`, `rea_device_driver_intelligence`, `rea_process_resource_audit`.
+- **Runtime Telemetry, Crash RCA & Live Ghidra Bridge (7 Tools):** `rea_vad_inspect`, `rea_memory_scan`, `rea_pointer_scan`, `rea_struct_dissect`, `rea_crash_rca`, `rea_etw_capture`, `rea_ghidra_live_bridge`.
 
 ### Modality 2: Unified CLI (`rea-neural`) -- Recommended for Terminal / Bash / PowerShell
 ```powershell

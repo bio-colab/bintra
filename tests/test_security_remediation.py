@@ -293,6 +293,14 @@ class TestSecurityRemediation(unittest.TestCase):
         self.assertFalse(res["is_semantic_match"])
         self.assertFalse(res["branch_topology_congruent"])
 
+    def test_self_update_check_command(self):
+        """Verifies that 'rea-neural update --check' executes cleanly and verifies remote HEAD."""
+        import subprocess
+        res = subprocess.run([sys.executable, "-m", "cli", "update", "--check"], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("Checking remote repository for updates", res.stdout)
+        self.assertIn("REA-Neural is already at the latest commit", res.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

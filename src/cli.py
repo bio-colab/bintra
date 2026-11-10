@@ -95,6 +95,9 @@ Windows System Intelligence & Failure Diagnostic Commands:
 
 Agent-Native MCP (Model Context Protocol):
   mcp               Launch native JSON-RPC 2.0 stdio MCP server for AI models (Claude, Antigravity, Cursor)
+
+Maintenance & Update Commands:
+  update            Check and automatically update REA-Neural to latest commit from GitHub (or 'self-update')
 """)
 
 
@@ -812,9 +815,98 @@ def _dispatch_cli():
 
         rea_neural_engine.main()
 
+    elif cmd in ("update", "self-update"):
+        _handle_update()
+
     else:
         print(f"Unknown command '{cmd}'. Run 'cli.py help' for usage.")
         sys.exit(1)
+
+
+def _handle_update() -> None:
+    parser = argparse.ArgumentParser(
+        prog="rea-neural update",
+        description="Automatically update REA-Neural to latest commit from GitHub"
+    )
+    parser.add_argument("--check", action="store_true", help="Check for available updates without applying them")
+    parser.add_argument("--branch", default="main", help="Target git branch (default: main)")
+    args = parser.parse_args(sys.argv[2:])
+
+    import subprocess
+    repo_dir = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
+    git_dir = os.path.join(repo_dir, ".git")
+
+    if os.path.isdir(git_dir):
+        try:
+            print(f"[*] Checking remote repository for updates (branch: '{args.branch}')...")
+            fetch_res = subprocess.run(
+                ["git", "fetch", "origin", args.branch],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True
+            )
+            if fetch_res.returncode != 0:
+                print(f"[-] Git fetch error: {fetch_res.stderr.strip()}")
+                sys.exit(1)
+
+            local_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_dir, text=True).strip()
+            remote_hash = subprocess.check_output(["git", "rev-parse", f"origin/{args.branch}"], cwd=repo_dir, text=True).strip()
+
+            if local_hash == remote_hash:
+                commit_title = subprocess.check_output(["git", "log", "-1", "--format=%s"], cwd=repo_dir, text=True).strip()
+                print(f"[+] REA-Neural is already at the latest commit: {local_hash[:7]} (\"{commit_title}\")")
+                return
+
+            incoming_commits = subprocess.check_output(
+                ["git", "log", f"HEAD..origin/{args.branch}", "--oneline"],
+                cwd=repo_dir,
+                text=True
+            ).strip()
+            print(f"[!] New updates available ({local_hash[:7]} -> {remote_hash[:7]}):\n")
+            for c_line in incoming_commits.splitlines():
+                print(f"    • {c_line}")
+            print()
+
+            if args.check:
+                print("[*] Update check completed. Run 'rea-neural update' to download and apply.")
+                return
+
+            print(f"[*] Pulling latest commits from origin/{args.branch}...")
+            pull_res = subprocess.run(
+                ["git", "pull", "--ff-only", "origin", args.branch],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True
+            )
+            if pull_res.returncode != 0:
+                print(f"[-] Fast-forward pull failed, trying standard merge: {pull_res.stderr.strip()}")
+                subprocess.run(["git", "pull", "origin", args.branch], cwd=repo_dir, check=True)
+
+            print("[*] Refreshing package entry points and dependencies...")
+            subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], cwd=repo_dir, check=True)
+
+            new_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_dir, text=True).strip()
+            new_title = subprocess.check_output(["git", "log", "-1", "--format=%s"], cwd=repo_dir, text=True).strip()
+            print(f"[+] Successfully updated REA-Neural to latest commit: {new_hash[:7]} (\"{new_title}\")")
+        except Exception as e:
+            print(f"[-] Automatic update failed: {e}")
+            sys.exit(1)
+    else:
+        if args.check:
+            print("[*] Package is installed without a local git working tree.")
+            print("[*] Run 'rea-neural update' to reinstall/upgrade directly from GitHub.")
+            return
+
+        print("[*] Updating REA-Neural via pip from official GitHub repository...")
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--upgrade", "git+https://github.com/bio-colab/rea-neural.git"],
+                check=True
+            )
+            print("[+] Successfully updated REA-Neural to latest remote version via pip!")
+        except Exception as e:
+            print(f"[-] Pip update failed: {e}")
+            sys.exit(1)
 
 
 if __name__ == "__main__":

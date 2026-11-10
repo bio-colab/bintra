@@ -973,8 +973,8 @@ class SemanticFunctionMatcher:
                 md = Cs(CS_ARCH_X86, CS_MODE_64)
                 raw_insns = list(md.disasm(b, 0))
                 bytes_decoded = sum(len(i.bytes) for i in raw_insns)
-                # If less than 70% of the byte buffer can be disassembled into valid instructions, it is non-code noise
-                if len(b) >= 8 and bytes_decoded < 0.70 * len(b):
+                # If less than 100% of the byte buffer can be disassembled into valid instructions, it is non-code noise or partial stream
+                if len(b) >= 8 and bytes_decoded < len(b):
                     return ["invalid"] * len(b)
 
                 insns = []
@@ -1089,7 +1089,7 @@ class SemanticFunctionMatcher:
                 md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
                 raw_insns = list(md.disasm(b, 0))
                 bytes_decoded = sum(len(i.bytes) for i in raw_insns)
-                if len(b) >= 8 and bytes_decoded < 0.70 * len(b):
+                if len(b) >= 8 and bytes_decoded < len(b):
                     return ["invalid"] * len(b)
 
                 insns = []
@@ -1168,7 +1168,11 @@ class SemanticFunctionMatcher:
             return vec
 
         invalid_ratio = insns.count("invalid") / total
-        if invalid_ratio > 0.35 and total > 2:
+        if invalid_ratio > 0.18 and total > 2:
+            return vec
+
+        has_flow = any(x in insns for x in ("ret", "jump", "call"))
+        if not has_flow and total >= 4:
             return vec
 
         vec[0] = insns.count("alu") / total
@@ -1221,19 +1225,26 @@ class SemanticFunctionMatcher:
         norm1 = np.linalg.norm(v1)
         norm2 = np.linalg.norm(v2)
         if norm1 < 1e-6 or norm2 < 1e-6:
-            similarity = 0.0
-            interpretation = "One or both functions contain insufficient valid instructions to form a behavioral vector."
+            return {
+                "cosine_similarity": 0.0,
+                "is_semantic_match": False,
+                "confidence": "LOW / NO MATCH",
+                "granularity_type": "OPERATIONAL_MIX_HISTOGRAM",
+                "branch_topology_congruent": False,
+                "scale_ratio": round(len_ratio, 4),
+                "interpretation": "One or both functions contain insufficient valid instructions to form a behavioral vector."
+            }
+
+        similarity = float(np.dot(v1, v2))
+        similarity = max(min(similarity, 1.0), 0.0)
+        if similarity >= 0.90:
+            interpretation = "Functions exhibit equivalent behavioral control and operational topology."
+        elif similarity >= 0.80:
+            interpretation = "Functions share similar opcode category distributions, but lack strict operational equivalence."
+        elif similarity >= 0.50:
+            interpretation = "Functions share moderate operational characteristics but differ in branch/register topology."
         else:
-            similarity = float(np.dot(v1, v2))
-            similarity = max(min(similarity, 1.0), 0.0)
-            if similarity >= 0.90:
-                interpretation = "Functions exhibit equivalent behavioral control and operational topology."
-            elif similarity >= 0.80:
-                interpretation = "Functions share similar opcode category distributions, but lack strict operational equivalence."
-            elif similarity >= 0.50:
-                interpretation = "Functions share moderate operational characteristics but differ in branch/register topology."
-            else:
-                interpretation = "Functions exhibit divergent computational patterns or non-code noise."
+            interpretation = "Functions exhibit divergent computational patterns or non-code noise."
 
         has_branch_1 = bool(v1[1] > 0.01)
         has_branch_2 = bool(v2[1] > 0.01)

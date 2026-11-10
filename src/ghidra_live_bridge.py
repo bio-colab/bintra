@@ -14,6 +14,7 @@ import json
 import time
 import uuid
 import socket
+import tempfile
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Any, List, Optional, Tuple, Callable
@@ -140,16 +141,19 @@ class GhidraLiveBridgeServer:
 
         # Write discovery marker
         self._marker_path = target_marker
-        try:
-            with open(target_marker, "w", encoding="utf-8") as f:
-                json.dump({
-                    "host": self.host,
-                    "port": self.port,
-                    "auth_token": self.auth_token,
-                    "url": f"http://{self.host}:{self.port}"
-                }, f, indent=2)
-        except Exception:
-            self._marker_path = None
+        self._temp_marker_path = os.path.join(tempfile.gettempdir(), ".rea_bridge.json")
+        marker_payload = {
+            "host": self.host,
+            "port": self.port,
+            "auth_token": self.auth_token,
+            "url": f"http://{self.host}:{self.port}"
+        }
+        for m_path in (target_marker, self._temp_marker_path):
+            try:
+                with open(m_path, "w", encoding="utf-8") as f:
+                    json.dump(marker_payload, f, indent=2)
+            except Exception:
+                pass
 
         return {
             "status": "running",
@@ -168,12 +172,14 @@ class GhidraLiveBridgeServer:
             self.httpd.server_close()
             self.httpd = None
 
-        if getattr(self, "_marker_path", None) and os.path.exists(self._marker_path):
-            try:
-                os.remove(self._marker_path)
-            except Exception:
-                pass
-            self._marker_path = None
+        for m_path in (getattr(self, "_marker_path", None), getattr(self, "_temp_marker_path", None)):
+            if m_path and os.path.exists(m_path):
+                try:
+                    os.remove(m_path)
+                except Exception:
+                    pass
+        self._marker_path = None
+        self._temp_marker_path = None
 
         return {
             "status": "stopped",
@@ -244,6 +250,21 @@ class GhidraLiveBridgeServer:
         elif method == "rea.inject_etw_timeline":
             timeline_report = params.get("timeline_report", {})
             return self.inject_etw_timeline(timeline_report)
+
+        elif method == "rea.inject_structure_dissection":
+            struct_report = params.get("struct_report", {})
+            return self.inject_structure_dissection(struct_report)
+
+        elif method == "rea.inject_pointer_chains":
+            pointer_report = params.get("pointer_report", {})
+            return self.inject_pointer_chains(pointer_report)
+
+        elif method in ("shutdown", "stop"):
+            def _delayed_stop():
+                time.sleep(0.1)
+                self.stop()
+            threading.Thread(target=_delayed_stop, daemon=True).start()
+            return {"status": "stopping", "port": self.port}
 
         else:
             raise ValueError(f"Unknown RPC method: '{method}'")
@@ -345,6 +366,104 @@ class GhidraLiveBridgeServer:
         })
         return {"status": "queued", "verdict": verdict}
 
+    def inject_structure_dissection(self, struct_report: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Translates a runtime Structure Dissection report into Ghidra annotations and composite data types:
+        1. Queues APPLY_DATA_STRUCTURE with reconstructed C declaration and fields.
+        2. Queues CREATE_BOOKMARK at structure base address (Category: REA_STRUCT_DISSECTION).
+        3. Queues SET_PROGRAM_NOTE with the full C struct code.
+        """
+        base_addr = struct_report.get("base_address", "0x0")
+        c_decl = struct_report.get("c_struct_definition", "")
+        fields = struct_report.get("fields", [])
+        size = struct_report.get("size_analyzed", 0)
+        clean_addr = str(base_addr).lower().replace("0x", "").lstrip("0") or "0"
+        struct_name = struct_report.get("structure_name") or f"Reconstructed_0x{clean_addr.upper()}"
+
+        # 1. Queue APPLY_DATA_STRUCTURE
+        self.queue_command("APPLY_DATA_STRUCTURE", {
+            "address": base_addr,
+            "name": struct_name,
+            "c_declaration": c_decl,
+            "fields": fields,
+            "size": size
+        })
+
+        # 2. Queue Bookmark
+        self.queue_command("CREATE_BOOKMARK", {
+            "address": base_addr,
+            "category": "REA_STRUCT_DISSECTION",
+            "description": f"Reconstructed struct {struct_name} ({len(fields)} fields, {size} bytes)"
+        })
+
+        # 3. Queue Program Note
+        self.queue_command("SET_PROGRAM_NOTE", {
+            "title": f"REA_STRUCT_{struct_name}",
+            "content": c_decl or f"// Reconstructed struct at {base_addr} ({len(fields)} fields)"
+        })
+
+        return {
+            "status": "queued",
+            "base_address": base_addr,
+            "structure_name": struct_name,
+            "fields_count": len(fields),
+            "actions_queued": 3
+        }
+
+    def inject_pointer_chains(self, pointer_report: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Translates a runtime Pointer Scan report into Ghidra annotations:
+        1. Plate comments and bookmarks at static module pointer roots.
+        2. Program Note summarizing all discovered multi-level pointer paths.
+        """
+        target_addr = pointer_report.get("target_address", "0x0")
+        paths = pointer_report.get("paths", [])
+        queued_count = 0
+
+        note_lines = [
+            f"[REA-Neural Pointer Scanner Paths]: Target = {target_addr}",
+            f"Discovered Paths Count: {len(paths)}",
+            "-----------------------------------------------------------------"
+        ]
+
+        for p in paths[:10]:
+            rva = p.get("base_rva", "0x0")
+            expr = p.get("expression", "")
+            mod = p.get("base_module", "target.exe")
+            offsets = p.get("offsets", [])
+            depth = p.get("depth", 1)
+
+            note_lines.append(f"Depth {depth}: {expr} => {target_addr}")
+
+            # 1. Queue Plate comment at static base RVA
+            self.queue_command("SET_PLATE_COMMENT", {
+                "address": rva,
+                "comment": f"[REA Pointer Root]: Points to target {target_addr}\nExpression: {expr}\nModule: {mod}"
+            })
+
+            # 2. Queue Bookmark at static base RVA
+            self.queue_command("CREATE_BOOKMARK", {
+                "address": rva,
+                "category": "REA_POINTER_ROOT",
+                "description": f"Root for {target_addr} via {expr}"
+            })
+            queued_count += 2
+
+        if paths:
+            clean_tgt = str(target_addr).replace("0x", "")
+            self.queue_command("SET_PROGRAM_NOTE", {
+                "title": f"REA_POINTER_PATHS_{clean_tgt}",
+                "content": "\n".join(note_lines)
+            })
+            queued_count += 1
+
+        return {
+            "status": "queued",
+            "target_address": target_addr,
+            "paths_queued": len(paths[:10]),
+            "actions_queued": queued_count
+        }
+
 
 class GhidraLiveBridgeClient:
     """Python client for interacting with a running GhidraLiveBridgeServer."""
@@ -377,6 +496,38 @@ class GhidraLiveBridgeClient:
                 raise RuntimeError(f"Ghidra Bridge Error [{res_obj['error'].get('code')}]: {res_obj['error'].get('message')}")
             return res_obj.get("result")
 
+    def ping(self) -> Dict[str, Any]:
+        return self.call_rpc("ping")
+
+    def get_status(self) -> Dict[str, Any]:
+        return self.call_rpc("get_status")
+
+    def register_client(self, program_name: str, image_base: str, architecture: str, ghidra_version: str = "12.x") -> Dict[str, Any]:
+        return self.call_rpc("ghidra.register_client", {
+            "program_name": program_name,
+            "image_base": image_base,
+            "architecture": architecture,
+            "ghidra_version": ghidra_version
+        })
+
+    def poll_commands(self) -> Dict[str, Any]:
+        return self.call_rpc("ghidra.poll_commands")
+
+    def inject_crash_rca(self, rca_report: Dict[str, Any]) -> Dict[str, Any]:
+        return self.call_rpc("rea.inject_crash_rca", {"rca_report": rca_report})
+
+    def inject_vad_snapshot(self, vad_snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        return self.call_rpc("rea.inject_vad_snapshot", {"vad_snapshot": vad_snapshot})
+
+    def inject_etw_timeline(self, timeline_report: Dict[str, Any]) -> Dict[str, Any]:
+        return self.call_rpc("rea.inject_etw_timeline", {"timeline_report": timeline_report})
+
+    def inject_structure_dissection(self, struct_report: Dict[str, Any]) -> Dict[str, Any]:
+        return self.call_rpc("rea.inject_structure_dissection", {"struct_report": struct_report})
+
+    def inject_pointer_chains(self, pointer_report: Dict[str, Any]) -> Dict[str, Any]:
+        return self.call_rpc("rea.inject_pointer_chains", {"pointer_report": pointer_report})
+
 
 _GLOBAL_BRIDGE_SERVER: Optional[GhidraLiveBridgeServer] = None
 
@@ -396,12 +547,41 @@ def get_active_bridge() -> Optional[GhidraLiveBridgeServer]:
     return _GLOBAL_BRIDGE_SERVER
 
 
-def stop_active_bridge() -> Dict[str, Any]:
-    """Stops the running bridge server if active."""
+def resolve_bridge_marker() -> Optional[Dict[str, Any]]:
+    """Resolves active bridge discovery marker from system tempdir, workspace, or home."""
+    scope = ExecutionGuard.get_current_scope()
+    ws_dir = scope.workspace_dir if scope else os.path.abspath(".")
+    candidates = [
+        os.path.join(tempfile.gettempdir(), ".rea_bridge.json"),
+        os.path.join(ws_dir, ".rea_bridge.json"),
+        os.path.join(os.getcwd(), ".rea_bridge.json"),
+        os.path.expanduser("~/.rea_bridge.json")
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            try:
+                with open(c, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+    return None
+
+
+def stop_active_bridge(port: Optional[int] = None, auth_token: Optional[str] = None) -> Dict[str, Any]:
+    """Stops the running bridge server locally or across process boundaries via RPC shutdown."""
     global _GLOBAL_BRIDGE_SERVER
     if _GLOBAL_BRIDGE_SERVER and _GLOBAL_BRIDGE_SERVER.is_running:
         res = _GLOBAL_BRIDGE_SERVER.stop()
         _GLOBAL_BRIDGE_SERVER = None
         return res
-    return {"status": "not_running"}
+
+    marker = resolve_bridge_marker()
+    target_port = port or (marker.get("port") if marker else DEFAULT_BRIDGE_PORT)
+    token = auth_token or (marker.get("auth_token") if marker else None)
+
+    try:
+        client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{target_port}", auth_token=token)
+        return client.call_rpc("shutdown")
+    except Exception as e:
+        return {"status": "not_running", "error": str(e)}
 

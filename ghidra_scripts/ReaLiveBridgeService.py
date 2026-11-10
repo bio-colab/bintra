@@ -13,6 +13,7 @@ import os
 import sys
 import json
 import time
+import tempfile
 
 try:
     import urllib.request as urllib_req
@@ -40,8 +41,13 @@ def log_err(msg):
 
 
 def resolve_bridge_config():
-    """Locates .rea_bridge.json marker in working tree or user home."""
+    """Locates .rea_bridge.json marker in working tree, temp, or user home, or env override."""
+    env_url = os.environ.get("REA_BRIDGE_URL")
+    if env_url:
+        return env_url, os.environ.get("REA_BRIDGE_TOKEN", "")
+
     candidates = [
+        os.path.join(tempfile.gettempdir(), ".rea_bridge.json"),
         os.path.join(os.getcwd(), ".rea_bridge.json"),
         os.path.expanduser("~/.rea_bridge.json"),
     ]
@@ -155,10 +161,72 @@ def apply_command(prog, cmd):
         new_name = details.get("new_name")
         if addr and new_name:
             func = prog.getFunctionManager().getFunctionAt(addr)
+            if not func:
+                func = prog.getFunctionManager().getFunctionContaining(addr)
             if func:
                 from ghidra.program.model.symbol import SourceType
                 func.setName(new_name, SourceType.USER_DEFINED)
-                log_msg(f"Renamed function at {addr.toString()} -> '{new_name}'")
+                log_msg(f"Renamed function at {addr.toString()} (entry: {func.getEntryPoint().toString()}) -> '{new_name}'")
+            else:
+                log_msg(f"No function found containing {addr.toString()} to rename.")
+
+    elif action == "APPLY_DATA_STRUCTURE":
+        addr = _resolve_addr(details.get("address"))
+        struct_name = details.get("name", "ReaReconstructedStruct")
+        c_decl = details.get("c_declaration", "")
+        fields = details.get("fields", [])
+        size = details.get("size", 0)
+
+        # 1. Apply Plate Comment at structure base address
+        if addr:
+            cu = listing.getCodeUnitAt(addr)
+            if cu:
+                from ghidra.program.model.listing import CodeUnit
+                comment = f"[REA Reconstructed Structure: {struct_name}] ({len(fields)} fields, {size} bytes)\n{c_decl}"
+                cu.setComment(CodeUnit.PLATE_COMMENT, comment)
+                log_msg(f"Applied Structure Plate Comment at {addr.toString()}")
+
+        # 2. Add Composite Structure in Ghidra DataTypeManager if available
+        try:
+            from ghidra.program.model.data import (
+                StructureDataType, ByteDataType, DWordDataType,
+                QWordDataType, PointerDataType
+            )
+            dtm = prog.getDataTypeManager()
+            struct_dt = StructureDataType(struct_name, 0)
+            for f_info in fields:
+                offset = f_info.get("offset_bytes", 0)
+                if isinstance(offset, str):
+                    offset = int(offset, 16) if offset.startswith("0x") else int(offset)
+                f_type_str = f_info.get("inferred_type", "uint8")
+                f_comment = f_info.get("description", "")
+                f_name = f"field_0x{offset:X}"
+
+                if "void*" in f_type_str or "ptr" in f_type_str.lower():
+                    dt = PointerDataType()
+                elif "64" in f_type_str:
+                    dt = QWordDataType()
+                elif "32" in f_type_str or "float" in f_type_str:
+                    dt = DWordDataType()
+                else:
+                    dt = ByteDataType()
+
+                struct_dt.insertAtOffset(offset, dt, dt.getLength(), f_name, f_comment)
+
+            added_dt = dtm.addDataType(struct_dt, None)
+            log_msg(f"Created DataTypeManager structure: {added_dt.getName()} ({added_dt.getLength()} bytes)")
+        except Exception as dt_err:
+            log_msg(f"DataTypeManager notice (running headless/fallback): {dt_err}")
+
+    elif action == "SET_POINTER_CHAIN":
+        addr = _resolve_addr(details.get("address"))
+        comment = details.get("comment", "")
+        if addr:
+            cu = listing.getCodeUnitAt(addr)
+            if cu:
+                from ghidra.program.model.listing import CodeUnit
+                cu.setComment(CodeUnit.EOL_COMMENT, comment)
+                log_msg(f"Applied Pointer Chain EOL comment at {addr.toString()}")
 
 
 def run():

@@ -1,8 +1,9 @@
 # Ghidra Integration Architecture & Operational Guide (v7.4.0)
 
 ## Overview
-REA-Neural provides **file-exchange + headless orchestration** integration with Ghidra (target 12.1.x / 11.x, **unverified**).
-> **Honest status (aligned with `README.md`):** there is **no live TCP/socket bridge** to a running Ghidra instance. What ships is: (a) in-engine scripts (`ghidra_scripts/ReaNeuralGhidraBridge.java`, `rea_extract_pcode.py`), (b) a headless orchestrator (`cli.py ghidra-headless`) that launches `analyzeHeadless.bat` with the bridge as a `-postScript`, and (c) a P-code vectorizer/matcher plus an annotation **plan generator** (`cli.py ghidra-analyze`) that consumes exported JSON. The 6-step cycle below is the DESIGN; and `ReaNeuralGhidraBridge.java` integrates end-to-end: extracting High P-Code / CFG to JSON, invoking `cli.py ghidra-analyze`, and applying the mutation plan to the Program Database.
+REA-Neural provides two complementary integration architectures with Ghidra (target 12.1.x / 11.x):
+1. **Live Bidirectional IPC Bridge (`ghidra_live_bridge.py` & `ReaLiveBridgeService.py`):** Real-time, authenticated localhost JSON-RPC 2.0 communication daemon at `127.0.0.1:41718`. Continuously injects Crash RCA root-cause attributions, VAD memory maps, reconstructed C data structures, multi-level pointer scan paths, and ETW temporal causality timelines directly into an open Ghidra session.
+2. **File-Exchange + Headless Orchestration (`ReaNeuralGhidraBridge.java` & `cli.py ghidra-headless`):** Automates offline batch deobfuscation, High P-Code extraction, and mutation plan generation via Ghidra's `analyzeHeadless.bat`.
 
 ---
 
@@ -48,20 +49,55 @@ sequenceDiagram
 
 ---
 
-## Shipped Components in `ghidra_scripts/`
+## Shipped Components in `ghidra_scripts/` and `src/`
 
 | Component | File Path | Description |
 |:---|:---|:---|
-| **Native Java Bridge** | [`ghidra_scripts/ReaNeuralGhidraBridge.java`](file:///D:/rea-neural/ghidra_scripts/ReaNeuralGhidraBridge.java) | Zero-external-dependency Java `GhidraScript`. Compiles and runs directly in Ghidra 11.x and 12.1.4+. Features full GUI confirmation dialogs and atomic database transactions. |
+| **Live Bridge Daemon** | [`src/ghidra_live_bridge.py`](file:///D:/rea-neural/src/ghidra_live_bridge.py) | Localhost JSON-RPC 2.0 bridge server and client with token authentication and auto-discovery. |
+| **Ghidra Live Service** | [`ghidra_scripts/ReaLiveBridgeService.py`](file:///D:/rea-neural/ghidra_scripts/ReaLiveBridgeService.py) | Python/PyGhidra background script polling the bridge and committing atomic Ghidra transactions. |
+| **Native Java Bridge** | [`ghidra_scripts/ReaNeuralGhidraBridge.java`](file:///D:/rea-neural/ghidra_scripts/ReaNeuralGhidraBridge.java) | Zero-external-dependency Java `GhidraScript` for offline P-Code extraction and batch mutation. |
 | **Python / PyGhidra Bridge** | [`ghidra_scripts/rea_extract_pcode.py`](file:///D:/rea-neural/ghidra_scripts/rea_extract_pcode.py) | Python variant for Jython / PyGhidra headless environments. |
 | **CLI Analysis Engine** | `python src/cli.py ghidra-analyze` | Batch-processes exported Ghidra JSON files, runs algebraic deobfuscation, and outputs mutation plans. |
 | **Headless CLI Orchestrator** | `python src/cli.py ghidra-headless` | Wraps Ghidra's `analyzeHeadless.bat` into a single, automated REA command for Windows. |
+| **Bridge CLI Controller** | `python src/cli.py ghidra-bridge` | Manages bridge daemon (`--start`, `--daemon`, `--stop`, `--status`) and diagnostic injection. |
 
 ---
 
 ## Usage Guide
 
-### Method A: Inside Ghidra GUI (Interactive)
+### Method D: Live Bidirectional Socket Bridge (Real-Time IPC)
+1. **Launch REA-Neural Bridge Daemon:**
+   ```powershell
+   # Foreground mode:
+   python src/cli.py ghidra-bridge --start --port 41718
+
+   # Or background detached daemon:
+   python src/cli.py ghidra-bridge --daemon --port 41718
+   ```
+2. **Start Service in Ghidra GUI:**
+   - In Ghidra, open **Script Manager** -> category `REA-Neural`.
+   - Run `ReaLiveBridgeService.py`.
+   - The script auto-discovers `.rea_bridge.json` in temp or workspace and connects.
+3. **Stream Live Diagnostics from REA to Ghidra:**
+   ```powershell
+   # Inject Crash RCA from MiniDump:
+   python src/cli.py ghidra-bridge --annotate-crash crash.dmp
+
+   # Inject VAD Memory Layout from live process:
+   python src/cli.py ghidra-bridge --annotate-vad 1234
+
+   # Dissect runtime structure and inject C composite struct into DataTypeManager:
+   python src/cli.py ghidra-bridge --annotate-struct 1234 --addr 0x7FF71000
+
+   # Resolve multi-level pointer chains and annotate static roots:
+   python src/cli.py ghidra-bridge --annotate-pointers 1234 --addr 0x7FF71000
+   ```
+4. **Stop the Bridge Server:**
+   ```powershell
+   python src/cli.py ghidra-bridge --stop
+   ```
+
+### Method A: Inside Ghidra GUI (Interactive Batch)
 1. In Ghidra, open the **Script Manager** (`Window` -> `Script Manager`).
 2. Click the **Script Directories** icon and add the path: `C:\path\to\rea-neural\ghidra_scripts`.
 3. Filter by category `REA-Neural`.

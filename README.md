@@ -50,11 +50,12 @@ Modern Windows applications (games, anti-cheat, endpoint security clients, media
 - **Selective Column Surgery:** Intervenes in linear projection matrices (`column_direction_subtract`) at extreme sparsity (editing top-$K$ columns, e.g. 1.56% of weights for 64 of 4096 columns) to eliminate pathological looping or bypass deadlocks without retraining.
 - **Cross-Layer Induction & Effective Rank:** Evaluates cross-layer composition ($W_{QK}^{(l_2)} W_{OV}^{(l_1)}$) and spectral effective rank to infer alphabet and structural data complexity without running model text.
 
-### 5. Symbiotic Ghidra Integration (High P-Code Vectorization & Windows Mutation)
-Rather than treating Ghidra as a detached external decompiler, `REA-Neural` is designed to feed and complement Ghidra. Current status: the repository ships the P-code vectorizer/matcher and an annotation **plan generator** only; it does **not** yet include a live transport/bridge to Ghidra (see `skills/reverse-engineer-anything/references/ghidra-bridge-status.md`). Target Ghidra version: 12.1.x (unverified).
+### 5. Symbiotic Ghidra Integration (High P-Code Vectorization & Live Bidirectional Bridge)
+Rather than treating Ghidra as a detached external decompiler, `REA-Neural` directly feeds and complements Ghidra through a bidirectional, authenticated localhost JSON-RPC 2.0 bridge daemon (`ghidra_live_bridge.py` & `ReaLiveBridgeService.py`):
+- **Live Bidirectional IPC Bridge:** Localhost transport (`127.0.0.1:41718`) protected by capability tokens and auto-discovery markers (`.rea_bridge.json`). Allows seamless background daemon operation (`--daemon`), remote status inspection, and cross-process shutdown.
+- **Dynamic Diagnostic Injection:** Streams Phase 1 VAD memory layout notes, Phase 1.5 runtime structure dissections (auto-synthesized C composite structs registered in Ghidra's `DataTypeManager`) and pointer scan paths, Phase 2 Crash RCA root-cause bookmarks and function renames, and Phase 3 ETW temporal causality timelines directly into the active Ghidra Program Database.
 - **High P-Code IR Vectorization:** Translates Ghidra's SSA P-code operations into 64-dimensional continuous behavioral vectors, achieving $>95\%$ cross-architecture semantic matching invariant to compiler registers or optimizations.
 - **Pre-Decompiler Opaque Predicate Pruning:** Simplifies algebraic dead-end branches before AST construction, eliminating decompiler timeouts and sprawling control-flow flattening dispatcher cascades.
-- **Windows Database Mutation (plan generation):** Generates JSON-RPC **plans** for function renaming (`set_address_name`), prototype injection (`annotate_native_function`), and C-structure type synthesis. Applying a plan requires an external Ghidra-side script; REA-Neural does not open a TCP connection itself.
 
 ---
 

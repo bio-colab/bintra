@@ -1045,10 +1045,16 @@ def _dispatch_cli():
             parser.add_argument("--start", action="store_true", help="Start the bridge server daemon")
             parser.add_argument("--stop", action="store_true", help="Stop the running bridge server daemon")
             parser.add_argument("--status", action="store_true", help="Check status of the bridge daemon")
+            parser.add_argument("--daemon", action="store_true", help="Launch bridge server as a detached background daemon process")
             parser.add_argument("--port", type=int, default=41718, help="Bridge port (default: 41718)")
             parser.add_argument("--token", default=None, help="Optional authentication token")
             parser.add_argument("--annotate-crash", default=None, help="MiniDump (.dmp) file to analyze and inject into Ghidra")
             parser.add_argument("--annotate-vad", type=int, default=None, help="Process ID to inspect VAD layout and inject into Ghidra")
+            parser.add_argument("--annotate-struct", default=None, help="PID or JSON report path to dissect structure and inject into Ghidra")
+            parser.add_argument("--annotate-pointers", default=None, help="PID or JSON report path to resolve pointer chains and inject into Ghidra")
+            parser.add_argument("--addr", default=None, help="Target address in hex (e.g. 0x140001000) for struct or pointer scan")
+            parser.add_argument("--size", type=int, default=128, help="Size in bytes for structure dissection (default: 128)")
+            parser.add_argument("--depth", type=int, default=2, help="Max pointer scan depth (default: 2)")
             parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
             args = parser.parse_args(sys.argv[2:])
 
@@ -1058,8 +1064,32 @@ def _dispatch_cli():
             )
 
             if args.stop:
-                res = stop_active_bridge()
+                res = stop_active_bridge(port=args.port, auth_token=args.token)
                 print(json.dumps(res, indent=2))
+                return
+
+            if args.daemon:
+                import subprocess
+                daemon_cmd = [
+                    sys.executable,
+                    os.path.abspath(sys.argv[0]),
+                    "ghidra-bridge",
+                    "--start",
+                    "--port", str(args.port)
+                ]
+                if args.token:
+                    daemon_cmd.extend(["--token", args.token])
+                DETACHED_PROCESS = 0x00000008
+                CREATE_NEW_PROCESS_GROUP = 0x00000200
+                flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+                proc = subprocess.Popen(
+                    daemon_cmd,
+                    creationflags=flags,
+                    close_fds=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                print(f"[+] Launched REA-Neural Ghidra Bridge background daemon (PID {proc.pid}) on http://127.0.0.1:{args.port}")
                 return
 
             if args.status:
@@ -1103,19 +1133,67 @@ def _dispatch_cli():
                         print(json.dumps({"status": "error", "message": f"Bridge communication error: {e}"}, indent=2))
                 return
 
-            # Default / --start: start bridge server
+            if args.annotate_struct:
+                if os.path.isfile(args.annotate_struct):
+                    with open(args.annotate_struct, "r", encoding="utf-8") as f:
+                        struct_rep = json.load(f)
+                else:
+                    target_pid = int(args.annotate_struct)
+                    if not args.addr:
+                        print(json.dumps({"status": "error", "message": "--addr is required when --annotate-struct is a PID"}, indent=2))
+                        return
+                    base_addr = int(args.addr, 16) if args.addr.lower().startswith("0x") else int(args.addr)
+                    from windows_intelligence import StructureDissector
+                    struct_rep = StructureDissector.dissect(target_pid, base_addr, size=args.size)
+
+                client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
+                try:
+                    inj = client.call_rpc("rea.inject_structure_dissection", {"struct_report": struct_rep})
+                    print(json.dumps(inj, indent=2, ensure_ascii=False))
+                except Exception as e:
+                    act = get_active_bridge()
+                    if act and act.is_running:
+                        inj = act.inject_structure_dissection(struct_rep)
+                        print(json.dumps(inj, indent=2, ensure_ascii=False))
+                    else:
+                        print(json.dumps({"status": "error", "message": f"Bridge communication error: {e}"}, indent=2))
+                return
+
+            if args.annotate_pointers:
+                if os.path.isfile(args.annotate_pointers):
+                    with open(args.annotate_pointers, "r", encoding="utf-8") as f:
+                        ptr_rep = json.load(f)
+                else:
+                    target_pid = int(args.annotate_pointers)
+                    if not args.addr:
+                        print(json.dumps({"status": "error", "message": "--addr is required when --annotate-pointers is a PID"}, indent=2))
+                        return
+                    target_addr = int(args.addr, 16) if args.addr.lower().startswith("0x") else int(args.addr)
+                    from windows_intelligence import PointerScanner
+                    ptr_rep = PointerScanner.find_pointer_paths(target_pid, target_addr, max_depth=args.depth)
+
+                client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
+                try:
+                    inj = client.call_rpc("rea.inject_pointer_chains", {"pointer_report": ptr_rep})
+                    print(json.dumps(inj, indent=2, ensure_ascii=False))
+                except Exception as e:
+                    act = get_active_bridge()
+                    if act and act.is_running:
+                        inj = act.inject_pointer_chains(ptr_rep)
+                        print(json.dumps(inj, indent=2, ensure_ascii=False))
+                    else:
+                        print(json.dumps({"status": "error", "message": f"Bridge communication error: {e}"}, indent=2))
+                return
+
+            # Default / --start: start bridge server in foreground
             server = get_or_create_bridge(port=args.port, auth_token=args.token)
             print(f"[*] REA-Neural Ghidra Live Bridge running on http://127.0.0.1:{server.port}")
             print(f"[*] Auth Token: {server.auth_token}")
             print(f"[*] Marker File: {getattr(server, '_marker_path', 'None')}")
-            if not args.start:
-                print("[*] Bridge started. Exiting immediate mode.")
-                return
-
             print("[*] Press Ctrl+C to shutdown bridge server...")
             try:
                 while server.is_running:
-                    time.sleep(1.0)
+                    time.sleep(0.5)
             except KeyboardInterrupt:
                 print("\n[*] Stopping Ghidra Live Bridge...")
                 server.stop()

@@ -231,6 +231,190 @@ class TestGhidraLiveBridge(unittest.TestCase):
         data_stop = json.loads(res_stop["content"][0]["text"])
         self.assertEqual(data_stop.get("status"), "stopped")
 
+    def test_structure_dissection_injection(self):
+        """Verifies structure dissection injection queues composite struct, bookmark, and note."""
+        server = GhidraLiveBridgeServer(port=0, auth_token="tok-struct-1")
+        server.start()
+        try:
+            struct_mock = {
+                "pid": 1337,
+                "base_address": "0x00007FF712340000",
+                "structure_name": "EntityActor",
+                "size_analyzed": 64,
+                "fields_count": 3,
+                "fields": [
+                    {"offset": "0x0", "offset_bytes": 0, "inferred_type": "void**", "description": "vtable"},
+                    {"offset": "0x8", "offset_bytes": 8, "inferred_type": "int32_t", "description": "health"},
+                    {"offset": "0x10", "offset_bytes": 16, "inferred_type": "void*", "description": "p_name"}
+                ],
+                "c_struct_definition": "struct EntityActor {\n    void** vtable;\n    int32_t health;\n    void* p_name;\n};"
+            }
+            res = server.inject_structure_dissection(struct_mock)
+            self.assertEqual(res["status"], "queued")
+            self.assertEqual(res["structure_name"], "EntityActor")
+            self.assertEqual(res["actions_queued"], 3)
+
+            # Client polling
+            client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{server.port}", auth_token="tok-struct-1")
+            poll = client.poll_commands()
+            cmds = poll["commands"]
+            self.assertEqual(len(cmds), 3)
+
+            action_types = [c["action"] for c in cmds]
+            self.assertIn("APPLY_DATA_STRUCTURE", action_types)
+            self.assertIn("CREATE_BOOKMARK", action_types)
+            self.assertIn("SET_PROGRAM_NOTE", action_types)
+
+            apply_cmd = [c for c in cmds if c["action"] == "APPLY_DATA_STRUCTURE"][0]
+            self.assertEqual(apply_cmd["details"]["name"], "EntityActor")
+            self.assertEqual(len(apply_cmd["details"]["fields"]), 3)
+        finally:
+            server.stop()
+
+    def test_pointer_chains_injection(self):
+        """Verifies multi-level pointer scan path injection into Ghidra."""
+        server = GhidraLiveBridgeServer(port=0, auth_token="tok-ptr-1")
+        server.start()
+        try:
+            pointer_mock = {
+                "pid": 2048,
+                "target_address": "0x00007FF799990000",
+                "paths_count": 2,
+                "paths": [
+                    {
+                        "depth": 1,
+                        "base_module": "target.exe",
+                        "base_rva": "0x14500",
+                        "offsets": ["0x20"],
+                        "expression": "[target.exe+0x14500] + 0x20"
+                    },
+                    {
+                        "depth": 2,
+                        "base_module": "target.exe",
+                        "base_rva": "0x14510",
+                        "offsets": ["0x10", "0x8"],
+                        "expression": "[[target.exe+0x14510] + 0x10] + 0x8"
+                    }
+                ]
+            }
+            res = server.inject_pointer_chains(pointer_mock)
+            self.assertEqual(res["status"], "queued")
+            self.assertEqual(res["paths_queued"], 2)
+            # 2 paths * 2 (plate + bookmark) + 1 program note = 5
+            self.assertEqual(res["actions_queued"], 5)
+
+            client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{server.port}", auth_token="tok-ptr-1")
+            poll = client.poll_commands()
+            cmds = poll["commands"]
+            self.assertEqual(len(cmds), 5)
+
+            actions = [c["action"] for c in cmds]
+            self.assertEqual(actions.count("SET_PLATE_COMMENT"), 2)
+            self.assertEqual(actions.count("CREATE_BOOKMARK"), 2)
+            self.assertEqual(actions.count("SET_PROGRAM_NOTE"), 1)
+        finally:
+            server.stop()
+
+    def test_client_convenience_methods(self):
+        """Verifies typed client convenience methods against running server."""
+        server = GhidraLiveBridgeServer(port=0, auth_token="tok-conv-1")
+        server.start()
+        try:
+            client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{server.port}", auth_token="tok-conv-1")
+            ping = client.ping()
+            self.assertEqual(ping["status"], "ok")
+
+            st = client.get_status()
+            self.assertTrue(st["is_running"])
+
+            reg = client.register_client("app.exe", "0x140000000", "x86_64")
+            self.assertEqual(reg["status"], "registered")
+
+            struct_mock = {
+                "base_address": "0x14001000",
+                "structure_name": "TestStruct",
+                "fields": [],
+                "c_struct_definition": "struct TestStruct {};"
+            }
+            inj_s = client.inject_structure_dissection(struct_mock)
+            self.assertEqual(inj_s["status"], "queued")
+
+            ptr_mock = {
+                "target_address": "0x14002000",
+                "paths": [{"base_rva": "0x100", "expression": "[app.exe+0x100]", "base_module": "app.exe"}]
+            }
+            inj_p = client.inject_pointer_chains(ptr_mock)
+            self.assertEqual(inj_p["status"], "queued")
+
+            poll = client.poll_commands()
+            self.assertGreater(poll["count"], 0)
+        finally:
+            server.stop()
+
+    def test_tempdir_discovery_marker(self):
+        """Verifies discovery marker is published to system temp dir and cleaned up on stop."""
+        server = GhidraLiveBridgeServer(port=0, auth_token="tok-temp-1")
+        server.start()
+        temp_marker = os.path.join(tempfile.gettempdir(), ".rea_bridge.json")
+        try:
+            self.assertTrue(os.path.isfile(temp_marker))
+            with open(temp_marker, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.assertEqual(data["port"], server.port)
+            self.assertEqual(data["auth_token"], "tok-temp-1")
+        finally:
+            server.stop()
+            self.assertFalse(os.path.isfile(temp_marker))
+
+    def test_mcp_extended_bridge_actions(self):
+        """Verifies inject_struct and inject_pointers via ReaMcpServer."""
+        from mcp_server import ReaMcpServer
+        mcp = ReaMcpServer()
+
+        # Start bridge
+        mcp.handle_tools_call({
+            "name": "rea_ghidra_live_bridge",
+            "arguments": {"action": "start", "port": 0, "auth_token": "mcp-ext-tok"}
+        })
+
+        try:
+            # Inject struct
+            res_struct = mcp.handle_tools_call({
+                "name": "rea_ghidra_live_bridge",
+                "arguments": {
+                    "action": "inject_struct",
+                    "struct_report": {
+                        "base_address": "0x7FF70001",
+                        "structure_name": "MCPDissected",
+                        "fields": [],
+                        "c_struct_definition": "struct MCPDissected {};"
+                    }
+                }
+            })
+            self.assertFalse(res_struct.get("isError", False))
+            data_s = json.loads(res_struct["content"][0]["text"])
+            self.assertEqual(data_s["status"], "queued")
+
+            # Inject pointers
+            res_ptr = mcp.handle_tools_call({
+                "name": "rea_ghidra_live_bridge",
+                "arguments": {
+                    "action": "inject_pointers",
+                    "pointer_report": {
+                        "target_address": "0x7FF70002",
+                        "paths": [{"base_rva": "0x50", "expression": "[mcp.exe+0x50]"}]
+                    }
+                }
+            })
+            self.assertFalse(res_ptr.get("isError", False))
+            data_p = json.loads(res_ptr["content"][0]["text"])
+            self.assertEqual(data_p["status"], "queued")
+        finally:
+            mcp.handle_tools_call({
+                "name": "rea_ghidra_live_bridge",
+                "arguments": {"action": "stop"}
+            })
+
 
 if __name__ == "__main__":
     unittest.main()

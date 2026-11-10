@@ -620,14 +620,14 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
     },
     {
         "name": "rea_ghidra_live_bridge",
-        "description": "Bidirectional localhost JSON-RPC 2.0 IPC bridge connecting REA-Neural to Ghidra. Enables starting/stopping the bridge server, querying client connection status, and injecting Phase 1 VAD memory maps, Phase 2 Crash RCA annotations, and Phase 3 ETW timelines directly into Ghidra's Program Database.",
+        "description": "Bidirectional localhost JSON-RPC 2.0 IPC bridge connecting REA-Neural to Ghidra. Enables starting/stopping the bridge server, querying client connection status, and injecting Phase 1 VAD memory maps, Phase 1.5 structure dissections and pointer scan paths, Phase 2 Crash RCA annotations, and Phase 3 ETW timelines directly into Ghidra's Program Database.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "description": "Action to perform: 'start', 'status', 'inject_crash_rca', 'inject_vad', 'inject_etw', or 'stop'",
-                    "enum": ["start", "status", "inject_crash_rca", "inject_vad", "inject_etw", "stop"]
+                    "description": "Action to perform: 'start', 'status', 'inject_crash_rca', 'inject_vad', 'inject_etw', 'inject_struct', 'inject_pointers', or 'stop'",
+                    "enum": ["start", "status", "inject_crash_rca", "inject_vad", "inject_etw", "inject_struct", "inject_pointers", "stop"]
                 },
                 "port": {
                     "type": "integer",
@@ -643,7 +643,19 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                 },
                 "pid": {
                     "type": "integer",
-                    "description": "Target Process ID for 'inject_vad'"
+                    "description": "Target Process ID for 'inject_vad', 'inject_struct', or 'inject_pointers'"
+                },
+                "address": {
+                    "type": "string",
+                    "description": "Target memory address for 'inject_struct' or 'inject_pointers'"
+                },
+                "struct_report": {
+                    "type": "object",
+                    "description": "Optional structure dissection report dictionary for 'inject_struct'"
+                },
+                "pointer_report": {
+                    "type": "object",
+                    "description": "Optional pointer scan report dictionary for 'inject_pointers'"
                 },
                 "timeline_report": {
                     "type": "object",
@@ -1223,6 +1235,36 @@ class ReaMcpServer:
                     return server.inject_etw_timeline(tl)
                 client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
                 return client.call_rpc("rea.inject_etw_timeline", {"timeline_report": tl})
+            elif act == "inject_struct":
+                s_rep = args.get("struct_report")
+                if not s_rep:
+                    pid = int(args.get("pid", 0))
+                    addr_str = args.get("address")
+                    if pid <= 0 or not addr_str:
+                        raise ValueError("'struct_report' or both 'pid' and 'address' are required for 'inject_struct'")
+                    base_addr = int(addr_str, 16) if addr_str.lower().startswith("0x") else int(addr_str)
+                    from windows_intelligence import StructureDissector
+                    s_rep = StructureDissector.dissect(pid, base_addr)
+                server = get_active_bridge()
+                if server and server.is_running:
+                    return server.inject_structure_dissection(s_rep)
+                client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
+                return client.call_rpc("rea.inject_structure_dissection", {"struct_report": s_rep})
+            elif act == "inject_pointers":
+                p_rep = args.get("pointer_report")
+                if not p_rep:
+                    pid = int(args.get("pid", 0))
+                    addr_str = args.get("address")
+                    if pid <= 0 or not addr_str:
+                        raise ValueError("'pointer_report' or both 'pid' and 'address' are required for 'inject_pointers'")
+                    target_addr = int(addr_str, 16) if addr_str.lower().startswith("0x") else int(addr_str)
+                    from windows_intelligence import PointerScanner
+                    p_rep = PointerScanner.find_pointer_paths(pid, target_addr)
+                server = get_active_bridge()
+                if server and server.is_running:
+                    return server.inject_pointer_chains(p_rep)
+                client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
+                return client.call_rpc("rea.inject_pointer_chains", {"pointer_report": p_rep})
             else:
                 raise ValueError(f"Unknown ghidra_live_bridge action: '{act}'")
 

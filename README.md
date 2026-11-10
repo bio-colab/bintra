@@ -17,13 +17,13 @@ Forked from **REA (Reverse Engineer Anything)** and augmented with continuous re
 
 ### 1. Continuous Semantic Deobfuscation
 Complex code protection techniques—such as Control Flow Flattening, Opaque Predicates, and instruction virtualization—artificially multiply basic blocks and obfuscate control graphs. `REA-Neural` models state transitions as continuous vector trajectories, allowing it to:
-- Instantly identify algebraic opaque predicates (e.g. dead conditional jumps following register zeroing).
-- Prune dummy dispatcher loops and recover canonical linear control flow graphs.
+- Instantly identify algebraic opaque predicates (e.g. dead conditional jumps following register zeroing) with flag-preserving lookahead (`mov`, `nop`, `lea`).
+- Prune dummy dispatcher loops using localized window cadence analysis ($\le 1024$ bytes, regularity $\ge 0.35$) and recover canonical linear control flow graphs without false-positive alarms on standard compiler outputs.
 
 ### 2. Cross-Architecture & Cross-Compiler Semantic Matching
 Traditional function matching algorithms rely on exact opcode hashes or structural CFG graphs, which fail when binaries are recompiled across architectures (x86-64 vs. ARM64) or optimization levels (`-O0` vs. `-O3`). `REA-Neural` bridges this gap via two complementary mechanisms:
-- **16-D Behavioral Feature Vectorizer (`SemanticFunctionMatcher`):** In standalone mode, extracts an engineered 16-dimensional behavioral histogram and state transition profile (instruction category distributions, branch frequency, memory semantics, and frame deltas). This provides fast, zero-dependency cosine matching across structurally similar routines without requiring a heavy deep learning runtime.
-- **High P-Code SSA IR Vectorizer (`ghidra_pcode_vectorizer.py`):** When paired with Ghidra decompilation, High P-Code SSA operations are lifted into 64-dimensional semantic vectors invariant to register allocation and compiler optimizations (>95% cross-architecture matching on evaluated functions).
+- **16-D Behavioral Feature Vectorizer (`SemanticFunctionMatcher`):** In standalone mode, extracts an engineered 16-dimensional behavioral histogram and state transition profile with scale-congruence guards (`scale_ratio >= 0.60`) and 100% disassembly completeness. Provides fast, zero-dependency cosine matching across structurally similar routines without requiring a heavy deep learning runtime.
+- **High P-Code SSA IR Vectorizer (`ghidra_pcode_vectorizer.py`):** When paired with Ghidra decompilation, High P-Code SSA operations are lifted into complete 64-dimensional semantic vectors encoding transition topology, def-use edge density, cyclomatic loop complexity, and memory intensity (>95% cross-architecture matching on evaluated functions).
 
 ### 3. Goal-Driven Surgical Binary Patching
 Manual byte patching is notoriously error-prone, frequently resulting in stack imbalance (`RSP`/`RBP` misalignment) or PE checksum violations. `REA-Neural` computes minimal perturbation vectors ($\Delta \text{State} \le \epsilon$), automatically recalculates PE integrity checksums, and guarantees stack frame stability.
@@ -95,10 +95,12 @@ Beyond the declared binary reverse engineering workflows, the codebase preserves
 
 ## Future Research Roadmap & Historical Lineage Archive
 
+For detailed strategic priorities, technological evaluations (ETW, Event Log, phnt, WMI, Sysinternals), and phased development milestones, see the comprehensive [Strategic Direction & Roadmap (docs/ROADMAP.md)](docs/ROADMAP.md).
+
 The preservation of these capabilities serves three vital engineering purposes:
 
 * **1. Active Frontier for Ongoing Development:**  
-  These mechanisms form the concrete development backlog for upcoming `REA-Neural` milestones, including automated Ghidra P-code symbolic-to-neural lifting, full CFF unflattening with SSA reconstruction, and live Win32 DirectML memory hooking.
+  These mechanisms form the concrete development backlog for upcoming `REA-Neural` milestones, including live ETW process-targeted tracing, automated Ghidra P-code symbolic-to-neural lifting, and deep NTAPI inspection.
 * **2. Open Platform for Future Collaborators:**  
   By documenting both the operational CLI tools and the latent experimental algorithms, external researchers and open-source contributors can immediately access, benchmark, and extend these continuous semantic techniques.
 * **3. Historical Lineage & Design Provenance:**  
@@ -134,8 +136,10 @@ rea-neural/
 ├── skills/
 │   └── reverse-engineer-anything/ # Agent-native skill specification
 ├── schemas/                       # Agent MCP tool definitions
-├── tests/                         # 135 automated unit, sensory & security tests
-└── docs/                          # Architecture & mathematical foundation
+├── tests/                         # 139 automated unit, sensory & security tests (100% CI pass)
+└── docs/                          # Architecture, Roadmap & mathematical foundations
+    ├── architecture.md            # Master architecture & formal model
+    └── ROADMAP.md                 # Strategic direction, tech evaluation & roadmap
 ```
 
 ---

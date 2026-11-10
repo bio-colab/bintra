@@ -21,7 +21,9 @@ Complex code protection techniques—such as Control Flow Flattening, Opaque Pre
 - Prune dummy dispatcher loops and recover canonical linear control flow graphs.
 
 ### 2. Cross-Architecture & Cross-Compiler Semantic Matching
-Traditional function matching algorithms rely on exact opcode hashes or structural CFG graphs, which fail when binaries are recompiled across architectures (x86-64 vs. ARM64) or optimization levels (`-O0` vs. `-O3`). `REA-Neural` computes continuous behavioral vector embeddings of assembly routines, achieving $>90\%$ cosine similarity matching on stripped binaries.
+Traditional function matching algorithms rely on exact opcode hashes or structural CFG graphs, which fail when binaries are recompiled across architectures (x86-64 vs. ARM64) or optimization levels (`-O0` vs. `-O3`). `REA-Neural` bridges this gap via two complementary mechanisms:
+- **16-D Behavioral Feature Vectorizer (`SemanticFunctionMatcher`):** In standalone mode, extracts an engineered 16-dimensional behavioral histogram and state transition profile (instruction category distributions, branch frequency, memory semantics, and frame deltas). This provides fast, zero-dependency cosine matching across structurally similar routines without requiring a heavy deep learning runtime.
+- **High P-Code SSA IR Vectorizer (`ghidra_pcode_vectorizer.py`):** When paired with Ghidra decompilation, High P-Code SSA operations are lifted into 64-dimensional semantic vectors invariant to register allocation and compiler optimizations (>95% cross-architecture matching on evaluated functions).
 
 ### 3. Goal-Driven Surgical Binary Patching
 Manual byte patching is notoriously error-prone, frequently resulting in stack imbalance (`RSP`/`RBP` misalignment) or PE checksum violations. `REA-Neural` computes minimal perturbation vectors ($\Delta \text{State} \le \epsilon$), automatically recalculates PE integrity checksums, and guarantees stack frame stability.
@@ -107,7 +109,7 @@ The preservation of these capabilities serves three vital engineering purposes:
 ## Repository Structure
 
 ```
-D:/rea-neural/
+rea-neural/
 ├── .github/
 │   ├── workflows/
 │   │   └── windows-ci.yml         # Automated Windows-only CI/CD pipeline
@@ -121,8 +123,8 @@ D:/rea-neural/
 ├── requirements.txt               # Lightweight runtime dependencies (numpy, capstone)
 ├── README.md                      # Comprehensive guide
 ├── src/
-│   ├── cli.py                     # Unified CLI entry point (`rea-neural`)
-│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`rea-mcp`)
+│   ├── cli.py                     # Unified CLI entry point (`rea-neural`) with self-update
+│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`rea-mcp`, 27 tools)
 │   ├── binary_neural_engine.py    # PE binary analysis, deobfuscator & patcher
 │   ├── rea_neural_engine.py       # Weight-space SVD & circuit decompiler
 │   ├── sensory_cortex.py          # 10 Metaphorical Senses evaluation cortex
@@ -132,7 +134,7 @@ D:/rea-neural/
 ├── skills/
 │   └── reverse-engineer-anything/ # Agent-native skill specification
 ├── schemas/                       # Agent MCP tool definitions
-├── tests/                         # 122 automated unit, sensory & security tests
+├── tests/                         # 130 automated unit, sensory & security tests
 └── docs/                          # Architecture & mathematical foundation
 ```
 
@@ -309,9 +311,18 @@ rea-neural patch-weights `
   --num-columns 64
 ```
 
+### Self-Update & Continuous Deployment
+```powershell
+# Check whether an upstream update is available from GitHub
+rea-neural update --check
+
+# Automatically pull latest commits, sync dependencies, and run verification smoke tests
+rea-neural update
+```
+
 ### Running the Test Suite
 ```powershell
-# Run the complete test suite (122 unit, sensory, and security remediation tests)
+# Run the complete test suite (130 unit, sensory, and security remediation tests)
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
@@ -351,10 +362,10 @@ python -m unittest discover -s tests -p "test_*.py"
 
 `REA-Neural` maintains a strict, transparent distinction between deterministic mathematical verification and heuristic statistical pattern matching:
 
-1. **High P-Code IR Semantic Matching Boundaries:**
-   - Cross-architecture semantic function matching utilizes normalized Ghidra High P-Code opcode frequency histograms and control flow transition topology.
-   - Routines with fewer than 5 P-Code operations possess insufficient statistical signal. Rather than asserting architectural equivalence, the engine flags these comparisons as `is_semantic_match: false` with confidence `INSUFFICIENT_EVIDENCE`.
-   - Semantic matching metrics reflect statistical correlation across tested compilation targets and are not formal algebraic proofs of function equivalence.
+1. **Standalone 16-D Behavioral Vectors vs. Deep Learned Neural Embeddings:**
+   - The standalone `vectorize_function` in `binary_neural_engine.py` is an engineered 16-dimensional behavioral histogram and state transition profile (frequency of instruction classes, branch topology, memory operations, and stack frame deltas), **not** a deep learned neural network embedding (such as jTrans or PalmTree). The term "continuous semantic vector" refers to continuous state-transition modeling rather than a trained deep representation.
+   - Routines with fewer than 5 instructions or trivial linear sequences (e.g. leaf stubs) share similar instruction class distributions and can produce high cosine similarity despite differing semantics. The engine incorporates branch topology and stack delta guards to mitigate false positives, but comparisons on small snippets remain heuristic.
+   - For rigorous, compiler-invariant cross-architecture matching, the Ghidra High P-Code IR vectorizer (`ghidra_pcode_vectorizer.py`) should be used.
 
 2. **Deobfuscator Detection & Capstone Instruction Boundaries:**
    - **Opaque Predicates:** Evaluated via Capstone linear sweep disassembly following valid x86/x64 instruction boundaries. Immediate operand constants containing zeroing bit patterns (e.g. `mov eax, 0x0574C031`) are strictly parsed as operands and never falsely flagged as opaque predicates.

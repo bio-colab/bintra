@@ -52,7 +52,7 @@ def serialize_varnode(vn, current_prog):
 
 def run():
     print("=================================================================")
-    print(" [REA-Neural] Initiating Python Ghidra Bridge (v7.3.0)")
+    print(" [REA-Neural] Initiating Python Ghidra Bridge (v7.4.0)")
     print("=================================================================")
 
     if currentProgram is None:
@@ -156,11 +156,24 @@ def run():
     comments = plan.get("comment_actions", [])
     print("[REA-Neural] Analysis found %d renames and %d comments." % (len(renames), len(comments)))
 
-    # Ask user or check headless
-    should_apply = True
-    if hasattr(globals().get("__builtins__", {}), "askYesNo"):
-        msg = "Apply %d renames and %d comments to Ghidra Database?" % (len(renames), len(comments))
-        should_apply = askYesNo("REA-Neural Mutations", msg)
+    # Security confirmation: In Ghidra Jython, askYesNo is injected into script globals(), not __builtins__.
+    # Default to False (fail-closed) unless the user explicitly confirms or REA_GHIDRA_AUTO_APPLY is set.
+    should_apply = False
+    msg = "Apply %d renames and %d comments to Ghidra Database?" % (len(renames), len(comments))
+    try:
+        ask_func = globals().get("askYesNo")
+        if ask_func is not None and callable(ask_func):
+            should_apply = ask_func("REA-Neural Mutations", msg)
+        elif "askYesNo" in dir(__builtins__):
+            should_apply = askYesNo("REA-Neural Mutations", msg)
+        elif os.environ.get("REA_GHIDRA_AUTO_APPLY", "").lower() in ("1", "true", "yes"):
+            # Authorized automated headless workflow
+            should_apply = True
+        else:
+            print("[REA-Neural] Interactive prompt 'askYesNo' unavailable in headless context; mutations not applied (set REA_GHIDRA_AUTO_APPLY=1 to permit).")
+    except Exception as e:
+        print("[REA-Neural] Confirmation check error: %s; fail-closed." % e)
+        should_apply = False
 
     if should_apply:
         from ghidra.program.model.symbol import SourceType

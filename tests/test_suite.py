@@ -786,7 +786,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("ghidra-analyze", java_content)
 
     def test_mcp_server_initialize_and_tools_list(self):
-        """Verifies that native MCP server implements JSON-RPC 2.0 handshake and 12 tools."""
+        """Verifies that native MCP server implements JSON-RPC 2.0 handshake and 27 tools."""
         from mcp_server import ReaMcpServer, TOOLS_REGISTRY
         server = ReaMcpServer()
         init_res = server.handle_initialize({})
@@ -1139,6 +1139,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
 
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_windows_os_profiler(self):
         """Verifies Windows OS Profiler retrieves kernel build, arch, and WOW64 emulation status."""
         from windows_intelligence import WindowsOSProfiler
@@ -1151,6 +1152,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertTrue(profile["kernel"].get("is_windows"))
         self.assertIn("major_version", profile["kernel"])
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_windows_dependency_resolver_synthetic(self):
         """Verifies Windows Dependency Resolver simulates Safe DLL Search, API Sets, and KnownDLLs."""
         from windows_intelligence import WindowsDependencyResolver
@@ -1168,6 +1170,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertEqual(res["resolved_dlls"][0]["imported_name"], "KERNEL32.dll")
         self.assertEqual(res["missing_dlls"][0]["imported_name"], "NON_EXISTENT_FAKE_MODULE_9999.dll")
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_windows_device_inspector(self):
         """Verifies Windows Device Inspector scans display adapters and DirectX runtimes."""
         from windows_intelligence import WindowsDeviceInspector
@@ -1179,6 +1182,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("legacy_directdraw", subsystems)
         self.assertIn("legacy_direct3d9", subsystems)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_windows_security_inspector(self):
         """Verifies Windows Security Inspector evaluates token integrity and directory write access."""
         import tempfile
@@ -1197,6 +1201,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_windows_crash_analyzer_synthetic_wer_and_minidump(self):
         """Verifies Windows Crash Analyzer parses WER reports, Event 1000 XML, and correlated minidumps."""
         import tempfile
@@ -1271,6 +1276,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             if os.path.exists(dmp_file):
                 os.remove(dmp_file)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_windows_evidence_correlator_end_to_end(self):
         """Verifies cross-correlation of crash telemetry with strict RVA semantics and module attribution."""
         import tempfile
@@ -1354,6 +1360,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             if os.path.exists(pe_path):
                 os.remove(pe_path)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_mcp_server_windows_intelligence_dispatch(self):
         """Verifies that native MCP server can dispatch windows intelligence audit tools."""
         from mcp_server import ReaMcpServer
@@ -1386,6 +1393,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIsNotNone(os_ver_entry)
         self.assertTrue(os_ver_entry["supported"])
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_command_executor_safe_execution(self):
         """Verifies safe command execution without shell=True, timeout enforcement, and argument gating."""
         from windows_intelligence import CommandExecutor
@@ -1494,6 +1502,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertEqual(reg_res["status"], "success")
         self.assertEqual(reg_res["domain"], "OPERATING_SYSTEM")
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_native_device_inspector_live(self):
         """Verifies NativeDeviceInspector SetupAPI & CfgMgr32 device enumeration and health audit."""
         from windows_intelligence import NativeDeviceInspector
@@ -1507,6 +1516,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         desc = NativeDeviceInspector.get_problem_description(1)
         self.assertIn("CM_PROB_NOT_CONFIGURED", desc)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_kernel_driver_inspector_psapi(self):
         """Verifies KernelDriverInspector PSAPI driver enumeration and base mapping."""
         from windows_intelligence import KernelDriverInspector
@@ -1523,6 +1533,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("kernel_image_base", first)
         self.assertTrue(first["kernel_image_base"].startswith("0x"))
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_service_manager_inspector_advapi32(self):
         """Verifies ServiceManagerInspector SCM service interrogation via Advapi32."""
         from windows_intelligence import ServiceManagerInspector
@@ -1708,21 +1719,26 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertEqual(sess['session_name'], 'Eventlog-Application')
         self.assertTrue(sess['is_active'])
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_etw_controller_bounded_session(self):
         """Verifies EtwController bounded trace session lifecycle with fail-closed elevation handling."""
+        import tempfile
+        import shutil
         from windows_intelligence import EtwController
-        if os.name != 'nt':
-            return
-        res = EtwController.capture_bounded_session(
-            session_name="REA_Unit_Test_Trace",
-            duration_sec=0.5,
-            workspace_dir=r"D:\rea-neural\workspace"
-        )
-        self.assertIn('status', res)
-        self.assertIn(res['status'], ('elevation_required', 'success', 'already_active'))
-        if res['status'] == 'elevation_required':
-            self.assertEqual(res['error_code'], 5)
-            self.assertIn('safe_alternatives', res)
+        ws_tmp = tempfile.mkdtemp(prefix="rea_etw_ws_")
+        try:
+            res = EtwController.capture_bounded_session(
+                session_name="REA_Unit_Test_Trace",
+                duration_sec=0.5,
+                workspace_dir=ws_tmp
+            )
+            self.assertIn('status', res)
+            self.assertIn(res['status'], ('elevation_required', 'success', 'already_active'))
+            if res['status'] == 'elevation_required':
+                self.assertEqual(res['error_code'], 5)
+                self.assertIn('safe_alternatives', res)
+        finally:
+            shutil.rmtree(ws_tmp, ignore_errors=True)
 
     def test_mcp_server_telemetry_dispatch(self):
         """Verifies MCP server protocol dispatch for rea_dmp_inspect and rea_etw_audit."""
@@ -1931,20 +1947,23 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("-Depth 4", cmd)
 
     def test_zero_hardcoded_developer_paths(self):
-        """Verifies zero occurrences of developer paths (Eylias, D:\rea-neural) in source code and ghidra scripts."""
+        """Verifies zero occurrences of developer paths in source code, tests, and ghidra scripts."""
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        disallowed = ["C:\\Users\\Eylias", "D:\\rea-neural", "/Users/Eylias", "users/eylias"]
+        disallowed = ["c:" + "\\users\\eylias", "d:" + "\\rea-neural", "/users/eylias", "users/eylias"]
         scanned_exts = (".py", ".java", ".md", ".json")
 
-        for root_dir in (os.path.join(repo_root, "src"), os.path.join(repo_root, "ghidra_scripts")):
+        for root_dir in (os.path.join(repo_root, "src"), os.path.join(repo_root, "ghidra_scripts"), os.path.join(repo_root, "tests")):
             for root, _, files in os.walk(root_dir):
                 for f in files:
                     if f.endswith(scanned_exts):
                         p = os.path.join(root, f)
                         with open(p, "r", encoding="utf-8", errors="ignore") as fh:
                             fc = fh.read().lower()
-                            self.assertNotIn("c:\\users\\eylias", fc, f"Leaked developer path in {p}")
-                            self.assertNotIn("d:\\rea-neural", fc, f"Leaked developer path in {p}")
+                            if f == "test_suite.py":
+                                lines = [line for line in fc.splitlines() if "disallowed" not in line and "test_zero_hardcoded" not in line]
+                                fc = "\n".join(lines)
+                            for bad in disallowed:
+                                self.assertNotIn(bad, fc, f"Leaked developer path in {p}")
 
     def test_minidump_parser_stream_bounds_and_miscinfo_stream_15(self):
         """Verifies MiniDumpParser bounds checking and strict Stream 15 MiscInfo mapping."""

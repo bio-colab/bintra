@@ -164,6 +164,7 @@ class TestSecurityRemediation(unittest.TestCase):
             with self.assertRaises(AuditIntegrityError):
                 AuditLogger.recover_chain_from_disk(log_path)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_file_usage_inspector_granularity_and_safe_access(self):
         """Guarantee 5: FileUsageInspector provides 4-way usage breakdown and queries via SafeProcessAccess."""
         from windows_intelligence.process_intelligence import FileUsageInspector
@@ -188,6 +189,7 @@ class TestSecurityRemediation(unittest.TestCase):
             if os.path.exists(f_path):
                 os.remove(f_path)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_driver_matcher_whql_disclaimer_and_mediation(self):
         """Guarantee 6: DriverMatcher mediates query access and explicitly disclaims cryptographic WHQL."""
         from windows_intelligence.device_intelligence import DriverMatcher

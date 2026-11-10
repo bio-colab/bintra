@@ -23,6 +23,12 @@
 
 ## 2. معمارية محرك البرمجيات في REA-Neural
 
+<p align="center">
+  <img src="../assets/hero.jpg" alt="REA-Neural Cognitive Architecture and Binary Flow" width="95%">
+  <br>
+  <em>الشكل 1: التدفق الإدراكي لـ REA-Neural — انتقال كتل كود الآلة التنفيذية عبر النواة العصبية الإدراكية إلى فضاء المتجهات المستمر لكسر التعمية والمطابقة عبر المعماريات.</em>
+</p>
+
 ```mermaid
 graph TD
     subgraph InputBinary["الملف التنفيذي الهدف (PE .exe/.dll / ELF / Mach-O)"]

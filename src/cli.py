@@ -45,8 +45,14 @@ WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "w
 
 def print_help():
     print("""
-REA-Neural Unified CLI v7.4.0 (Windows-Native & 10-Sense Edition)
-Autonomous Continuous Semantic Reverse Engineering & Binary Analysis
+  ____  _____    _         _   _                      _ 
+ |  _ \\| ____|  / \\       | \\ | | ___ _   _ _ __ __ _| |
+ | |_) |  _|   / _ \\ _____|  \\| |/ _ \\ | | | '__/ _` | |
+ |  _ <| |___ / ___ \\_____| |\\  |  __/ |_| | | | (_| | |
+ |_| \\_\\_____/_/   \\_\\    |_| \\_|\\___|\\__,_|_|  \\__,_|_|
+
+ REA-Neural Unified CLI v7.4.0 (Windows-Native & 10-Sense Edition)
+ Autonomous Continuous Semantic Reverse Engineering & Binary Analysis
 
 Usage:
   python src/cli.py <command> [options]

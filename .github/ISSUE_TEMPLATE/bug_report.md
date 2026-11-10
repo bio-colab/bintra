@@ -1,24 +1,41 @@
 ---
 name: Bug Report
-about: Create a report to help us improve REA-Neural
+about: Create an actionable bug report to help us improve REA-Neural
 title: "[BUG] "
-labels: bug
+labels: ["bug", "triage"]
 assignees: ''
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+**Summary of the Issue**
+A clear and concise description of what the unexpected behavior is.
 
-**Target Executable / Environment**
-- OS: Windows 10 / 11 / Server
-- Target Format: PE32 / PE32+ (x86_64 / ARM64)
-- Command executed: `rea <command>` or `python src/cli.py <command>`
+**Environment & System Specifications**
+- **OS Version:** Windows 10 / Windows 11 / Windows Server (Build: `winver`)
+- **Python Version:** 3.10 / 3.11 / 3.12 (`python --version`)
+- **Execution Architecture:** x86-64 / WOW64 (32-bit) / ARM64
+- **REA-Neural Commit or Tag:** (e.g. `v7.4.0` or git hash)
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Run command '...'
-2. Input bytecode / binary '....'
-3. See error
+**Target Binary / Input Data**
+- Binary Format: PE32 / PE32+ / DLL / Safetensors / Machine Hex
+- Target Compiler (if known): MSVC / Clang-cl / MinGW / Rustc
+- Obfuscation Type (if applicable): CFF / Opaque Predicates / Virtualized
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+**Steps to Reproduce**
+1. Command executed:
+   ```powershell
+   python src/cli.py <command> <arguments>
+   ```
+2. Input payload or synthetic test snippet:
+   ```
+   [paste hex sequence or synthetic reproduction snippet here]
+   ```
+3. Error observed / traceback:
+   ```
+   [paste JSON error output or stack trace here]
+   ```
+
+**Expected Behavior**
+A clear description of what you expected to happen according to REA-Neural's deterministic or semantic invariants.
+
+**Additional Context / Anonymity Notice**
+*Reminder: Please do NOT include proprietary game titles, closed-source commercial product names, or private binary paths in this issue.*

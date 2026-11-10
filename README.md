@@ -1,11 +1,27 @@
-# REA-Neural
-### Autonomous Continuous Semantic Reverse Engineering & Binary Analysis Framework
+<p align="center">
+  <img src="assets/banner.jpg" alt="REA-Neural Continuous Semantic Reverse Engineering" width="100%">
+</p>
 
-[![Windows Native CI](https://github.com/bio-colab/rea-neural/actions/workflows/windows-ci.yml/badge.svg)](https://github.com/bio-colab/rea-neural/actions/workflows/windows-ci.yml)
-[![Platform](https://img.shields.io/badge/Platform-Windows_10_%2F_11_%2F_Server-blue.svg?logo=windows)](https://www.microsoft.com/windows)
-[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg?logo=python)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
-[![Continuous Semantics](https://img.shields.io/badge/Methodology-Continuous_Semantics-purple.svg)](#)
+<p align="center">
+  <a href="#quick-start"><img src="assets/icon.png" alt="REA-Neural Icon" width="110" height="110"></a>
+</p>
+
+<h1 align="center">REA-Neural</h1>
+
+<p align="center">
+  <strong>Autonomous Continuous Semantic Reverse Engineering & Binary Analysis Framework</strong><br>
+  <em>Bridging Symbolic Decompilation, Continuous Weight-Space Semantics, and Windows System Forensics</em>
+</p>
+
+<p align="center">
+  <a href="https://github.com/bio-colab/rea-neural/actions/workflows/windows-ci.yml"><img src="https://github.com/bio-colab/rea-neural/actions/workflows/windows-ci.yml/badge.svg" alt="Windows Native CI"></a>
+  <a href="https://github.com/bio-colab/rea-neural/releases/tag/v7.4.0"><img src="https://img.shields.io/badge/Release-v7.4.0-purple.svg" alt="Latest Release"></a>
+  <a href="https://www.microsoft.com/windows"><img src="https://img.shields.io/badge/Platform-Windows_10_%2F_11_%2F_Server-blue.svg?logo=windows" alt="Platform"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg?logo=python" alt="Python"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-green.svg" alt="License"></a>
+  <a href="docs/ROADMAP.md"><img src="https://img.shields.io/badge/Roadmap-2026-blueviolet.svg" alt="Roadmap"></a>
+</p>
+
 
 `REA-Neural` is an agent-native, next-generation reverse engineering framework tailored for **Windows compiled software executables and libraries** (`.exe`, `.dll`, PE32, PE32+). 
 
@@ -41,6 +57,12 @@ Rather than treating Ghidra as a detached external decompiler, `REA-Neural` is d
 - **Windows Database Mutation (plan generation):** Generates JSON-RPC **plans** for function renaming (`set_address_name`), prototype injection (`annotate_native_function`), and C-structure type synthesis. Applying a plan requires an external Ghidra-side script; REA-Neural does not open a TCP connection itself.
 
 ---
+
+<p align="center">
+  <img src="assets/hero.jpg" alt="REA-Neural Continuous Binary Perception and Deobfuscation Flow" width="95%">
+  <br>
+  <em>Figure 1: Continuous Program Perception — Machine code basic blocks flow through the cybernetic sensory core into continuous vector trajectories, deobfuscating control flow and enabling cross-architecture equivalence matching.</em>
+</p>
 
 ## The 10 Metaphorical Senses Framework (Cybernetic Program Perception)
 
@@ -350,6 +372,15 @@ python -m unittest discover -s tests -p "test_*.py"
 **Solution:** Direct `--output` to an isolated workspace folder (e.g. `--output ./workspace/target_patched.exe`).
 
 ---
+
+## Community & Contributing
+
+We warmly welcome contributions from the binary analysis, systems research, and reverse engineering communities!
+- **Contributing Guide:** Review [CONTRIBUTING.md](CONTRIBUTING.md) for local environment setup, architecture standards, and PR requirements.
+- **Code of Conduct:** Please adhere to our [Code of Conduct](CODE_OF_CONDUCT.md) in all project spaces.
+- **Security & Responsible Disclosure:** Review our [Security Policy](SECURITY.md) and fail-closed safety kernel invariants.
+- **Visual Identity:** Check out our official brand marks, palettes, and vector assets in [assets/README.md](assets/README.md).
+- **Roadmap:** Track ongoing priorities (ETW live telemetry, Event Log native API, NTAPI phnt) in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Citation, References & Verification
 - **Upstream Foundation:** Based on **REA (Reverse Engineer Anything)** by morluto.

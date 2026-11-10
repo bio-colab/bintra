@@ -1187,9 +1187,57 @@ class SurgicalBinaryPatcher:
     def compute_stack_proprioception(code_bytes: bytes) -> Dict[str, Any]:
         """
         Deep Proprioception: Walks x86/x64 instruction boundaries to compute exact
-        stack pointer delta (Delta RSP) without false-positiving on immediate operands
-        (e.g. 'mov eax, 0x55' -> B8 55 00 00 00).
+        stack pointer delta (Delta RSP) and detects all stack-altering operations
+        (including SUB/ADD/MOV/LEA/XCHG RSP and register/memory PUSH/POP)
+        without false-positiving on immediate operands.
         """
+        if HAS_CAPSTONE:
+            try:
+                md = Cs(CS_ARCH_X86, CS_MODE_64)
+                md.detail = True
+                stack_delta = 0
+                violating_opcodes: List[str] = []
+                decoded_len = 0
+
+                for insn in md.disasm(code_bytes, 0):
+                    decoded_len += insn.size
+                    mnem = insn.mnemonic.lower()
+                    op_str = insn.op_str.lower()
+
+                    if mnem.startswith("push"):
+                        stack_delta -= 8
+                        violating_opcodes.append(f"{insn.mnemonic.upper()} {insn.op_str}".strip())
+                    elif mnem.startswith("pop"):
+                        stack_delta += 8
+                        violating_opcodes.append(f"{insn.mnemonic.upper()} {insn.op_str}".strip())
+                    elif "rsp" in op_str or "esp" in op_str or any(insn.reg_name(r) in ("rsp", "esp") for r in insn.regs_write):
+                        if mnem == "sub":
+                            import re
+                            m = re.search(r"0x[0-9a-fA-F]+|\d+", op_str.split(",")[-1])
+                            imm = int(m.group(0), 0) if m else 8
+                            stack_delta -= imm
+                            violating_opcodes.append(f"SUB RSP, {hex(imm)}")
+                        elif mnem == "add":
+                            import re
+                            m = re.search(r"0x[0-9a-fA-F]+|\d+", op_str.split(",")[-1])
+                            imm = int(m.group(0), 0) if m else 8
+                            stack_delta += imm
+                            violating_opcodes.append(f"ADD RSP, {hex(imm)}")
+                        elif mnem in ("mov", "lea", "xchg", "and", "or", "xor"):
+                            violating_opcodes.append(f"STACK_POINTER_CLOBBER: {insn.mnemonic.upper()} {insn.op_str}")
+                            stack_delta += 999999
+                        elif mnem in ("call", "ret", "leave", "enter"):
+                            violating_opcodes.append(f"FRAME_EXIT ({insn.mnemonic.upper()})")
+
+                if decoded_len == len(code_bytes) and decoded_len > 0:
+                    return {
+                        "stack_delta_bytes": stack_delta,
+                        "violating_instructions": violating_opcodes,
+                        "is_frame_invariant": len(violating_opcodes) == 0 and stack_delta == 0
+                    }
+            except Exception:
+                pass
+
         idx = 0
         n = len(code_bytes)
         stack_delta = 0
@@ -1242,10 +1290,39 @@ class SurgicalBinaryPatcher:
             if b_op in (0xE8, 0xE9) and op_pos + 5 <= n:
                 idx = op_pos + 5
                 continue
-            # MOV/LEA r/m, r or r, r/m (89, 8B, 8D)
-            if b_op in (0x89, 0x8B, 0x8D) and op_pos + 1 < n:
+            # MOV/LEA/XCHG r/m, r or r, r/m (89, 8B, 8D, 87)
+            if b_op in (0x89, 0x8B, 0x8D, 0x87) and op_pos + 1 < n:
+                modrm = code_bytes[op_pos + 1]
+                mod = (modrm >> 6) & 3
+                reg = (modrm >> 3) & 7
+                rm = modrm & 7
+                if reg == 4 or (mod == 3 and rm == 4):
+                    # Direct modification of RSP
+                    violating_opcodes.append(f"STACK_POINTER_CLOBBER (0x{b_op:02X})")
+                    stack_delta += 999999
+                insn_len = 2 if mod == 3 else (3 if mod == 1 else 6)
+                idx = min(op_pos + insn_len, n)
+                continue
+            # XCHG RSP, RAX (94 or 48 94)
+            if b_op == 0x94:
+                violating_opcodes.append("STACK_POINTER_CLOBBER: XCHG RSP, RAX (0x94)")
+                stack_delta += 999999
+                idx = op_pos + 1
+                continue
+            # PUSH r/m (FF /6)
+            if b_op == 0xFF and op_pos + 1 < n and ((code_bytes[op_pos + 1] >> 3) & 7) == 6:
                 mod = (code_bytes[op_pos + 1] >> 6) & 3
                 insn_len = 2 if mod == 3 else (3 if mod == 1 else 6)
+                stack_delta -= 8
+                violating_opcodes.append("PUSH r/m (0xFF /6)")
+                idx = min(op_pos + insn_len, n)
+                continue
+            # POP r/m (8F /0)
+            if b_op == 0x8F and op_pos + 1 < n and ((code_bytes[op_pos + 1] >> 3) & 7) == 0:
+                mod = (code_bytes[op_pos + 1] >> 6) & 3
+                insn_len = 2 if mod == 3 else (3 if mod == 1 else 6)
+                stack_delta += 8
+                violating_opcodes.append("POP r/m (0x8F /0)")
                 idx = min(op_pos + insn_len, n)
                 continue
             # ALU r/m, imm8 (83 + ModR/M + imm8)
@@ -1552,24 +1629,44 @@ class HybridBinaryDissector:
 
         # 1. TensorFlow Lite: FlatBuffer file identifier 'TFL3' at offset +4
         start = 0
-        while True:
+        while len(findings) < 500:
             idx = data.find(b"TFL3", start)
             if idx == -1:
                 break
             if idx >= 4:
                 buf_start = idx - 4
-                findings.append({
-                    "type": "TensorFlow Lite FlatBuffer Model",
-                    "file_offset": hex(buf_start),
-                    "identifier": "TFL3",
-                    "confidence": "HIGH",
-                    "details": "Verified FlatBuffer header with TFL3 magic."
-                })
+                is_valid_fb = False
+                if buf_start + 8 <= n:
+                    root_offset = struct.unpack("<I", data[buf_start:buf_start+4])[0]
+                    if 4 <= root_offset <= min(n - buf_start - 4, 100_000_000):
+                        tbl_pos = buf_start + root_offset
+                        if tbl_pos + 4 <= n:
+                            soffset = struct.unpack("<i", data[tbl_pos:tbl_pos+4])[0]
+                            vtable_pos = tbl_pos - soffset
+                            if 0 <= vtable_pos < n:
+                                is_valid_fb = True
+
+                if is_valid_fb:
+                    findings.append({
+                        "type": "TensorFlow Lite FlatBuffer Model",
+                        "file_offset": hex(buf_start),
+                        "identifier": "TFL3",
+                        "confidence": "HIGH",
+                        "details": "Verified FlatBuffer header with TFL3 magic and valid root table."
+                    })
+                else:
+                    findings.append({
+                        "type": "TensorFlow Lite FlatBuffer Candidate (Unverified)",
+                        "file_offset": hex(buf_start),
+                        "identifier": "TFL3_RAW",
+                        "confidence": "LOW",
+                        "details": "Candidate 4-byte TFL3 marker found without valid FlatBuffer vtable structure."
+                    })
             start = idx + 4
 
         # 2. GGUF: Must be exactly b"GGUF" followed by uint32 version 2 or 3
         start = 0
-        while True:
+        while len(findings) < 500:
             idx = data.find(b"GGUF", start)
             if idx == -1:
                 break
@@ -1587,7 +1684,7 @@ class HybridBinaryDissector:
 
         # 3. ONNX Protobuf Model: Protobuf ModelProto (ir_version tag 0x08 followed by varint 3..12)
         start = 0
-        while True:
+        while len(findings) < 500:
             idx = data.find(b"\x08", start)
             if idx == -1 or idx + 16 > n:
                 break
@@ -1608,10 +1705,25 @@ class HybridBinaryDissector:
 
         # 4. TorchScript / PyTorch ZIP Package: Must be ZIP archive containing PyTorch artifacts
         start = 0
-        while True:
+        zip_attempts = 0
+        MAX_ZIP_ATTEMPTS = 16
+        while len(findings) < 500 and zip_attempts < MAX_ZIP_ATTEMPTS:
             idx = data.find(b"PK\x03\x04", start)
             if idx == -1:
                 break
+            start = idx + 4
+            # Validate standard local file header length
+            if idx + 30 > n:
+                continue
+            fn_len = struct.unpack("<H", data[idx+26:idx+28])[0]
+            if fn_len == 0 or idx + 30 + fn_len > n:
+                continue
+            fn_bytes = data[idx+30:idx+30+fn_len]
+            fn_lower = fn_bytes.lower()
+            if not any(k in fn_lower for k in (b"pkl", b"model", b"code", b"version", b"data", b"pytorch", b"archive")):
+                continue
+
+            zip_attempts += 1
             try:
                 zip_stream = io.BytesIO(data[idx:])
                 with zipfile.ZipFile(zip_stream, "r") as z:
@@ -1629,13 +1741,13 @@ class HybridBinaryDissector:
                             "confidence": "HIGH",
                             "details": f"Verified ZIP package containing TorchScript serialized structures: {names[:3]}"
                         })
+                        start = idx + 30
             except Exception:
                 pass
-            start = idx + 4
 
         # 5. Safetensors Model: 8-byte length followed by JSON header starting with {"
         start = 0
-        while True:
+        while len(findings) < 500:
             idx = data.find(b'{"__metadata__', start)
             if idx == -1:
                 idx = data.find(b'{"', start)

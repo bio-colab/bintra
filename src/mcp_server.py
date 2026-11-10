@@ -632,6 +632,8 @@ class ReaMcpServer:
     def handle_tools_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
         tool_name = params.get("name")
         args = params.get("arguments", {})
+        if tool_name not in self.TOOL_SECURITY_METADATA and f"rea_{tool_name}" in self.TOOL_SECURITY_METADATA:
+            tool_name = f"rea_{tool_name}"
 
         try:
             from security import ExecutionGuard, Capability, SecurityViolationError, TargetMutationError, PathIdentity
@@ -701,6 +703,8 @@ class ReaMcpServer:
             }
 
     def dispatch_tool(self, name: str, args: Dict[str, Any]) -> Any:
+        if name not in self.TOOL_SECURITY_METADATA and f"rea_{name}" in self.TOOL_SECURITY_METADATA:
+            name = f"rea_{name}"
         if name == "rea_inspect_binary":
             path = args["file_path"]
             return BinaryFormatInspector.inspect(path)

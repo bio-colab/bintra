@@ -6,6 +6,7 @@ integrity levels, and virtual memory counters using kernel32 and advapi32 APIs.
 """
 
 import os
+import sys
 import ctypes
 from ctypes import wintypes
 from typing import Dict, Any, List, Optional

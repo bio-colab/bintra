@@ -134,7 +134,7 @@ rea-neural/
 ├── skills/
 │   └── reverse-engineer-anything/ # Agent-native skill specification
 ├── schemas/                       # Agent MCP tool definitions
-├── tests/                         # 130 automated unit, sensory & security tests
+├── tests/                         # 135 automated unit, sensory & security tests
 └── docs/                          # Architecture & mathematical foundation
 ```
 
@@ -322,7 +322,7 @@ rea-neural update
 
 ### Running the Test Suite
 ```powershell
-# Run the complete test suite (130 unit, sensory, and security remediation tests)
+# Run the complete test suite (135 unit, sensory, and security remediation tests)
 python -m unittest discover -s tests -p "test_*.py"
 ```
 

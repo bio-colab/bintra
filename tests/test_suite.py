@@ -1453,6 +1453,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertEqual(parsed_pnp[0]["published_name"], "oem12.inf")
         self.assertEqual(parsed_pnp[0]["provider_name"], "NVIDIA")
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_registry_catalog_and_dual_view_reader(self):
         """Verifies 11-domain RegistryCatalog and dual-view (32/64-bit) reader."""
         from windows_intelligence import RegistryCatalog, WindowsRegistryReader
@@ -1697,6 +1698,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertFalse(EventLogCollector.LAST_QUERY_ERRORS)
 
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_etw_controller_live_and_providers(self):
         """Verifies EtwController providers catalog and session query capabilities."""
         from windows_intelligence import EtwController
@@ -1870,6 +1872,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertEqual(dossier["binary_mapping"]["external_fault_module"], "UNKNOWN_MODULE")
         self.assertEqual(dossier["binary_mapping"]["attribution"], "ATTRIBUTION_UNKNOWN")
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_registry_subkeys_and_three_state_policies(self):
         """Verifies registry subkey enumeration and 3-state policy status (SafeDllSearchMode, EnableLUA)."""
         from windows_intelligence.registry_intelligence import WindowsRegistryReader, WindowsRegistryAnalyzer
@@ -1921,6 +1924,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             self.assertEqual(res["status"], "success")
             self.assertTrue(res["is_truncated"])
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_command_executor_sc_query_arguments(self):
         """Verifies sc.exe query argument parsing with both separate and merged state= all flags."""
         from windows_intelligence.command_engine import CommandExecutor
@@ -2034,6 +2038,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             if os.path.exists(dmp_path):
                 os.remove(dmp_path)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_security_inspector_policy_estimation(self):
         """Verifies WindowsSecurityInspector returns explicit POLICY_ESTIMATION semantics."""
         from windows_intelligence.security_inspector import WindowsSecurityInspector
@@ -2044,6 +2049,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertIn("methodology", res)
         self.assertIn("notice", res)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_registry_reader_truncation_metadata_and_access_denied(self):
         """Verifies registry reader truncation metadata and ACCESS_DENIED preservation in analyzer."""
         from windows_intelligence.registry_intelligence import WindowsRegistryReader, WindowsRegistryAnalyzer
@@ -2072,6 +2078,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             self.assertIn("ACCESS_DENIED", pol["safedllsearch_mode_status"])
             self.assertIn("ACCESS_DENIED", pol["uac_status"])
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_causality_synthesizer_exact_block_containment_and_unknowns(self):
         """Verifies exact basic block containment matching and unknowns ledger generation."""
         from windows_intelligence.evidence_engine import CausalitySynthesizer
@@ -2470,6 +2477,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertEqual(res["status"], "success")
         self.assertEqual(res["exit_code"], 0)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_safety_kernel_target_binary_zero_mutation_post_analysis(self):
         """Verifies that full end-to-end binary and diagnostic analysis causes ZERO mutations to target PE."""
         from binary_neural_engine import BinaryFormatInspector
@@ -2508,6 +2516,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             if os.path.exists(target_dir):
                 os.rmdir(target_dir)
 
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_safety_kernel_cmd_executor_fails_closed_on_denial(self):
         """Verifies that CommandExecutor fails closed with DENY decision when Safety Kernel denies execution."""
         from windows_intelligence.command_engine import CommandExecutor
@@ -2719,6 +2728,141 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertFalse(tamper_status["is_valid"])
         self.assertIn("Tamper detected", tamper_status["error"])
         self.assertEqual(tamper_status["failed_sequence"], 1)
+
+    def test_hardlink_target_immutability_enforcement(self):
+        """Verifies Audit §2.1: Hard-link aliases of registered targets inside workspaces are strictly blocked."""
+        from security import ExecutionGuard, SafeFileAccess, TargetMutationError, TargetScope
+        target_dir = tempfile.mkdtemp(prefix="rea_tgt_hl_")
+        ws_dir = tempfile.mkdtemp(prefix="rea_ws_hl_")
+        tgt_file = os.path.join(target_dir, "original_target.bin")
+        with open(tgt_file, "w") as f:
+            f.write("PROTECTED_TARGET_DATA")
+
+        link_file = os.path.join(ws_dir, "hardlink_alias.bin")
+        try:
+            os.link(tgt_file, link_file)
+            scope = TargetScope(target_binary_path=tgt_file, workspace_dir=ws_dir)
+            self.assertTrue(scope.is_target_file(link_file), "TargetScope must identify hard-link alias as target file")
+
+            with ExecutionGuard.scoped_session(target_binary_path=tgt_file, workspace_dir=ws_dir):
+                with self.assertRaises(TargetMutationError):
+                    SafeFileAccess.write_workspace_file(link_file, "MUTATED_VIA_HARDLINK")
+            # Verify target content remains byte-identical
+            with open(tgt_file, "r") as f:
+                self.assertEqual(f.read(), "PROTECTED_TARGET_DATA")
+        finally:
+            shutil.rmtree(target_dir, ignore_errors=True)
+            shutil.rmtree(ws_dir, ignore_errors=True)
+
+    def test_stack_proprioception_clobber_instructions(self):
+        """Verifies Audit §2.2: compute_stack_proprioception flags all RSP-altering instructions."""
+        from binary_neural_engine import SurgicalBinaryPatcher
+        adversarial_cases = [
+            ("4889c4", "mov rsp, rax"),
+            ("488d20", "lea rsp, [rax]"),
+            ("4889cc", "mov rsp, rcx"),
+            ("488d642408", "lea rsp, [rsp+8]"),
+            ("ff30", "push qword ptr [rax]"),
+            ("8f00", "pop qword ptr [rax]"),
+            ("4894", "xchg rsp, rax"),
+        ]
+        for hex_code, desc in adversarial_cases:
+            code_bytes = bytes.fromhex(hex_code)
+            prop = SurgicalBinaryPatcher.compute_stack_proprioception(code_bytes)
+            self.assertFalse(prop["is_frame_invariant"], f"Failed to flag {desc} ({hex_code}) as frame variant")
+            self.assertGreater(len(prop["violating_instructions"]), 0, f"No violations recorded for {desc}")
+            is_safe, reason = SurgicalBinaryPatcher.verify_stack_safety(code_bytes)
+            self.assertFalse(is_safe, f"verify_stack_safety falsely approved {desc}")
+
+    def test_safetensors_validation_schema_and_boundaries(self):
+        """Verifies Audit §3.1: SafetensorsHandler strictly validates dtype, offsets, shapes, and overlaps."""
+        from rea_neural_engine import SafetensorsHandler
+
+        def make_st(header_dict: dict, data_bytes: bytes, target_dir: str = None) -> str:
+            hdr_json = json.dumps(header_dict, separators=(",", ":")).encode("utf-8")
+            tf = tempfile.NamedTemporaryFile(suffix=".safetensors", dir=target_dir, delete=False)
+            tf.write(struct.pack("<Q", len(hdr_json)) + hdr_json + data_bytes)
+            tf.close()
+            return tf.name
+
+        # Case 1: Unknown dtype
+        p1 = make_st({"x": {"dtype": "INVALID", "shape": [1], "data_offsets": [0, 4]}}, b"\x00\x00\x00\x00")
+        with self.assertRaises(ValueError):
+            SafetensorsHandler.read_header(p1)
+        os.remove(p1)
+
+        # Case 2: Negative data_offsets
+        p2 = make_st({"x": {"dtype": "F32", "shape": [1], "data_offsets": [-4, 0]}}, b"\x00\x00\x00\x00")
+        with self.assertRaises(ValueError):
+            SafetensorsHandler.read_header(p2)
+        os.remove(p2)
+
+        # Case 3: Overlapping data offsets
+        p3 = make_st({
+            "x": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]},
+            "y": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}
+        }, b"\x00\x00\x00\x00")
+        with self.assertRaises(ValueError):
+            SafetensorsHandler.read_header(p3)
+        os.remove(p3)
+
+        # Case 4: Negative shape dimension
+        p4 = make_st({"x": {"dtype": "F32", "shape": [-1], "data_offsets": [0, 4]}}, b"\x00\x00\x00\x00")
+        with self.assertRaises(ValueError):
+            SafetensorsHandler.read_header(p4)
+        os.remove(p4)
+
+        # Case 5: Missing tensor in write_patched_safetensors
+        tgt_dir = tempfile.mkdtemp(prefix="rea_tgt_dir_")
+        ws_dir = tempfile.mkdtemp(prefix="rea_ws_dir_")
+        p5 = make_st({"x": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}}, b"\x00\x00\x00\x00", target_dir=tgt_dir)
+        out_p = os.path.join(ws_dir, "patched.safetensors")
+        from security import ExecutionGuard
+        try:
+            with ExecutionGuard.scoped_session(target_binary_path=p5, workspace_dir=ws_dir):
+                with self.assertRaises(KeyError):
+                    SafetensorsHandler.write_patched_safetensors(p5, out_p, {"does_not_exist": np.array([1.0], dtype=np.float32)})
+        finally:
+            shutil.rmtree(tgt_dir, ignore_errors=True)
+            shutil.rmtree(ws_dir, ignore_errors=True)
+
+    def test_svd_non_finite_resilience(self):
+        """Verifies Audit §3.2: SubspaceAnalyzer returns structured error dict on NaN or Inf input."""
+        from rea_neural_engine import SubspaceAnalyzer
+        m_nan = np.array([[np.nan, 1.0], [0.0, 2.0]], dtype=np.float32)
+        res_nan = SubspaceAnalyzer.analyze_svd(m_nan)
+        self.assertEqual(res_nan["status"], "error")
+        self.assertIn("non-finite", res_nan["error"])
+
+        m_inf = np.array([[np.inf, 1.0], [0.0, 2.0]], dtype=np.float32)
+        res_inf = SubspaceAnalyzer.analyze_svd(m_inf)
+        self.assertEqual(res_inf["status"], "error")
+        self.assertIn("non-finite", res_inf["error"])
+
+    def test_hybrid_dissector_tflite_and_zip_dos_protection(self):
+        """Verifies Audit §3.4 & §4: TFLite requires valid vtable structure, and dense ZIP markers avoid DoS."""
+        from binary_neural_engine import HybridBinaryDissector
+        # Test 13-byte raw TFL3
+        with tempfile.NamedTemporaryFile(delete=False) as tf:
+            tf.write(b"XXXXTFL3YYYYY")
+            p_tfl = tf.name
+        try:
+            res_tfl = HybridBinaryDissector.scan_for_embedded_logic(p_tfl)
+            self.assertEqual(len(res_tfl["findings"]), 1)
+            self.assertEqual(res_tfl["findings"][0]["confidence"], "LOW")
+            self.assertIn("Unverified", res_tfl["findings"][0]["type"])
+        finally:
+            os.remove(p_tfl)
+
+        # Test dense PK0304 non-PyTorch buffer (must be sub-second, non-hanging)
+        with tempfile.NamedTemporaryFile(delete=False) as tf:
+            tf.write((b"PK\x03\x04" + b"\x00" * 28) * 10000)
+            p_zip = tf.name
+        try:
+            res_zip = HybridBinaryDissector.scan_for_embedded_logic(p_zip)
+            self.assertEqual(len(res_zip["findings"]), 0)
+        finally:
+            os.remove(p_zip)
 
 if __name__ == "__main__":
     unittest.main()

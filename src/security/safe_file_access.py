@@ -73,6 +73,13 @@ class SafeFileAccess:
         )
 
         can_path = PathIdentity.canonicalize(file_path)
+        scope = ExecutionGuard.get_current_scope()
+        if scope and scope.is_target_file(can_path):
+            from .policy_engine import TargetMutationError
+            raise TargetMutationError(
+                f"TARGET_WRITE_FORBIDDEN: Path '{can_path}' references a strictly immutable target (hard-link alias)."
+            )
+
         if os.path.exists(can_path) and not overwrite:
             raise FileExistsError(f"Workspace file already exists: '{can_path}'")
 

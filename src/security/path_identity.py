@@ -49,9 +49,7 @@ class PathIdentity:
 
     @classmethod
     def _validate_no_ads(cls, path: str) -> None:
-        """Ensures the path does not target an Alternate Data Stream (:stream) on Windows."""
-        if sys.platform != "win32":
-            return
+        """Ensures the path does not target an Alternate Data Stream (:stream)."""
         # Drive letter colon (e.g. C:) is permitted at index 1
         tail = path[2:] if (len(path) >= 2 and path[1] == ":") else path
         if ":" in tail:
@@ -114,8 +112,15 @@ class PathIdentity:
 
     @classmethod
     def is_same_file(cls, path_a: str, path_b: str) -> bool:
-        """Determines if two path strings point to the exact same canonical file on disk."""
+        """Determines if two path strings point to the exact same canonical file on disk, including hard links."""
         try:
-            return os.path.normcase(cls.canonicalize(path_a)) == os.path.normcase(cls.canonicalize(path_b))
+            can_a = cls.canonicalize(path_a)
+            can_b = cls.canonicalize(path_b)
+            if os.path.normcase(can_a) == os.path.normcase(can_b):
+                return True
+            # Check filesystem inode / device identity (handles hard links across Windows NTFS and POSIX)
+            if os.path.exists(can_a) and os.path.exists(can_b):
+                return os.path.samefile(can_a, can_b)
+            return False
         except Exception:
             return False

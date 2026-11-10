@@ -6,6 +6,7 @@ verifying driver integrity, image bases, and system dependencies.
 """
 
 import os
+import sys
 import ctypes
 from ctypes import wintypes
 from typing import Dict, Any, List, Optional

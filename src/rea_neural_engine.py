@@ -47,11 +47,86 @@ class SafetensorsHandler:
 
     INV_DTYPE_MAP = {np.dtype(v): k for k, v in DTYPE_MAP.items()}
 
+    DTYPE_SIZES = {
+        "F64": 8, "I64": 8, "U64": 8,
+        "F32": 4, "I32": 4, "U32": 4,
+        "F16": 2, "BF16": 2, "I16": 2, "U16": 2,
+        "I8": 1, "U8": 1, "BOOL": 1
+    }
+
+    @classmethod
+    def _validate_header(cls, header: Dict[str, Any], base_offset: int, file_size: Optional[int] = None) -> None:
+        """Validates safetensors header schema, dtypes, shapes, and offset ranges according to format specification."""
+        import math
+        tensors_by_offset = []
+
+        for name, meta in header.items():
+            if name == "__metadata__":
+                if not isinstance(meta, dict):
+                    raise ValueError("__metadata__ in safetensors header must be a JSON dictionary.")
+                continue
+
+            if not isinstance(meta, dict):
+                raise ValueError(f"Tensor entry '{name}' in safetensors header must be a dictionary.")
+
+            # Validate dtype
+            dtype_str = meta.get("dtype")
+            if not dtype_str or (dtype_str not in cls.DTYPE_MAP and dtype_str != "BF16"):
+                raise ValueError(f"Unknown or invalid safetensors dtype: '{dtype_str}' in tensor '{name}'.")
+
+            # Validate shape
+            shape = meta.get("shape")
+            if not isinstance(shape, (list, tuple)):
+                raise ValueError(f"Invalid shape for tensor '{name}': must be a list of integers.")
+            for dim in shape:
+                if not isinstance(dim, int) or dim < 0:
+                    raise ValueError(f"Invalid dimension {dim} in shape for tensor '{name}': must be a non-negative integer.")
+
+            # Validate data_offsets
+            offsets = meta.get("data_offsets")
+            if not isinstance(offsets, (list, tuple)) or len(offsets) != 2:
+                raise ValueError(f"Invalid data_offsets for tensor '{name}': must be a 2-element list [start, end].")
+            start_off, end_off = offsets
+            if not isinstance(start_off, int) or not isinstance(end_off, int) or start_off < 0 or end_off < 0:
+                raise ValueError(f"Negative offset in data_offsets [{start_off}, {end_off}] for tensor '{name}'.")
+            if end_off < start_off:
+                raise ValueError(f"Inverted offset range [{start_off}, {end_off}] for tensor '{name}'.")
+
+            elem_size = cls.DTYPE_SIZES.get(dtype_str, 4)
+            num_elements = math.prod(shape) if len(shape) > 0 else 1
+            expected_bytes = num_elements * elem_size
+            declared_bytes = end_off - start_off
+            if declared_bytes != expected_bytes:
+                raise ValueError(
+                    f"Tensor '{name}' declared byte length ({declared_bytes}) does not match shape {shape} "
+                    f"and dtype {dtype_str} ({expected_bytes} bytes)."
+                )
+
+            if file_size is not None:
+                if base_offset + end_off > file_size:
+                    raise ValueError(
+                        f"Tensor '{name}' data offsets [{base_offset + start_off}, {base_offset + end_off}] exceed file size ({file_size})."
+                    )
+
+            tensors_by_offset.append((name, start_off, end_off))
+
+        # Check for overlapping tensor byte intervals
+        tensors_by_offset.sort(key=lambda t: t[1])
+        for i in range(len(tensors_by_offset) - 1):
+            t1_name, t1_start, t1_end = tensors_by_offset[i]
+            t2_name, t2_start, t2_end = tensors_by_offset[i+1]
+            if t1_end > t2_start:
+                raise ValueError(
+                    f"Overlapping tensor data offsets detected between '{t1_name}' [{t1_start}, {t1_end}] "
+                    f"and '{t2_name}' [{t2_start}, {t2_end}]."
+                )
+
     @classmethod
     def read_header(cls, file_path: str) -> Tuple[Dict[str, Any], int, str]:
         """Reads Safetensors header without loading tensor payloads."""
         norm_path = os.path.abspath(file_path)
         with open(norm_path, "rb") as f:
+            file_size = os.fstat(f.fileno()).st_size
             header_len_bytes = f.read(8)
             if len(header_len_bytes) < 8:
                 raise ValueError("Invalid safetensors file: too small (< 8 bytes).")
@@ -67,7 +142,9 @@ class SafetensorsHandler:
                 raise ValueError("Truncated safetensors header.")
             header_dict = json.loads(header_json_bytes.decode("utf-8"))
             header_sha256 = hashlib.sha256(header_json_bytes).hexdigest()
-            return header_dict, 8 + header_len, header_sha256
+            base_offset = 8 + header_len
+            cls._validate_header(header_dict, base_offset, file_size)
+            return header_dict, base_offset, header_sha256
 
     @classmethod
     def read_tensor(cls, file_path: str, tensor_name: str) -> Tuple[np.ndarray, Dict[str, Any]]:
@@ -156,6 +233,9 @@ class SafetensorsHandler:
             if src_abs == out_abs:
                 raise ValueError("source_path and output_path cannot refer to the same file.")
         header, base_offset, _ = cls.read_header(src_abs)
+        missing_tensors = [t for t in patched_tensors if t not in header or t == "__metadata__"]
+        if missing_tensors:
+            raise KeyError(f"Patched tensor(s) {missing_tensors} not found in source safetensors file.")
         new_header: Dict[str, Any] = {}
         data_buffers: List[Tuple[Any, ...]] = []
         current_offset = 0
@@ -269,9 +349,33 @@ class SubspaceAnalyzer:
             matrix_2d = matrix
 
         matrix_f32 = matrix_2d.astype(np.float32)
+        if not np.all(np.isfinite(matrix_f32)):
+            return {
+                "status": "error",
+                "error": "Matrix contains non-finite values (NaN or Inf). SVD computation cannot converge.",
+                "matrix_shape": orig_shape,
+                "top_k": 0,
+                "singular_values": [],
+                "energy_retained_ratio": 0.0,
+                "spectral_condition_number": 0.0,
+                "dominant_modes": []
+            }
+
         total_energy = float(np.sum(matrix_f32 ** 2))
 
-        u, s, vt = np.linalg.svd(matrix_f32, full_matrices=False)
+        try:
+            u, s, vt = np.linalg.svd(matrix_f32, full_matrices=False)
+        except np.linalg.LinAlgError as e:
+            return {
+                "status": "error",
+                "error": f"SVD did not converge: {e}",
+                "matrix_shape": orig_shape,
+                "top_k": 0,
+                "singular_values": [],
+                "energy_retained_ratio": 0.0,
+                "spectral_condition_number": 0.0,
+                "dominant_modes": []
+            }
         k = min(max(int(top_k), 1), 64, len(s))
 
         singular_values = s[:k].tolist()

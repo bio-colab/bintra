@@ -7,6 +7,7 @@ and hardware problem codes (CM_PROB_*).
 """
 
 import os
+import sys
 import ctypes
 from ctypes import wintypes
 from typing import Dict, Any, List, Optional

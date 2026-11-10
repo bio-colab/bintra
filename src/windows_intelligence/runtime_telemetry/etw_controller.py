@@ -6,6 +6,7 @@ Queries active ETW trace sessions and interrogates critical diagnostic providers
 """
 
 import os
+import sys
 import ctypes
 from ctypes import wintypes
 from typing import Dict, Any, List, Optional

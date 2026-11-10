@@ -795,8 +795,11 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
         tools_res = server.handle_tools_list({})
         self.assertIn("tools", tools_res)
-        self.assertEqual(len(tools_res["tools"]), 31)
+        self.assertEqual(len(tools_res["tools"]), 34)
         tool_names = [t["name"] for t in tools_res["tools"]]
+        self.assertIn("rea_memory_scan", tool_names)
+        self.assertIn("rea_pointer_scan", tool_names)
+        self.assertIn("rea_struct_dissect", tool_names)
         self.assertIn("rea_ghidra_live_bridge", tool_names)
         self.assertIn("rea_device_driver_intelligence", tool_names)
         self.assertIn("rea_process_resource_audit", tool_names)

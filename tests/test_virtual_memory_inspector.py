@@ -18,6 +18,9 @@ from windows_intelligence.runtime_telemetry import (
     VirtualMemoryInspector,
     ProcessMemoryMapSnapshot,
     ProcessMemoryRegion,
+    ProcessMemoryScanner,
+    PointerScanner,
+    StructureDissector,
 )
 from windows_intelligence.runtime_telemetry.virtual_memory_inspector import (
     MEM_COMMIT,
@@ -211,6 +214,100 @@ class TestVirtualMemoryInspector(unittest.TestCase):
         # Execute address classification via MCP
         null_res = server.dispatch_tool("rea_vad_inspect", {"pid": self.pid, "address": "0x0"})
         self.assertEqual(null_res["status"], "FAULT_NULL_DEREFERENCE")
+
+    def test_read_process_memory_safe_chunking(self):
+        """Verifies safe, read-only memory reading via kernel32.ReadProcessMemory."""
+        import ctypes
+        import struct
+        test_val = ctypes.c_int32(133742)
+        val_addr = ctypes.addressof(test_val)
+
+        raw = VirtualMemoryInspector.read_process_memory(self.pid, val_addr, 4)
+        self.assertEqual(len(raw), 4)
+        (recovered_int,) = struct.unpack("<i", raw)
+        self.assertEqual(recovered_int, 133742)
+
+    def test_process_memory_scanner_first_and_next_scan(self):
+        """Verifies First Scan and Next Scan differential value filtering."""
+        import ctypes
+        test_val = ctypes.c_int32(987654)
+        val_addr = ctypes.addressof(test_val)
+
+        # 1. First Scan: find exact value
+        res_first = ProcessMemoryScanner.first_scan(
+            pid=self.pid,
+            data_type="int32",
+            scan_type="EXACT_VALUE",
+            value=987654,
+            writable_only=True
+        )
+        self.assertIn("session_id", res_first)
+        self.assertGreaterEqual(res_first["total_candidates"], 1)
+
+        sid = res_first["session_id"]
+
+        # Modify value in place
+        test_val.value = 987700
+
+        # 2. Next Scan: find INCREASED_VALUE
+        res_next = ProcessMemoryScanner.next_scan(
+            session_id=sid,
+            scan_type="INCREASED_VALUE"
+        )
+        self.assertGreaterEqual(res_next["surviving_count"], 1)
+        surv_addrs = [c["address_int"] for c in res_next["candidates_sample"]]
+        self.assertIn(val_addr, surv_addrs)
+
+    def test_structure_dissector_inferred_types(self):
+        """Verifies runtime structure dissection and C struct generation."""
+        import ctypes
+        class DummyEntity(ctypes.Structure):
+            _fields_ = [
+                ("flags", ctypes.c_int32),
+                ("health", ctypes.c_float),
+                ("score", ctypes.c_uint64),
+                ("magic", ctypes.c_uint64)
+            ]
+        entity = DummyEntity(flags=1, health=100.0, score=5000, magic=0xDEADBEEF)
+        entity_addr = ctypes.addressof(entity)
+
+        report = StructureDissector.dissect(pid=self.pid, base_address=entity_addr, size=24)
+        self.assertEqual(report["status"], "success")
+        self.assertEqual(report["fields_count"], 3)
+        self.assertIn("struct Reconstructed_", report["c_struct_definition"])
+        self.assertIn("field_0x0", report["c_struct_definition"])
+
+    def test_diff_snapshots_mutations(self):
+        """Verifies diff_snapshots tracking of region resizing, type mutations, and protection."""
+        snap_a = ProcessMemoryMapSnapshot(self.pid, "test.exe")
+        r1 = ProcessMemoryRegion(0x1000, 0x1000, 0x1000, MEM_COMMIT, PAGE_READWRITE, PAGE_READWRITE, MEM_PRIVATE, "HEAP")
+        snap_a.add_region(r1)
+
+        snap_b = ProcessMemoryMapSnapshot(self.pid, "test.exe")
+        r2 = ProcessMemoryRegion(0x1000, 0x1000, 0x2000, MEM_COMMIT, PAGE_READONLY, PAGE_READWRITE, MEM_PRIVATE, "HEAP")
+        snap_b.add_region(r2)
+
+        diff = VirtualMemoryInspector.diff_snapshots(snap_a, snap_b)
+        self.assertEqual(diff["mutated_regions_count"], 1)
+        self.assertEqual(diff["protection_modifications_count"], 1)
+        self.assertEqual(diff["mutated_regions"][0]["mutations"]["new_size"], 0x2000)
+        self.assertEqual(diff["mutated_regions"][0]["mutations"]["old_size"], 0x1000)
+
+    def test_pointer_scanner_resolution(self):
+        """Verifies multi-level static/dynamic pointer resolution."""
+        import ctypes
+        target_obj = (ctypes.c_uint64 * 4)(10, 20, 30, 40)
+        target_addr = ctypes.addressof(target_obj)
+
+        res = PointerScanner.find_pointer_paths(
+            pid=self.pid,
+            target_address=target_addr,
+            max_depth=2,
+            max_offset=0x1000
+        )
+        self.assertEqual(res["pid"], self.pid)
+        self.assertIn("paths", res)
+        self.assertIsInstance(res["paths"], list)
 
 
 if __name__ == "__main__":

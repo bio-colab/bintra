@@ -169,12 +169,15 @@ class MiniDumpParser:
                     "file_path": dmp_path,
                     "format": "MINIDUMP_MDMP",
                     "timestamp": time_date,
+                    "process_id": misc_info.get("process_id") if misc_info else None,
                     "stream_count": num_streams,
                     "streams": streams_detected,
                     "system_info": system_info,
                     "misc_info": misc_info,
                     "thread_count": len(threads),
                     "module_count": len(modules),
+                    "threads": threads,
+                    "modules": modules,
                     "exception_info": exception_info,
                     "modules_sample": [m["name"] for m in modules[:10]]
                 }
@@ -317,6 +320,7 @@ class MiniDumpParser:
 
             info["access_violation_details"] = {
                 "operation": access_type_name,
+                "access_type": access_type_name,
                 "target_virtual_address": hex(target_addr),
                 "is_null_pointer_dereference": is_null_ptr,
                 "probable_cause": "Hypothesis: Probable NULL Pointer Dereference (Access target < 0x10000)" if is_null_ptr

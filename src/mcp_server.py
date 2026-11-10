@@ -460,6 +460,107 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
+        "name": "rea_memory_scan",
+        "description": "Performs read-only virtual memory scanning across a target Windows process (First Scan / Next Scan) to locate addresses matching specific values (int8..int64, float, double, bytes, string) and conditions (exact, between, changed, unchanged, increased, decreased).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pid": {
+                    "type": "integer",
+                    "description": "Target process ID (PID) to scan"
+                },
+                "value_type": {
+                    "type": "string",
+                    "description": "Value type: 'int8', 'uint8', 'int16', 'uint16', 'int32', 'uint32', 'int64', 'uint64', 'float', 'double', 'bytes', 'string'",
+                    "default": "int32"
+                },
+                "scan_mode": {
+                    "type": "string",
+                    "description": "Scan mode: 'exact', 'between', 'unknown', 'increased', 'decreased', 'changed', 'unchanged'",
+                    "default": "exact"
+                },
+                "target_value": {
+                    "description": "Target numeric value, hex string for bytes, or search string"
+                },
+                "high_value": {
+                    "description": "Optional upper bound for 'between' scan mode"
+                },
+                "candidate_addresses": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Optional list of candidate addresses from a previous scan pass to filter via Next Scan"
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of candidate matches to return (default: 100)",
+                    "default": 100
+                }
+            },
+            "required": ["pid"]
+        }
+    },
+    {
+        "name": "rea_pointer_scan",
+        "description": "Resolves multi-level static module base pointer chains pointing to a target dynamic address ([Module.dll + RVA] + Offset1 + Offset2 -> Target).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pid": {
+                    "type": "integer",
+                    "description": "Target process ID (PID)"
+                },
+                "target_address": {
+                    "type": "string",
+                    "description": "Target dynamic memory address (e.g. '0x7fff12340000')"
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "description": "Maximum pointer indirection depth (1 to 3, default: 2)",
+                    "default": 2
+                },
+                "max_offset": {
+                    "type": "integer",
+                    "description": "Maximum struct offset (default: 4096)",
+                    "default": 4096
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of pointer paths to return (default: 20)",
+                    "default": 20
+                }
+            },
+            "required": ["pid", "target_address"]
+        }
+    },
+    {
+        "name": "rea_struct_dissect",
+        "description": "Performs runtime object memory field analysis at a target address: classifies virtual method tables (vftables), heap/stack pointers, floats, and integers, and synthesizes a formal C struct definition.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pid": {
+                    "type": "integer",
+                    "description": "Target process ID (PID)"
+                },
+                "address": {
+                    "type": "string",
+                    "description": "Target object base address (e.g. '0x7fff12340000')"
+                },
+                "size": {
+                    "type": "integer",
+                    "description": "Size in bytes to dissect (default: 64)",
+                    "default": 64
+                },
+                "struct_name": {
+                    "type": "string",
+                    "description": "Name for the generated C struct (default: 'DissectedObject')",
+                    "default": "DissectedObject"
+                }
+            },
+            "required": ["pid", "address"]
+        }
+    },
+    {
         "name": "rea_crash_rca",
         "description": "Performs automated root cause analysis (RCA) on a Windows MiniDump (.dmp): extracts ExceptionRecord, classifies violated memory address (Null-trap, heap, unmapped), disassembles the faulting instruction window using Capstone, identifies the culprit register (e.g. RCX=0x0), and provides actionable developer remediation.",
         "inputSchema": {
@@ -720,6 +821,9 @@ class ReaMcpServer:
         "rea_etw_audit": ("cap.event_log.read", "READ", "session_name"),
         "rea_etw_capture": ("cap.event_log.read", "READ", "session_name"),
         "rea_vad_inspect": ("cap.process.query", "QUERY", "pid"),
+        "rea_memory_scan": ("cap.process.query", "READ", "pid"),
+        "rea_pointer_scan": ("cap.process.query", "READ", "pid"),
+        "rea_struct_dissect": ("cap.process.query", "READ", "pid"),
         "rea_crash_rca": ("cap.minidump.read", "READ", "dmp_path"),
         "rea_ghidra_live_bridge": ("cap.file.read", "READ", None),
         "rea_evidence_graph": ("cap.file.read", "READ", "binary_path"),
@@ -1106,6 +1210,91 @@ class ReaMcpServer:
                 addr = int(addr_str, 0)
                 return snapshot.classify_address(addr)
             return snapshot.to_dict(include_regions=bool(args.get("include_regions", False)))
+
+        elif name == "rea_memory_scan":
+            pid = int(args.get("pid", 0))
+            if pid <= 0:
+                raise ValueError("Valid 'pid' (> 0) is required.")
+            from windows_intelligence import ProcessMemoryScanner
+            scanner = ProcessMemoryScanner(pid=pid)
+            val_type = args.get("value_type", "int32")
+            mode = args.get("scan_mode", "exact")
+            mode_map = {
+                "exact": "EXACT_VALUE",
+                "between": "VALUE_BETWEEN",
+                "unknown": "UNKNOWN_INITIAL_VALUE",
+                "increased": "INCREASED_VALUE",
+                "decreased": "DECREASED_VALUE",
+                "changed": "CHANGED_VALUE",
+                "unchanged": "UNCHANGED_VALUE",
+            }
+            scan_mode = mode_map.get(mode, "EXACT_VALUE")
+            val = args.get("target_value")
+            high_val = args.get("high_value")
+            if val is not None:
+                if val_type in ("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64") and isinstance(val, str):
+                    val = int(val, 0)
+                elif val_type in ("float", "double") and isinstance(val, str):
+                    val = float(val)
+                elif val_type == "bytes" and isinstance(val, str):
+                    val = bytes.fromhex(val.replace(" ", "").replace("0x", ""))
+            if high_val is not None:
+                if val_type in ("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64") and isinstance(high_val, str):
+                    high_val = int(high_val, 0)
+                elif val_type in ("float", "double") and isinstance(high_val, str):
+                    high_val = float(high_val)
+
+            sid = args.get("session_id")
+            if sid:
+                return ProcessMemoryScanner.next_scan(
+                    session_id=sid,
+                    scan_type=scan_mode,
+                    value=val,
+                    min_val=val,
+                    max_val=high_val
+                )
+            else:
+                return ProcessMemoryScanner.first_scan(
+                    pid=pid,
+                    data_type=val_type,
+                    scan_type=scan_mode,
+                    value=val,
+                    min_val=val,
+                    max_val=high_val,
+                    max_candidates=int(args.get("max_results", 50000))
+                )
+
+        elif name == "rea_pointer_scan":
+            pid = int(args.get("pid", 0))
+            if pid <= 0:
+                raise ValueError("Valid 'pid' (> 0) is required.")
+            target_str = args.get("target_address")
+            if not target_str:
+                raise ValueError("'target_address' is required.")
+            target_addr = int(target_str, 0) if isinstance(target_str, str) else int(target_str)
+            from windows_intelligence import PointerScanner
+            depth = min(3, max(1, int(args.get("max_depth", 2))))
+            offset = int(args.get("max_offset", 4096))
+            max_r = int(args.get("max_results", 20))
+            return PointerScanner.find_pointer_paths(
+                pid=pid,
+                target_address=target_addr,
+                max_depth=depth,
+                max_offset=offset,
+                max_results=max_r
+            )
+
+        elif name == "rea_struct_dissect":
+            pid = int(args.get("pid", 0))
+            if pid <= 0:
+                raise ValueError("Valid 'pid' (> 0) is required.")
+            addr_str = args.get("address")
+            if not addr_str:
+                raise ValueError("'address' is required.")
+            addr = int(addr_str, 0) if isinstance(addr_str, str) else int(addr_str)
+            size = min(4096, max(8, int(args.get("size", 64))))
+            from windows_intelligence import StructureDissector
+            return StructureDissector.dissect(pid=pid, base_address=addr, size=size)
 
         elif name == "rea_crash_rca":
             dmp_p = args.get("dmp_path")

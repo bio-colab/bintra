@@ -8,7 +8,14 @@ Event Tracing for Windows (ETW) provider inspection, and passive Virtual Memory 
 from .minidump_parser import MiniDumpParser
 from .event_log_collector import EventLogCollector
 from .etw_controller import EtwController
-from .virtual_memory_inspector import VirtualMemoryInspector, ProcessMemoryMapSnapshot, ProcessMemoryRegion
+from .virtual_memory_inspector import (
+    VirtualMemoryInspector,
+    ProcessMemoryMapSnapshot,
+    ProcessMemoryRegion,
+    ProcessMemoryScanner,
+    PointerScanner,
+    StructureDissector
+)
 from .crash_rca_engine import CrashRootCauseAnalyzer
 from .etw_capture_engine import EtwLiveCaptureSession, EtwEventRecord, EtwTimelineCorrelator
 
@@ -19,6 +26,9 @@ __all__ = [
     "VirtualMemoryInspector",
     "ProcessMemoryMapSnapshot",
     "ProcessMemoryRegion",
+    "ProcessMemoryScanner",
+    "PointerScanner",
+    "StructureDissector",
     "CrashRootCauseAnalyzer",
     "EtwLiveCaptureSession",
     "EtwEventRecord",

@@ -11,6 +11,7 @@ import os
 import sys
 import time
 import ctypes
+import threading
 from ctypes import wintypes
 from typing import Dict, Any, List, Optional, Tuple, Callable
 from collections import deque
@@ -98,6 +99,9 @@ class EtwLiveCaptureSession:
         self.trace_handle: Optional[int] = None
         self.status_description = "INITIALIZED"
         self.start_time: Optional[float] = None
+        self._owns_session = False
+        self._consumer_thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
 
     def start_session(self, providers: Optional[List[str]] = None) -> Dict[str, Any]:
         """
@@ -113,6 +117,7 @@ class EtwLiveCaptureSession:
         )
 
         self.start_time = time.time()
+        self._stop_event.clear()
 
         if os.name != "nt":
             self.is_running = True
@@ -126,8 +131,6 @@ class EtwLiveCaptureSession:
 
         try:
             advapi32 = ctypes.windll.advapi32
-            # Check if session already exists and stop it cleanly
-            self._stop_session_native()
 
             advapi32.StartTraceW.argtypes = [
                 ctypes.POINTER(ctypes.c_uint64), wintypes.LPCWSTR, ctypes.POINTER(EVENT_TRACE_PROPERTIES)
@@ -152,6 +155,7 @@ class EtwLiveCaptureSession:
             if res == 0:
                 self.trace_handle = h_trace.value
                 self.is_running = True
+                self._owns_session = True
                 self.status_description = "ACTIVE_REALTIME"
 
                 # Enable requested providers
@@ -160,6 +164,9 @@ class EtwLiveCaptureSession:
                 for p_name in prov_list:
                     if self._enable_provider_native(p_name):
                         enabled.append(p_name)
+
+                # Start background event consumer
+                self._start_event_consumer()
 
                 return {
                     "status": "success",
@@ -172,11 +179,14 @@ class EtwLiveCaptureSession:
                 # ERROR_ACCESS_DENIED (requires Administrator for real-time kernel logger)
                 self.is_running = True
                 self.status_description = "NON_ELEVATED_INSPECTION_MODE"
+                # Start non-elevated consumer via EventLog API
+                self._start_event_consumer()
+
                 return {
                     "status": "non_elevated",
                     "session_name": self.session_name,
                     "mode": "USER_MODE_TELEMETRY",
-                    "warning": "Real-time kernel trace requires Administrator privileges. Operating in non-elevated telemetry mode."
+                    "warning": "Real-time kernel trace requires Administrator privileges. Operating in non-elevated EventLog telemetry mode."
                 }
             else:
                 self.status_description = f"START_FAILED_0x{res:X}"
@@ -196,15 +206,89 @@ class EtwLiveCaptureSession:
             }
 
     def _enable_provider_native(self, provider_name: str) -> bool:
-        """Enables a provider GUID on the active real-time trace session."""
+        """Enables a provider GUID on the active real-time trace session via EnableTraceEx2."""
         if not self.trace_handle or os.name != "nt":
             return False
-        # EnableTraceEx2 logic or graceful pass
-        return True
+
+        guid_str = KNOWN_PROVIDER_GUIDS.get(provider_name)
+        if not guid_str:
+            return False
+
+        try:
+            ole32 = ctypes.windll.ole32
+            advapi32 = ctypes.windll.advapi32
+
+            class GUID(ctypes.Structure):
+                _fields_ = [
+                    ("Data1", wintypes.DWORD),
+                    ("Data2", wintypes.WORD),
+                    ("Data3", wintypes.WORD),
+                    ("Data4", wintypes.BYTE * 8)
+                ]
+
+            guid = GUID()
+            hr = ole32.CLSIDFromString(ctypes.c_wchar_p(guid_str), ctypes.byref(guid))
+            if hr != 0:
+                return False
+
+            advapi32.EnableTraceEx2.argtypes = [
+                ctypes.c_uint64,
+                ctypes.POINTER(GUID),
+                wintypes.ULONG,
+                ctypes.c_ubyte,
+                ctypes.c_uint64,
+                ctypes.c_uint64,
+                wintypes.ULONG,
+                ctypes.c_void_p
+            ]
+            advapi32.EnableTraceEx2.restype = wintypes.ULONG
+
+            status = advapi32.EnableTraceEx2(
+                self.trace_handle,
+                ctypes.byref(guid),
+                1,  # EVENT_CONTROL_CODE_ENABLE_PROVIDER
+                5,  # TRACE_LEVEL_VERBOSE
+                0,
+                0,
+                0,
+                None
+            )
+            return (status == 0)
+        except Exception:
+            return False
+
+    def _start_event_consumer(self) -> None:
+        """Starts asynchronous thread consuming system and diagnostic events."""
+        def _consumer_loop():
+            from .event_log_collector import EventLogCollector
+            while not self._stop_event.is_set():
+                try:
+                    # Collect recent application and system diagnostic events
+                    app_evs = EventLogCollector.query_events("Application", limit=10)
+                    for ev in app_evs:
+                        ev_pid = ev.get("process_id", 0)
+                        if self.target_pid is None or ev_pid == 0 or ev_pid == self.target_pid:
+                            rec = EtwEventRecord(
+                                timestamp=ev.get("time_created", time.time()),
+                                provider_name=ev.get("provider_name", "Application"),
+                                event_id=ev.get("event_id", 0),
+                                pid=ev_pid,
+                                tid=ev.get("thread_id", 0),
+                                event_type=ev.get("level", "INFO"),
+                                details={"message": ev.get("message", "")[:120]}
+                            )
+                            self.record_event(rec)
+                except Exception:
+                    pass
+                time.sleep(0.5)
+
+        self._consumer_thread = threading.Thread(target=_consumer_loop, daemon=True)
+        self._consumer_thread.start()
 
     def stop_session(self) -> Dict[str, Any]:
         """Stops the real-time ETW trace session and releases kernel handles."""
         self.is_running = False
+        self._stop_event.set()
         duration = round(time.time() - (self.start_time or time.time()), 3)
 
         if os.name == "nt":
@@ -218,7 +302,7 @@ class EtwLiveCaptureSession:
         }
 
     def _stop_session_native(self) -> None:
-        if os.name != "nt":
+        if os.name != "nt" or not getattr(self, "_owns_session", False):
             return
         try:
             advapi32 = ctypes.windll.advapi32
@@ -235,6 +319,7 @@ class EtwLiveCaptureSession:
             prop.LoggerNameOffset = ctypes.sizeof(EVENT_TRACE_PROPERTIES)
 
             advapi32.ControlTraceW(0, self.session_name, prop_ptr, EVENT_TRACE_CONTROL_STOP)
+            self._owns_session = False
         except Exception:
             pass
 

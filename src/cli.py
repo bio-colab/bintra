@@ -41,7 +41,7 @@ WEIGHT_COMMANDS = {
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless", "ghidra-bridge"}
-WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture"}
+WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct"}
 
 
 def print_help():
@@ -101,6 +101,9 @@ Windows System Intelligence & Failure Diagnostic Commands:
   proc-modules      Locate running processes that have loaded a specific module or DLL
   dev-match         Match Plug and Play (PnP) hardware IDs against driver INF store and problem codes
   vad-inspect       Inspect passive virtual memory map (VAD) and classify addresses (Heap/Stack/Image)
+  mem-scan          Non-intrusive read-only memory value search (First/Next scan: exact, changed, between)
+  pointer-scan      Multi-level backward pointer path resolver finding static module roots
+  dissect-struct    Runtime object structure field analysis (vftables, pointers, floats, ints, C struct)
   crash-rca         Automated Crash Root Cause Analysis (MiniDump + Disassembly + Culprit Register)
   etw-capture       Establish real-time ETW capture session and stream diagnostic timeline events
 
@@ -168,7 +171,8 @@ def _dispatch_cli():
             RegistryCatalog, WindowsRegistryReader, WindowsRegistryAnalyzer,
             NativeDeviceInspector, KernelDriverInspector, ServiceManagerInspector, ProcessMitigationInspector,
             MiniDumpParser, EventLogCollector, EtwController, VirtualMemoryInspector, CrashRootCauseAnalyzer,
-            EtwLiveCaptureSession, EtwTimelineCorrelator
+            EtwLiveCaptureSession, EtwTimelineCorrelator,
+            ProcessMemoryScanner, PointerScanner, StructureDissector
         )
         if cmd == "win-audit":
             parser = argparse.ArgumentParser(description="Profile host Windows OS, devices, and security context")
@@ -586,6 +590,204 @@ def _dispatch_cli():
                         f"- **Total Contiguous Regions:** {sum_data['total_regions']}",
                     ]
                     print("\n".join(lines))
+            else:
+                print(json.dumps(res, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "mem-scan":
+            parser = argparse.ArgumentParser(prog="rea mem-scan", description="Non-intrusive read-only memory value search (First/Next scan)")
+            parser.add_argument("--pid", type=int, required=True, help="Target process PID to scan")
+            parser.add_argument("--type", default="int32", choices=["int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float", "double", "bytes", "string"], help="Data type to scan")
+            parser.add_argument("--mode", default="exact", choices=["exact", "between", "unknown", "increased", "decreased", "changed", "unchanged"], help="Scan mode")
+            parser.add_argument("--value", default=None, help="Target value (or hex string for bytes)")
+            parser.add_argument("--high-value", default=None, help="High value for 'between' scan mode")
+            parser.add_argument("--session-file", default=None, help="Path to state file to enable iterative First Scan -> Next Scan filtering")
+            parser.add_argument("--max-results", type=int, default=100, help="Maximum number of matches to display")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args(sys.argv[2:])
+
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="mem-scan",
+                target=f"PID_{args.pid}",
+                capability=Capability.PROCESS_QUERY,
+                access_mode="READ"
+            )
+
+            val = args.value
+            high_val = args.high_value
+            if val is not None:
+                if args.type in ("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64"):
+                    val = int(val, 0)
+                elif args.type in ("float", "double"):
+                    val = float(val)
+                elif args.type == "bytes":
+                    val = bytes.fromhex(val.replace(" ", "").replace("0x", ""))
+            if high_val is not None:
+                if args.type in ("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64"):
+                    high_val = int(high_val, 0)
+                elif args.type in ("float", "double"):
+                    high_val = float(high_val)
+
+            mode_map = {
+                "exact": "EXACT_VALUE",
+                "between": "VALUE_BETWEEN",
+                "unknown": "UNKNOWN_INITIAL_VALUE",
+                "increased": "INCREASED_VALUE",
+                "decreased": "DECREASED_VALUE",
+                "changed": "CHANGED_VALUE",
+                "unchanged": "UNCHANGED_VALUE",
+            }
+            scan_mode = mode_map.get(args.mode, "EXACT_VALUE")
+
+            sid = None
+            if args.session_file and os.path.exists(args.session_file):
+                try:
+                    with open(args.session_file, "r", encoding="utf-8") as f:
+                        session_data = json.load(f)
+                    sid = session_data.get("session_id")
+                except Exception:
+                    pass
+
+            if sid:
+                res = ProcessMemoryScanner.next_scan(
+                    session_id=sid,
+                    scan_type=scan_mode,
+                    value=val,
+                    min_val=val,
+                    max_val=high_val
+                )
+            else:
+                res = ProcessMemoryScanner.first_scan(
+                    pid=args.pid,
+                    data_type=args.type,
+                    scan_type=scan_mode,
+                    value=val,
+                    min_val=val,
+                    max_val=high_val
+                )
+
+            if args.session_file and res.get("session_id"):
+                try:
+                    with open(args.session_file, "w", encoding="utf-8") as f:
+                        json.dump(res, f, indent=2)
+                except Exception:
+                    pass
+
+            if args.format == "md":
+                is_next = "surviving_count" in res
+                total = res.get("surviving_count") if is_next else res.get("total_candidates", 0)
+                sample = res.get("surviving_sample") if is_next else res.get("candidates_sample", [])
+                lines = [
+                    f"# Memory Scan Report (PID: {args.pid})",
+                    f"- **Scan Pass:** `{'Next Scan' if is_next else 'First Scan'}` (Session ID: `{res.get('session_id')}`)",
+                    f"- **Type / Mode:** `{args.type}` / `{scan_mode}`",
+                    f"- **Total Candidates Found:** {total}",
+                    "",
+                    "| Address | Value | Category |",
+                    "| :--- | :--- | :--- |"
+                ]
+                for m in sample[:args.max_results]:
+                    addr_hex = m.get("address", "")
+                    cur_val = m.get("value", "")
+                    cat = m.get("category", "")
+                    lines.append(f"| `{addr_hex}` | `{cur_val}` | `{cat}` |")
+                print("\n".join(lines))
+            else:
+                print(json.dumps(res, indent=2, ensure_ascii=False, default=str))
+            return
+
+        elif cmd == "pointer-scan":
+            parser = argparse.ArgumentParser(prog="rea pointer-scan", description="Multi-level static module base pointer path resolver")
+            parser.add_argument("--pid", type=int, required=True, help="Target process PID")
+            parser.add_argument("--target", required=True, help="Target dynamic address (e.g. '0x7fff12340000')")
+            parser.add_argument("--max-depth", type=int, default=2, choices=[1, 2, 3], help="Maximum pointer indirection depth")
+            parser.add_argument("--max-offset", type=int, default=4096, help="Maximum struct offset (default: 4096)")
+            parser.add_argument("--max-results", type=int, default=20, help="Maximum number of resolved pointer paths")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args(sys.argv[2:])
+
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="pointer-scan",
+                target=f"PID_{args.pid}",
+                capability=Capability.PROCESS_QUERY,
+                access_mode="READ"
+            )
+
+            target_addr = int(args.target, 0)
+            res = PointerScanner.find_pointer_paths(
+                pid=args.pid,
+                target_address=target_addr,
+                max_depth=args.max_depth,
+                max_offset=args.max_offset,
+                max_results=args.max_results
+            )
+
+            if args.format == "md":
+                paths = res.get("paths", [])
+                lines = [
+                    f"# Pointer Chain Discovery for `0x{target_addr:016X}` (PID: {args.pid})",
+                    f"- **Max Depth:** {args.max_depth} | **Paths Found:** {len(paths)}",
+                    "",
+                    "| Index | Base Module | Expression | Offsets |",
+                    "| :--- | :--- | :--- | :--- |"
+                ]
+                for idx, p in enumerate(paths, 1):
+                    mod_name = p.get("base_module") or "Unknown"
+                    expr = p.get("expression", "")
+                    offsets_str = " -> ".join(p.get("offsets", []))
+                    lines.append(f"| {idx} | `{mod_name}` | `{expr}` | `{offsets_str}` |")
+                print("\n".join(lines))
+            else:
+                print(json.dumps(res, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "dissect-struct":
+            parser = argparse.ArgumentParser(prog="rea dissect-struct", description="Runtime object field analysis and C struct generation")
+            parser.add_argument("--pid", type=int, required=True, help="Target process PID")
+            parser.add_argument("--address", required=True, help="Target object base address (e.g. '0x7fff12340000')")
+            parser.add_argument("--size", type=int, default=64, help="Size of object memory to dissect in bytes (default: 64)")
+            parser.add_argument("--name", default="ObjectLayout", help="Name for emitted C struct")
+            parser.add_argument("--format", choices=["json", "c", "md"], default="json", help="Output format")
+            args = parser.parse_args(sys.argv[2:])
+
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="dissect-struct",
+                target=f"PID_{args.pid}",
+                capability=Capability.PROCESS_QUERY,
+                access_mode="READ"
+            )
+
+            addr = int(args.address, 0)
+            res = StructureDissector.dissect(pid=args.pid, base_address=addr, size=args.size)
+
+            if args.format == "c":
+                print(res.get("c_struct_definition", "// No structure definition generated"))
+            elif args.format == "md":
+                c_code = res.get("c_struct_definition", "")
+                fields = res.get("fields", [])
+                lines = [
+                    f"# Structure Dissection at `0x{addr:016X}` (PID: {args.pid})",
+                    f"- **Analyzed Size:** {args.size} bytes | **Fields Reconstructed:** {len(fields)}",
+                    "",
+                    "```c",
+                    c_code,
+                    "```",
+                    "",
+                    "| Offset | Type | Description |",
+                    "| :--- | :--- | :--- |"
+                ]
+                for f in fields:
+                    off_hex = f"+0x{f.get('offset', 0):04X}"
+                    f_type = f.get('inferred_type', 'unknown')
+                    desc = f.get('description', '')
+                    lines.append(f"| `{off_hex}` | `{f_type}` | {desc} |")
+                print("\n".join(lines))
             else:
                 print(json.dumps(res, indent=2, ensure_ascii=False))
             return

@@ -94,7 +94,7 @@ class CrashRootCauseAnalyzer:
 
         # Access Violation parameters
         av_details = exc_info.get("access_violation_details") or {}
-        access_type = av_details.get("access_type", "UNKNOWN")
+        access_type = av_details.get("access_type") or av_details.get("operation") or "UNKNOWN"
         target_vaddr_str = av_details.get("target_virtual_address", "0x0")
         try:
             target_vaddr = int(target_vaddr_str, 16) if isinstance(target_vaddr_str, str) else int(target_vaddr_str)
@@ -169,6 +169,36 @@ class CrashRootCauseAnalyzer:
                     "description": f"Target address matches known debug allocator poison pattern: {pattern_desc}."
                 }
 
+        # Check thread stacks in dump
+        for th in parsed_dump.get("threads", []):
+            st_base_raw = th.get("stack_base")
+            st_size = th.get("stack_size_bytes", 0)
+            if st_base_raw and st_size > 0:
+                try:
+                    st_base = int(st_base_raw, 16) if isinstance(st_base_raw, str) else int(st_base_raw)
+                    low = min(st_base, st_base - st_size) if st_base > st_size else st_base
+                    high = max(st_base, st_base + st_size)
+                    if low <= target_vaddr <= high:
+                        return {
+                            "category": "THREAD_STACK",
+                            "status": "VALID_STACK_REGION",
+                            "thread_id": th.get("thread_id"),
+                            "description": f"Target address resides within the stack bounds of Thread {th.get('thread_id')}."
+                        }
+                except ValueError:
+                    pass
+
+        # Check memory segments if present in dump
+        for mem in parsed_dump.get("memory_segments", []):
+            m_start = mem.get("start", 0)
+            m_size = mem.get("size", 0)
+            if m_start <= target_vaddr < m_start + m_size:
+                return {
+                    "category": mem.get("category", "COMMITTED_DYNAMIC_MEMORY"),
+                    "status": "VALID_MAPPED_SEGMENT",
+                    "description": f"Target address belongs to committed memory segment at 0x{m_start:X} ({m_size} bytes)."
+                }
+
         # Check against modules in dump
         for mod in parsed_dump.get("modules", []):
             m_base = int(mod.get("base_address", "0x0"), 16) if isinstance(mod.get("base_address"), str) else int(mod.get("base_address", 0))
@@ -181,10 +211,21 @@ class CrashRootCauseAnalyzer:
                     "description": f"Target address resides within loaded module {mod.get('name')}."
                 }
 
+        # Cross-query live VAD if PID is recorded in dump (Stream 15)
+        pid = parsed_dump.get("process_id")
+        if pid and pid > 0:
+            try:
+                snap = VirtualMemoryInspector.inspect_process(pid)
+                cls_info = snap.classify_address(target_vaddr)
+                if cls_info.get("status") == "COMMITTED":
+                    return cls_info
+            except Exception:
+                pass
+
         return {
             "category": "UNMAPPED_DYNAMIC_MEMORY",
             "status": "WILD_OR_FREED_POINTER",
-            "description": "Target address does not belong to any mapped PE module (likely unallocated heap or dangling pointer)."
+            "description": "Target address does not belong to any mapped PE module or thread stack (likely unallocated heap or dangling pointer)."
         }
 
     @classmethod
@@ -229,39 +270,67 @@ class CrashRootCauseAnalyzer:
                     "reason": f"Fault RVA 0x{fault_rva:X} does not map to any initialized file section in '{resolved_bin}'."
                 }
 
-            with open(resolved_bin, "rb") as f:
-                # Read window: 32 bytes before, 48 bytes after
-                start_off = max(0, file_offset - 32)
-                f.seek(start_off)
-                chunk = f.read(80)
-
             mode = CS_MODE_64 if arch == "x64" else CS_MODE_32
             md = Cs(CS_ARCH_X86, mode)
             md.detail = True
 
-            instructions = []
-            chunk_base_rva = fault_rva - (file_offset - start_off)
-            offending_inst = None
+            # 1. Guaranteed disassembly of the offending instruction and forward window
+            with open(resolved_bin, "rb") as f:
+                f.seek(file_offset)
+                fwd_chunk = f.read(64)
 
-            for inst in md.disasm(chunk, chunk_base_rva):
-                is_fault = (inst.address == fault_rva)
-                inst_entry = {
-                    "rva": f"0x{inst.address:X}",
-                    "mnemonic": inst.mnemonic,
-                    "op_str": inst.op_str,
-                    "bytes": inst.bytes.hex(),
-                    "is_faulting_instruction": is_fault
+            fwd_instructions = list(md.disasm(fwd_chunk, fault_rva))
+            if not fwd_instructions:
+                return {
+                    "available": False,
+                    "reason": f"Failed to decode machine code at fault RVA 0x{fault_rva:X}."
                 }
-                instructions.append(inst_entry)
-                if is_fault:
-                    offending_inst = inst_entry
+
+            offending_inst = {
+                "rva": f"0x{fwd_instructions[0].address:X}",
+                "mnemonic": fwd_instructions[0].mnemonic,
+                "op_str": fwd_instructions[0].op_str,
+                "bytes": fwd_instructions[0].bytes.hex(),
+                "is_faulting_instruction": True
+            }
+
+            # 2. Synchronized lookback for preceding instructions
+            max_lookback = min(32, file_offset)
+            with open(resolved_bin, "rb") as f:
+                f.seek(file_offset - max_lookback)
+                lookback_bytes = f.read(max_lookback)
+
+            best_pre = []
+            for back_off in range(max_lookback, 0, -1):
+                trial_chunk = lookback_bytes[max_lookback - back_off:]
+                trial_base = fault_rva - back_off
+                trial_insts = list(md.disasm(trial_chunk, trial_base))
+                if trial_insts:
+                    last_inst = trial_insts[-1]
+                    if last_inst.address + last_inst.size == fault_rva:
+                        best_pre = [{
+                            "rva": f"0x{i.address:X}",
+                            "mnemonic": i.mnemonic,
+                            "op_str": i.op_str,
+                            "bytes": i.bytes.hex(),
+                            "is_faulting_instruction": False
+                        } for i in trial_insts]
+                        break
+
+            all_instructions = best_pre + [offending_inst] + [{
+                "rva": f"0x{i.address:X}",
+                "mnemonic": i.mnemonic,
+                "op_str": i.op_str,
+                "bytes": i.bytes.hex(),
+                "is_faulting_instruction": False
+            } for i in fwd_instructions[1:6]]
 
             return {
                 "available": True,
                 "binary_analyzed": resolved_bin,
                 "faulting_rva": f"0x{fault_rva:X}",
                 "offending_instruction": offending_inst,
-                "instructions": instructions
+                "instructions": all_instructions
             }
 
         except Exception as e:

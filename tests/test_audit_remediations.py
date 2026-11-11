@@ -510,11 +510,12 @@ class TestAuditRemediations(unittest.TestCase):
         self.assertEqual(inside_stack.get("category"), "THREAD_STACK")
 
         # F-18: EventLogCollector._execute_wevtutil_fallback must propagate SecurityViolationError (no raw subprocess bypass)
-        with mock.patch("security.safe_subprocess.SafeSubprocessBroker.execute_catalog_command", side_effect=SecurityViolationError("BROKER_DENY")):
-            with mock.patch("subprocess.run") as raw_run:
-                with self.assertRaises(SecurityViolationError):
-                    EventLogCollector._execute_wevtutil_fallback("Application", "*", 5)
-                raw_run.assert_not_called()
+        with mock.patch.object(os, "name", "nt"):
+            with mock.patch("security.safe_subprocess.SafeSubprocessBroker.execute_catalog_command", side_effect=SecurityViolationError("BROKER_DENY")):
+                with mock.patch("subprocess.run") as raw_run:
+                    with self.assertRaises(SecurityViolationError):
+                        EventLogCollector._execute_wevtutil_fallback("Application", "*", 5)
+                    raw_run.assert_not_called()
 
         # F-3: Non-NT ETW capture discloses synthetic simulation honestly
         with mock.patch.object(os, "name", "posix"):

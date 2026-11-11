@@ -1,0 +1,120 @@
+{
+  "test_id": "BINTRA-OBS-007",
+  "start_result": {
+    "status": "non_elevated",
+    "session_name": "Bintra_OBS_Bench_Trace",
+    "mode": "USER_MODE_TELEMETRY",
+    "is_simulated": false,
+    "etw_native_consumer_active": false,
+    "event_consumption_backend": "WEVTAPI_EVENT_LOG_POLLING",
+    "warning": "Real-time kernel trace requires Administrator privileges. Operating in non-elevated EventLog telemetry mode."
+  },
+  "stop_result": {
+    "status": "stopped",
+    "session_name": "Bintra_OBS_Bench_Trace",
+    "duration_seconds": 47.273,
+    "captured_events_buffered": 30,
+    "consumer_errors_count": 0,
+    "consumer_errors": []
+  },
+  "global_timeline_count": 5,
+  "obs_pid_filtered_count": 0,
+  "event_sources_breakdown": {
+    "event_log_polling": 5
+  },
+  "sample_events": [
+    {
+      "timestamp": 1794404579.4116,
+      "time_str": "16:42:59.411",
+      "provider_name": "EventLog",
+      "event_id": 6013,
+      "pid": 0,
+      "tid": 0,
+      "event_type": "INFO",
+      "opcode": 0,
+      "source": "event_log_polling",
+      "details": {
+        "message": "Param_4=76025; Param_5=60; Param_6=-180 Arabic Standard Time",
+        "Param_4": "76025",
+        "Param_5": "60",
+        "Param_6": "-180 Arabic Standard Time"
+      }
+    },
+    {
+      "timestamp": 1794408403.3828,
+      "time_str": "17:46:43.382",
+      "provider_name": "Microsoft-Windows-Security-SPP",
+      "event_id": 16394,
+      "pid": 0,
+      "tid": 0,
+      "event_type": "INFO",
+      "opcode": 0,
+      "source": "event_log_polling",
+      "details": {
+        "message": ""
+      }
+    },
+    {
+      "timestamp": 1794408434.8665,
+      "time_str": "17:47:14.866",
+      "provider_name": "Microsoft-Windows-Security-SPP",
+      "event_id": 16384,
+      "pid": 0,
+      "tid": 0,
+      "event_type": "INFO",
+      "opcode": 0,
+      "source": "event_log_polling",
+      "details": {
+        "message": "Param_0=2027-01-26T10:17:14Z; Param_1=RulesEngine",
+        "Param_0": "2027-01-26T10:17:14Z",
+        "Param_1": "RulesEngine"
+      }
+    },
+    {
+      "timestamp": 1794409200.4353,
+      "time_str": "18:00:00.435",
+      "provider_name": "igcc",
+      "event_id": 0,
+      "pid": 0,
+      "tid": 0,
+      "event_type": "INFO",
+      "opcode": 0,
+      "source": "event_log_polling",
+      "details": {
+        "message": "Param_0=PowerEvent handled successfully by the service.",
+        "Param_0": "PowerEvent handled successfully by the service."
+      }
+    },
+    {
+      "timestamp": 1794409350.151,
+      "time_str": "18:02:30.150",
+      "provider_name": "igcc",
+      "event_id": 0,
+      "pid": 0,
+      "tid": 0,
+      "event_type": "INFO",
+      "opcode": 0,
+      "source": "event_log_polling",
+      "details": {
+        "message": "Param_0=PowerEvent handled successfully by the service.",
+        "Param_0": "PowerEvent handled successfully by the service."
+      }
+    }
+  ],
+  "correlator_summary": {
+    "keys": [
+      "events_count",
+      "event_sources",
+      "has_native_etw_events",
+      "reference_crash_timestamp",
+      "temporal_verdict",
+      "causality_findings",
+      "timeline_sample"
+    ],
+    "total_events_analyzed": null
+  },
+  "cli_etw_audit": {
+    "returncode": 0,
+    "stdout_head": "{\n  \"status\": \"success\",\n  \"is_windows\": true,\n  \"standard_sessions_probed\": 7,\n  \"active_sessions_count\": 5,\n  \"accessible_sessions_count\": 0,\n  \"system_protected_sessions_count\": 5,\n  \"system_total_registered_providers\": 1144,\n  \"active_kernel_providers_count\": 2142,\n  \"active_sessions\": [\n    \"Eventlog-Application\",\n    \"Eventlog-System\",\n    \"DiagLog\",\n    \"Circular Kernel Context Logger\",\n    \"WdiContextLog\"\n  ],\n  \"accessible_sessions\": [],\n  \"system_protected_sessions\": [\n    \"Eventlog-Application\",\n    \"Eventlog-System\",\n    \"DiagLog\",\n    \"Circular Kernel Context Logger\",\n    \"WdiContextLog\"\n  ],\n  \"sessions\": [\n    {\n      \"session_name\": \"Eventlog-Application\",\n      \"is_active\": true,\n      \"is_accessible\": false,\n      \"is_system_protected\": true,\n      \"status_code\": 5,\n     "
+  }
+}

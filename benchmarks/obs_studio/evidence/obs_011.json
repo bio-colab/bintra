@@ -1,0 +1,72 @@
+{
+  "test_id": "BINTRA-OBS-011",
+  "primary_verdict": "NOT TESTED",
+  "classification": "Test Limitation",
+  "reason": "Only OBS Studio 32.1.2 (64-bit) is installed locally; OBS 33.0.0 and 33.0.1 binaries are not present on this machine.",
+  "auxiliary_same_version_semantic_matcher_tests": [
+    {
+      "label": "identical_obs_module_ver_obs_browser",
+      "bin1": "obs-browser.dll",
+      "sym1": "obs_module_ver",
+      "bin2": "obs-browser.dll",
+      "sym2": "obs_module_ver",
+      "match_result": {
+        "cosine_similarity": 1.0,
+        "is_semantic_match": true,
+        "confidence": "HIGH",
+        "granularity_type": "OPERATIONAL_MIX_HISTOGRAM",
+        "branch_topology_congruent": true,
+        "scale_ratio": 1.0,
+        "interpretation": "Functions exhibit equivalent behavioral control and operational topology."
+      }
+    },
+    {
+      "label": "same_api_obs_module_ver_win_capture_vs_droidcam",
+      "bin1": "win-capture.dll",
+      "sym1": "obs_module_ver",
+      "bin2": "droidcam-obs.dll",
+      "sym2": "obs_module_ver",
+      "match_result": {
+        "cosine_similarity": 0.0,
+        "is_semantic_match": false,
+        "confidence": "LOW / NO MATCH",
+        "granularity_type": "OPERATIONAL_MIX_HISTOGRAM",
+        "branch_topology_congruent": false,
+        "scale_ratio": 1.0,
+        "interpretation": "One or both functions contain insufficient valid instructions to form a behavioral vector."
+      }
+    },
+    {
+      "label": "d3d11_vs_opengl_device_present",
+      "bin1": "libobs-d3d11.dll",
+      "sym1": "device_present",
+      "bin2": "libobs-opengl.dll",
+      "sym2": "device_present",
+      "match_result": {
+        "cosine_similarity": 0.0,
+        "is_semantic_match": false,
+        "confidence": "LOW / NO MATCH",
+        "granularity_type": "OPERATIONAL_MIX_HISTOGRAM",
+        "branch_topology_congruent": false,
+        "scale_ratio": 1.0,
+        "interpretation": "One or both functions contain insufficient valid instructions to form a behavioral vector."
+      }
+    },
+    {
+      "label": "graphics_hook64_vs_graphics_hook32_entrypoint_cross_bitness",
+      "bin1": "graphics-hook64.dll",
+      "sym1": "__ENTRYPOINT__",
+      "bin2": "graphics-hook32.dll",
+      "sym2": "__ENTRYPOINT__",
+      "match_result": {
+        "cosine_similarity": 0.6676,
+        "is_semantic_match": false,
+        "confidence": "LOW / NO MATCH",
+        "granularity_type": "OPERATIONAL_MIX_HISTOGRAM",
+        "branch_topology_congruent": true,
+        "scale_ratio": 1.0,
+        "interpretation": "Functions share moderate operational characteristics but differ in branch/register topology."
+      }
+    }
+  ]
+}

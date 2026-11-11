@@ -128,10 +128,12 @@ def run():
         "functions": funcs_data
     }
 
-    # Write export JSON
-    fd_exp, export_path = tempfile.mkstemp(prefix="bintra_exp_", suffix=".json")
+    # Write export JSON inside authorized Bintra workspace
+    ws_dir = os.path.join(os.path.expanduser("~"), ".bintra", "workspace")
+    os.makedirs(ws_dir, exist_ok=True)
+    fd_exp, export_path = tempfile.mkstemp(prefix="bintra_exp_", suffix=".json", dir=ws_dir)
     os.close(fd_exp)
-    fd_plan, plan_path = tempfile.mkstemp(prefix="bintra_plan_", suffix=".json")
+    fd_plan, plan_path = tempfile.mkstemp(prefix="bintra_plan_", suffix=".json", dir=ws_dir)
     os.close(fd_plan)
 
     with open(export_path, "w") as f:

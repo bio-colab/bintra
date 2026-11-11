@@ -1,0 +1,1872 @@
+{
+  "test_id": "BINTRA-OBS-001",
+  "cli_probe": {
+    "command": "bintra inspect --file <blind_dir>/obs.dll",
+    "returncode": 0,
+    "stdout_head": "{\n  \"format\": \"PE\",\n  \"pe_type\": \"PE32+ (64-bit)\",\n  \"pe_offset\": 128,\n  \"machine\": \"AMD64 (x86-64)\",\n  \"coff_characteristics\": \"0x2022\",\n  \"image_base\": \"0x180000000\",\n  \"entry_point_rva\": \"0xd33a0\",\n  \"subsystem\": 3,\n  \"stored_checksum\": \"0x12c81c\",\n  \"windows_security_mitigations\": {\n    \"aslr_dynamic_base\": true,\n    \"high_entropy_64bit_aslr\": true,\n    \"dep_nx_compat\": true,\n    \"control_flow_guard_cfg\": false,\n    \"no_seh\": false,\n    \"large_address_aware_4gb\": true\n  },\n  \"data_directories\": {\n    \"ExportTable\": {\n      \"rva\": \"0xfae30\",\n      \"size\": 59408\n    },\n    \"ImportTable\": {\n      \"rva\": \"0x109640\",\n      \"size\": 600\n    },\n    \"ResourceTable\": {\n      \"rva\": \"0x120000\",\n      \"size\": 1376\n    },\n    \"ExceptionTable\": {\n      \"rva\": \"0x113000\",\n      \"size\": 50040\n    },\n    \"CertificateTable\": {\n      \"rva\": \"0x11d200\",\n      \"size\": 8464\n    },\n    \"BaseRelocationTable\": {\n      \"rva\": \"0x121000\",\n      \"size\": 2212\n    },\n    \"Debug\": {\n      \"rva\": \"0xe8cf0\",\n      \"size\": 112\n    },\n    \"TLSTable\": {\n      \"rva\": \"0xe8d80\",\n      \"size\": 40\n    },\n    \"LoadConfigTable\": {\n      \"rva\": \"0xe8bb0\",\n      \"size\": 320\n    },\n    \"IAT\": {\n      \"rva\": \"0xd4000\",\n   ",
+    "stderr": "[Bintra][AuditLogger] Warning: rotated legacy/broken audit log (Audit log sequence discontinuity on disk at index 3: got 0) -> %USERPROFILE%\\.bintra\\logs\\audit.jsonl.legacy.1794414572.jsonl\n"
+  },
+  "binaries": [
+    {
+      "name": "obs64.exe",
+      "level1_blind": {
+        "inspect_ms": 484.1,
+        "bintra_keys": [
+          "format",
+          "pe_type",
+          "pe_offset",
+          "machine",
+          "coff_characteristics",
+          "image_base",
+          "entry_point_rva",
+          "subsystem",
+          "stored_checksum",
+          "windows_security_mitigations",
+          "data_directories",
+          "sections_count",
+          "sections",
+          "sha256",
+          "entry_point_file_offset",
+          "imports",
+          "exports",
+          "delay_imports",
+          "version_info"
+        ],
+        "format": "PE",
+        "pe_type": "PE32+ (64-bit)",
+        "machine": "AMD64 (x86-64)",
+        "image_base": "0x140000000",
+        "entrypoint_rva": "0x301470",
+        "subsystem": 2,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": true,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections_count": 8,
+        "import_dlls": 31,
+        "import_symbols_parsed": 3478,
+        "export_count_header": 2,
+        "export_parsed_count": 2,
+        "has_strings_extraction": false,
+        "has_xrefs_extraction": false,
+        "has_compiler_version_info": true,
+        "has_delay_imports": true,
+        "has_delay_import_parsed_list": true,
+        "has_authenticode": false,
+        "has_authenticode_dir_rva": true,
+        "deobfuscator_4kb_entry": {
+          "elapsed_ms": 406.45,
+          "keys": [
+            "total_bytes_analyzed",
+            "opaque_predicates_detected",
+            "dead_instruction_bytes",
+            "predicates",
+            "control_flow_flattening",
+            "complexity_reduction_percentage",
+            "source_file",
+            "analysis_file_offset",
+            "analysis_window_size",
+            "total_file_size",
+            "is_truncated",
+            "truncated"
+          ],
+          "disassembled_count": 0,
+          "opaque_predicates_found": 0,
+          "cff_detected": false,
+          "error": null
+        },
+        "sensory_cortex": {
+          "elapsed_ms": 1838.73,
+          "top_keys": [
+            "engine",
+            "platform_target",
+            "active_senses_count",
+            "overall_sensory_efficiency",
+            "score_semantics",
+            "senses"
+          ],
+          "senses_count": 10,
+          "sense_names": [
+            "analytical_vision",
+            "temporal_hearing",
+            "active_touch",
+            "exploratory_smell",
+            "discriminative_taste",
+            "deep_proprioception",
+            "spatial_sense",
+            "vestibular_balance",
+            "metaphorical_pain",
+            "sense_of_rhythm"
+          ]
+        }
+      },
+      "level2_pdb_ground_truth": {
+        "loaded_pdb": null,
+        "sym_type": 5,
+        "num_syms_header": 0,
+        "enumerated_total_symbols": 30689,
+        "enumerated_function_symbols": 21940,
+        "sample_functions": [
+          {
+            "name": "OBSBasicSettings::LoadListValues",
+            "rva": "0x14d370",
+            "size": 961
+          },
+          {
+            "name": "`UpdateMinMaxLabels'::`1'::dtor$5",
+            "rva": "0x302390",
+            "size": 14
+          },
+          {
+            "name": "`RestreamAuth::LoadUI'::`1'::dtor$6",
+            "rva": "0x31c880",
+            "size": 39
+          },
+          {
+            "name": "`OBSBasicFilters::FiltersMoved'::`1'::dtor$5",
+            "rva": "0x302810",
+            "size": 14
+          },
+          {
+            "name": "`OBS::PluginManager::loadModules_'::`1'::dtor$31",
+            "rva": "0x308170",
+            "size": 12
+          },
+          {
+            "name": "`parse_scenes'::`1'::dtor$18",
+            "rva": "0x307dd0",
+            "size": 12
+          },
+          {
+            "name": "`UpdateMinMaxLabels'::`1'::dtor$4",
+            "rva": "0x302390",
+            "size": 14
+          },
+          {
+            "name": "`RestreamAuth::LoadUI'::`1'::dtor$7",
+            "rva": "0x3023d0",
+            "size": 14
+          },
+          {
+            "name": "`translate_scene_item'::`1'::dtor$20",
+            "rva": "0x306130",
+            "size": 12
+          },
+          {
+            "name": "AutoConfigStreamPage::UpdateServerList",
+            "rva": "0x25d880",
+            "size": 548
+          },
+          {
+            "name": "`Ui_OBSBasicSettings::setupUi'::`1'::dtor$86",
+            "rva": "0x30a340",
+            "size": 32
+          },
+          {
+            "name": "`OBSBasic::SetupRenameSceneCollection'::`1'::dtor$4",
+            "rva": "0x302c70",
+            "size": 12
+          },
+          {
+            "name": "`UpdateMinMaxLabels'::`1'::dtor$7",
+            "rva": "0x303060",
+            "size": 14
+          },
+          {
+            "name": "`RestreamAuth::LoadUI'::`1'::dtor$4",
+            "rva": "0x3024c0",
+            "size": 14
+          },
+          {
+            "name": "`OBSBasic::SetPreviewProgramMode'::`1'::dtor$6",
+            "rva": "0x3044e0",
+            "size": 29
+          }
+        ]
+      },
+      "level3_pefile_ground_truth": {
+        "machine": "0x8664",
+        "size_bytes": 5406992,
+        "sections_count": 8,
+        "section_names": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".pdata",
+          ".detourc",
+          ".detourd",
+          ".rsrc",
+          ".reloc"
+        ],
+        "entrypoint_rva": "0x301470",
+        "normal_import_dlls": 31,
+        "normal_import_symbols": 3478,
+        "delay_import_dlls": [],
+        "delay_import_symbols": 0,
+        "export_total_symbols": 2,
+        "export_named_count": 2,
+        "forwarded_exports": 0,
+        "export_names_sample": [
+          "AmdPowerXpressRequestHighPerformance",
+          "NvOptimusEnablement"
+        ],
+        "version_info": {
+          "CompanyName": "OBS",
+          "FileDescription": "OBS Studio",
+          "FileVersion": "32.1.2",
+          "OriginalFilename": "obs",
+          "ProductName": "OBS Studio",
+          "ProductVersion": "32.1.2"
+        },
+        "has_debug_pdb_codeview": true,
+        "debug_pdb_basename": "obs64.pdb",
+        "has_authenticode_dir": true,
+        "has_rich_header": false,
+        "subsystem": 2
+      },
+      "deltas": {
+        "import_dll_delta_pefile_minus_bintra": 0,
+        "import_symbol_delta_pefile_minus_bintra": 0,
+        "missed_delay_import_dlls": [],
+        "export_parsed_delta_pefile_minus_bintra": 0,
+        "blind_internal_function_recall_vs_pdb": "2/21940 (0.01% exported-only)"
+      }
+    },
+    {
+      "name": "obs.dll",
+      "level1_blind": {
+        "inspect_ms": 235.06,
+        "bintra_keys": [
+          "format",
+          "pe_type",
+          "pe_offset",
+          "machine",
+          "coff_characteristics",
+          "image_base",
+          "entry_point_rva",
+          "subsystem",
+          "stored_checksum",
+          "windows_security_mitigations",
+          "data_directories",
+          "sections_count",
+          "sections",
+          "sha256",
+          "entry_point_file_offset",
+          "imports",
+          "exports",
+          "delay_imports",
+          "version_info"
+        ],
+        "format": "PE",
+        "pe_type": "PE32+ (64-bit)",
+        "machine": "AMD64 (x86-64)",
+        "image_base": "0x180000000",
+        "entrypoint_rva": "0xd33a0",
+        "subsystem": 3,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": true,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections_count": 6,
+        "import_dlls": 29,
+        "import_symbols_parsed": 280,
+        "export_count_header": 1782,
+        "export_parsed_count": 1782,
+        "has_strings_extraction": false,
+        "has_xrefs_extraction": false,
+        "has_compiler_version_info": true,
+        "has_delay_imports": true,
+        "has_delay_import_parsed_list": true,
+        "has_authenticode": false,
+        "has_authenticode_dir_rva": true,
+        "deobfuscator_4kb_entry": {
+          "elapsed_ms": 203.85,
+          "keys": [
+            "total_bytes_analyzed",
+            "opaque_predicates_detected",
+            "dead_instruction_bytes",
+            "predicates",
+            "control_flow_flattening",
+            "complexity_reduction_percentage",
+            "source_file",
+            "analysis_file_offset",
+            "analysis_window_size",
+            "total_file_size",
+            "is_truncated",
+            "truncated"
+          ],
+          "disassembled_count": 0,
+          "opaque_predicates_found": 0,
+          "cff_detected": false,
+          "error": null
+        },
+        "sensory_cortex": {
+          "elapsed_ms": 640.95,
+          "top_keys": [
+            "engine",
+            "platform_target",
+            "active_senses_count",
+            "overall_sensory_efficiency",
+            "score_semantics",
+            "senses"
+          ],
+          "senses_count": 10,
+          "sense_names": [
+            "analytical_vision",
+            "temporal_hearing",
+            "active_touch",
+            "exploratory_smell",
+            "discriminative_taste",
+            "deep_proprioception",
+            "spatial_sense",
+            "vestibular_balance",
+            "metaphorical_pain",
+            "sense_of_rhythm"
+          ]
+        }
+      },
+      "level2_pdb_ground_truth": {
+        "loaded_pdb": null,
+        "sym_type": 5,
+        "num_syms_header": 0,
+        "enumerated_total_symbols": 3381,
+        "enumerated_function_symbols": 2596,
+        "sample_functions": [
+          {
+            "name": "obs_reset_audio_monitoring",
+            "rva": "0x7bc30",
+            "size": 358
+          },
+          {
+            "name": "obs_weak_service_addref",
+            "rva": "0x8330",
+            "size": 10
+          },
+          {
+            "name": "obs_get_audio_info",
+            "rva": "0x75460",
+            "size": 41
+          },
+          {
+            "name": "obs_hotkey_name_map_free",
+            "rva": "0x22530",
+            "size": 366
+          },
+          {
+            "name": "signal_stop",
+            "rva": "0x37cd0",
+            "size": 1938
+          },
+          {
+            "name": "obs_weak_source_expired",
+            "rva": "0x57df0",
+            "size": 15
+          },
+          {
+            "name": "obs_encoder_gpu_scaling_enabled",
+            "rva": "0x15a00",
+            "size": 98
+          },
+          {
+            "name": "obs_properties_add_list",
+            "rva": "0x3c2e0",
+            "size": 184
+          },
+          {
+            "name": "obs_output_set_mixers",
+            "rva": "0x32970",
+            "size": 121
+          },
+          {
+            "name": "free_call_context",
+            "rva": "0x90580",
+            "size": 153
+          },
+          {
+            "name": "obs_get_audio_info2",
+            "rva": "0x75490",
+            "size": 72
+          },
+          {
+            "name": "deinterlace_update_async_video",
+            "rva": "0x50020",
+            "size": 708
+          },
+          {
+            "name": "obs_source_async_decoupled",
+            "rva": "0x68a70",
+            "size": 69
+          },
+          {
+            "name": "obs_sceneitem_get_bounds_type",
+            "rva": "0x4a360",
+            "size": 15
+          },
+          {
+            "name": "obs_source_get_monitoring_type",
+            "rva": "0x688e0",
+            "size": 58
+          }
+        ]
+      },
+      "level3_pefile_ground_truth": {
+        "machine": "0x8664",
+        "size_bytes": 1176336,
+        "sections_count": 6,
+        "section_names": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".pdata",
+          ".rsrc",
+          ".reloc"
+        ],
+        "entrypoint_rva": "0xd33a0",
+        "normal_import_dlls": 29,
+        "normal_import_symbols": 280,
+        "delay_import_dlls": [],
+        "delay_import_symbols": 0,
+        "export_total_symbols": 1782,
+        "export_named_count": 1782,
+        "forwarded_exports": 0,
+        "export_names_sample": [
+          "array_output_serializer_free",
+          "array_output_serializer_init",
+          "array_output_serializer_reset",
+          "astrcmp_n",
+          "astrcmpi",
+          "astrcmpi_n",
+          "astrstri",
+          "audio_output_active",
+          "audio_output_close",
+          "audio_output_connect",
+          "audio_output_disconnect",
+          "audio_output_get_block_size",
+          "audio_output_get_channels",
+          "audio_output_get_info",
+          "audio_output_get_planes",
+          "audio_output_get_sample_rate",
+          "audio_output_open",
+          "audio_resampler_create",
+          "audio_resampler_destroy",
+          "audio_resampler_resample"
+        ],
+        "version_info": {
+          "CompanyName": "OBS Project",
+          "FileDescription": "OBS Library",
+          "FileVersion": "32.1.2",
+          "ProductName": "OBS Studio",
+          "ProductVersion": "32.1.2",
+          "OriginalFilename": "libobs"
+        },
+        "has_debug_pdb_codeview": true,
+        "debug_pdb_basename": "obs.pdb",
+        "has_authenticode_dir": true,
+        "has_rich_header": false,
+        "subsystem": 3
+      },
+      "deltas": {
+        "import_dll_delta_pefile_minus_bintra": 0,
+        "import_symbol_delta_pefile_minus_bintra": 0,
+        "missed_delay_import_dlls": [],
+        "export_parsed_delta_pefile_minus_bintra": 0,
+        "blind_internal_function_recall_vs_pdb": "1782/2596 (68.64% exported-only)"
+      }
+    },
+    {
+      "name": "libobs-d3d11.dll",
+      "level1_blind": {
+        "inspect_ms": 60.77,
+        "bintra_keys": [
+          "format",
+          "pe_type",
+          "pe_offset",
+          "machine",
+          "coff_characteristics",
+          "image_base",
+          "entry_point_rva",
+          "subsystem",
+          "stored_checksum",
+          "windows_security_mitigations",
+          "data_directories",
+          "sections_count",
+          "sections",
+          "sha256",
+          "entry_point_file_offset",
+          "imports",
+          "exports",
+          "delay_imports",
+          "version_info"
+        ],
+        "format": "PE",
+        "pe_type": "PE32+ (64-bit)",
+        "machine": "AMD64 (x86-64)",
+        "image_base": "0x180000000",
+        "entrypoint_rva": "0x1c340",
+        "subsystem": 3,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": true,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections_count": 6,
+        "import_dlls": 20,
+        "import_symbols_parsed": 176,
+        "export_count_header": 171,
+        "export_parsed_count": 171,
+        "has_strings_extraction": false,
+        "has_xrefs_extraction": false,
+        "has_compiler_version_info": true,
+        "has_delay_imports": true,
+        "has_delay_import_parsed_list": true,
+        "has_authenticode": false,
+        "has_authenticode_dir_rva": true,
+        "deobfuscator_4kb_entry": {
+          "elapsed_ms": 35.09,
+          "keys": [
+            "total_bytes_analyzed",
+            "opaque_predicates_detected",
+            "dead_instruction_bytes",
+            "predicates",
+            "control_flow_flattening",
+            "complexity_reduction_percentage",
+            "source_file",
+            "analysis_file_offset",
+            "analysis_window_size",
+            "total_file_size",
+            "is_truncated",
+            "truncated"
+          ],
+          "disassembled_count": 0,
+          "opaque_predicates_found": 0,
+          "cff_detected": false,
+          "error": null
+        },
+        "sensory_cortex": {
+          "elapsed_ms": 97.23,
+          "top_keys": [
+            "engine",
+            "platform_target",
+            "active_senses_count",
+            "overall_sensory_efficiency",
+            "score_semantics",
+            "senses"
+          ],
+          "senses_count": 10,
+          "sense_names": [
+            "analytical_vision",
+            "temporal_hearing",
+            "active_touch",
+            "exploratory_smell",
+            "discriminative_taste",
+            "deep_proprioception",
+            "spatial_sense",
+            "vestibular_balance",
+            "metaphorical_pain",
+            "sense_of_rhythm"
+          ]
+        }
+      },
+      "level2_pdb_ground_truth": {
+        "loaded_pdb": null,
+        "sym_type": 5,
+        "num_syms_header": 0,
+        "enumerated_total_symbols": 1602,
+        "enumerated_function_symbols": 339,
+        "sample_functions": [
+          {
+            "name": "`gs_texture_2d::Rebuild'::`1'::dtor$0",
+            "rva": "0x1ce50",
+            "size": 12
+          },
+          {
+            "name": "`gs_texture_3d::Rebuild'::`1'::dtor$1",
+            "rva": "0x1cea0",
+            "size": 12
+          },
+          {
+            "name": "`gs_texture_2d::Rebuild'::`1'::dtor$1",
+            "rva": "0x1ce60",
+            "size": 12
+          },
+          {
+            "name": "`gs_texture_3d::Rebuild'::`1'::dtor$0",
+            "rva": "0x1ce90",
+            "size": 12
+          },
+          {
+            "name": "`std::_System_error::_System_error'::`1'::dtor$4",
+            "rva": "0x1cf90",
+            "size": 12
+          },
+          {
+            "name": "device_zstencil_create$dtor$3",
+            "rva": "0x1e130",
+            "size": 16
+          },
+          {
+            "name": "device_zstencil_create$dtor$2",
+            "rva": "0x1e120",
+            "size": 16
+          },
+          {
+            "name": "device_zstencil_create$dtor$1",
+            "rva": "0x1e110",
+            "size": 12
+          },
+          {
+            "name": "device_zstencil_create$dtor$0",
+            "rva": "0x1e0f0",
+            "size": 29
+          },
+          {
+            "name": "`std::basic_fstream<char,std::char_traits<char> >::open<0,std::filesystem::path>'::`1'::dtor$0",
+            "rva": "0x1d670",
+            "size": 12
+          },
+          {
+            "name": "`std::_System_error_category::message'::`1'::dtor$0",
+            "rva": "0x1cfa0",
+            "size": 12
+          },
+          {
+            "name": "`std::filesystem::_Convert_narrow_to_wide'::`1'::dtor$0",
+            "rva": "0x1cfb0",
+            "size": 38
+          },
+          {
+            "name": "`gs_device::HasBadNV12Output'::`1'::catch$37",
+            "rva": "0x1da20",
+            "size": 56
+          },
+          {
+            "name": "`dllmain_crt_process_detach'::`1'::fin$0",
+            "rva": "0x1f41c",
+            "size": 25
+          },
+          {
+            "name": "device_stagesurface_create_p010$catch$1",
+            "rva": "0x1ef20",
+            "size": 119
+          }
+        ]
+      },
+      "level3_pefile_ground_truth": {
+        "machine": "0x8664",
+        "size_bytes": 196880,
+        "sections_count": 6,
+        "section_names": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".pdata",
+          ".rsrc",
+          ".reloc"
+        ],
+        "entrypoint_rva": "0x1c340",
+        "normal_import_dlls": 20,
+        "normal_import_symbols": 176,
+        "delay_import_dlls": [],
+        "delay_import_symbols": 0,
+        "export_total_symbols": 171,
+        "export_named_count": 171,
+        "forwarded_exports": 0,
+        "export_names_sample": [
+          "device_begin_frame",
+          "device_begin_scene",
+          "device_blend_function",
+          "device_blend_function_separate",
+          "device_blend_op",
+          "device_can_adapter_fast_clear",
+          "device_clear",
+          "device_copy_texture",
+          "device_copy_texture_region",
+          "device_create",
+          "device_cubetexture_create",
+          "device_debug_marker_begin",
+          "device_debug_marker_end",
+          "device_depth_function",
+          "device_destroy",
+          "device_draw",
+          "device_duplicator_create",
+          "device_duplicator_get_monitor_index",
+          "device_enable_blending",
+          "device_enable_color"
+        ],
+        "version_info": {
+          "CompanyName": "OBS Project",
+          "FileDescription": "OBS Library D3D11 wrapper",
+          "FileVersion": "32.1.2",
+          "ProductName": "OBS Studio",
+          "ProductVersion": "32.1.2",
+          "OriginalFilename": "libobs-d3d11"
+        },
+        "has_debug_pdb_codeview": true,
+        "debug_pdb_basename": "libobs-d3d11.pdb",
+        "has_authenticode_dir": true,
+        "has_rich_header": false,
+        "subsystem": 3
+      },
+      "deltas": {
+        "import_dll_delta_pefile_minus_bintra": 0,
+        "import_symbol_delta_pefile_minus_bintra": 0,
+        "missed_delay_import_dlls": [],
+        "export_parsed_delta_pefile_minus_bintra": 0,
+        "blind_internal_function_recall_vs_pdb": "171/339 (50.44% exported-only)"
+      }
+    },
+    {
+      "name": "obs-frontend-api.dll",
+      "level1_blind": {
+        "inspect_ms": 44.3,
+        "bintra_keys": [
+          "format",
+          "pe_type",
+          "pe_offset",
+          "machine",
+          "coff_characteristics",
+          "image_base",
+          "entry_point_rva",
+          "subsystem",
+          "stored_checksum",
+          "windows_security_mitigations",
+          "data_directories",
+          "sections_count",
+          "sections",
+          "sha256",
+          "entry_point_file_offset",
+          "imports",
+          "exports",
+          "delay_imports",
+          "version_info"
+        ],
+        "format": "PE",
+        "pe_type": "PE32+ (64-bit)",
+        "machine": "AMD64 (x86-64)",
+        "image_base": "0x180000000",
+        "entrypoint_rva": "0x3c34",
+        "subsystem": 3,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": true,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections_count": 6,
+        "import_dlls": 7,
+        "import_symbols_parsed": 43,
+        "export_count_header": 96,
+        "export_parsed_count": 96,
+        "has_strings_extraction": false,
+        "has_xrefs_extraction": false,
+        "has_compiler_version_info": true,
+        "has_delay_imports": true,
+        "has_delay_import_parsed_list": true,
+        "has_authenticode": false,
+        "has_authenticode_dir_rva": true,
+        "deobfuscator_4kb_entry": {
+          "elapsed_ms": 15.59,
+          "keys": [
+            "total_bytes_analyzed",
+            "opaque_predicates_detected",
+            "dead_instruction_bytes",
+            "predicates",
+            "control_flow_flattening",
+            "complexity_reduction_percentage",
+            "source_file",
+            "analysis_file_offset",
+            "analysis_window_size",
+            "total_file_size",
+            "is_truncated",
+            "truncated"
+          ],
+          "disassembled_count": 0,
+          "opaque_predicates_found": 0,
+          "cff_detected": false,
+          "error": null
+        },
+        "sensory_cortex": {
+          "elapsed_ms": 46.37,
+          "top_keys": [
+            "engine",
+            "platform_target",
+            "active_senses_count",
+            "overall_sensory_efficiency",
+            "score_semantics",
+            "senses"
+          ],
+          "senses_count": 10,
+          "sense_names": [
+            "analytical_vision",
+            "temporal_hearing",
+            "active_touch",
+            "exploratory_smell",
+            "discriminative_taste",
+            "deep_proprioception",
+            "spatial_sense",
+            "vestibular_balance",
+            "metaphorical_pain",
+            "sense_of_rhythm"
+          ]
+        }
+      },
+      "level2_pdb_ground_truth": {
+        "loaded_pdb": null,
+        "sym_type": 5,
+        "num_syms_header": 0,
+        "enumerated_total_symbols": 352,
+        "enumerated_function_symbols": 177,
+        "sample_functions": [
+          {
+            "name": "__raise_securityfailure",
+            "rva": "0x3c74",
+            "size": 52
+          },
+          {
+            "name": "obs_frontend_virtualcam_active",
+            "rva": "0x2bd0",
+            "size": 62
+          },
+          {
+            "name": "obs_frontend_set_current_preview_scene",
+            "rva": "0x2a80",
+            "size": 51
+          },
+          {
+            "name": "obs_frontend_open_source_properties",
+            "rva": "0x2c40",
+            "size": 51
+          },
+          {
+            "name": "obs_frontend_create_profile",
+            "rva": "0x1e70",
+            "size": 51
+          },
+          {
+            "name": "obs_frontend_remove_event_callback",
+            "rva": "0x2400",
+            "size": 57
+          },
+          {
+            "name": "std::vector<std::basic_string<char,std::char_traits<char>,std::allocator<char> >,std::allocator<std::basic_string<char,std::char_traits<char>,std::allocator<char> > > >::_Xlength",
+            "rva": "0x34f0",
+            "size": 18
+          },
+          {
+            "name": "std::vector<std::basic_string<char,std::char_traits<char>,std::allocator<char> >,std::allocator<std::basic_string<char,std::char_traits<char>,std::allocator<char> > > >::_Emplace_reallocate<char const * &>",
+            "rva": "0x3020",
+            "size": 489
+          },
+          {
+            "name": "operator new",
+            "rva": "0x3540",
+            "size": 60
+          },
+          {
+            "name": "`dllmain_crt_process_detach'::`1'::fin$0",
+            "rva": "0x44db",
+            "size": 25
+          },
+          {
+            "name": "obs_frontend_set_streaming_service",
+            "rva": "0x28a0",
+            "size": 51
+          },
+          {
+            "name": "_guard_dispatch_icall_nop",
+            "rva": "0x4470",
+            "size": 2
+          },
+          {
+            "name": "__scrt_throw_std_bad_alloc",
+            "rva": "0x3e14",
+            "size": 32
+          },
+          {
+            "name": "__scrt_throw_std_bad_array_new_length",
+            "rva": "0x1110",
+            "size": 32
+          },
+          {
+            "name": "__scrt_uninitialize_type_info",
+            "rva": "0x4328",
+            "size": 12
+          }
+        ]
+      },
+      "level3_pefile_ground_truth": {
+        "machine": "0x8664",
+        "size_bytes": 40720,
+        "sections_count": 6,
+        "section_names": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".pdata",
+          ".rsrc",
+          ".reloc"
+        ],
+        "entrypoint_rva": "0x3c34",
+        "normal_import_dlls": 7,
+        "normal_import_symbols": 43,
+        "delay_import_dlls": [],
+        "delay_import_symbols": 0,
+        "export_total_symbols": 96,
+        "export_named_count": 96,
+        "forwarded_exports": 0,
+        "export_names_sample": [
+          "?obs_frontend_set_callbacks_internal@@YAXPEAUobs_frontend_callbacks@@@Z",
+          "obs_frontend_add_canvas",
+          "obs_frontend_add_custom_qdock",
+          "obs_frontend_add_dock_by_id",
+          "obs_frontend_add_event_callback",
+          "obs_frontend_add_preload_callback",
+          "obs_frontend_add_save_callback",
+          "obs_frontend_add_scene_collection",
+          "obs_frontend_add_tools_menu_item",
+          "obs_frontend_add_tools_menu_qaction",
+          "obs_frontend_add_undo_redo_action",
+          "obs_frontend_create_profile",
+          "obs_frontend_defer_save_begin",
+          "obs_frontend_defer_save_end",
+          "obs_frontend_delete_profile",
+          "obs_frontend_duplicate_profile",
+          "obs_frontend_get_app_config",
+          "obs_frontend_get_canvases",
+          "obs_frontend_get_current_preview_scene",
+          "obs_frontend_get_current_profile"
+        ],
+        "version_info": {
+          "CompanyName": "OBS Project",
+          "FileDescription": "OBS Frontend API",
+          "FileVersion": "32.1.2",
+          "ProductName": "OBS Studio",
+          "ProductVersion": "32.1.2",
+          "OriginalFilename": "obs-frontend-api"
+        },
+        "has_debug_pdb_codeview": true,
+        "debug_pdb_basename": "obs-frontend-api.pdb",
+        "has_authenticode_dir": true,
+        "has_rich_header": false,
+        "subsystem": 3
+      },
+      "deltas": {
+        "import_dll_delta_pefile_minus_bintra": 0,
+        "import_symbol_delta_pefile_minus_bintra": 0,
+        "missed_delay_import_dlls": [],
+        "export_parsed_delta_pefile_minus_bintra": 0,
+        "blind_internal_function_recall_vs_pdb": "96/177 (54.24% exported-only)"
+      }
+    },
+    {
+      "name": "droidcam-obs.dll",
+      "level1_blind": {
+        "inspect_ms": 112.95,
+        "bintra_keys": [
+          "format",
+          "pe_type",
+          "pe_offset",
+          "machine",
+          "coff_characteristics",
+          "image_base",
+          "entry_point_rva",
+          "subsystem",
+          "stored_checksum",
+          "windows_security_mitigations",
+          "data_directories",
+          "sections_count",
+          "sections",
+          "sha256",
+          "entry_point_file_offset",
+          "imports",
+          "exports",
+          "delay_imports",
+          "version_info"
+        ],
+        "format": "PE",
+        "pe_type": "PE32+ (64-bit)",
+        "machine": "AMD64 (x86-64)",
+        "image_base": "0x180000000",
+        "entrypoint_rva": "0x117c",
+        "subsystem": 2,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": true,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections_count": 11,
+        "import_dlls": 9,
+        "import_symbols_parsed": 255,
+        "export_count_header": 10,
+        "export_parsed_count": 10,
+        "has_strings_extraction": false,
+        "has_xrefs_extraction": false,
+        "has_compiler_version_info": true,
+        "has_delay_imports": true,
+        "has_delay_import_parsed_list": true,
+        "has_authenticode": false,
+        "has_authenticode_dir_rva": false,
+        "deobfuscator_4kb_entry": {
+          "elapsed_ms": 32.78,
+          "keys": [
+            "total_bytes_analyzed",
+            "opaque_predicates_detected",
+            "dead_instruction_bytes",
+            "predicates",
+            "control_flow_flattening",
+            "complexity_reduction_percentage",
+            "source_file",
+            "analysis_file_offset",
+            "analysis_window_size",
+            "total_file_size",
+            "is_truncated",
+            "truncated"
+          ],
+          "disassembled_count": 0,
+          "opaque_predicates_found": 0,
+          "cff_detected": false,
+          "error": null
+        },
+        "sensory_cortex": {
+          "elapsed_ms": 450.64,
+          "top_keys": [
+            "engine",
+            "platform_target",
+            "active_senses_count",
+            "overall_sensory_efficiency",
+            "score_semantics",
+            "senses"
+          ],
+          "senses_count": 10,
+          "sense_names": [
+            "analytical_vision",
+            "temporal_hearing",
+            "active_touch",
+            "exploratory_smell",
+            "discriminative_taste",
+            "deep_proprioception",
+            "spatial_sense",
+            "vestibular_balance",
+            "metaphorical_pain",
+            "sense_of_rhythm"
+          ]
+        }
+      },
+      "level2_pdb_ground_truth": {
+        "loaded_pdb": null,
+        "sym_type": 5,
+        "num_syms_header": 0,
+        "enumerated_total_symbols": 10,
+        "enumerated_function_symbols": 0,
+        "sample_functions": []
+      },
+      "level3_pefile_ground_truth": {
+        "machine": "0x8664",
+        "size_bytes": 2165760,
+        "sections_count": 11,
+        "section_names": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".pdata",
+          ".idata",
+          ".qtversi",
+          ".tls",
+          ".00cfg",
+          "_RDATA",
+          ".rsrc",
+          ".reloc"
+        ],
+        "entrypoint_rva": "0x117c",
+        "normal_import_dlls": 9,
+        "normal_import_symbols": 255,
+        "delay_import_dlls": [],
+        "delay_import_symbols": 0,
+        "export_total_symbols": 10,
+        "export_named_count": 10,
+        "forwarded_exports": 0,
+        "export_names_sample": [
+          "obs_module_author",
+          "obs_module_description",
+          "obs_module_free_locale",
+          "obs_module_get_string",
+          "obs_module_load",
+          "obs_module_name",
+          "obs_module_set_locale",
+          "obs_module_set_pointer",
+          "obs_module_unload",
+          "obs_module_ver"
+        ],
+        "version_info": {
+          "CompanyName": "DEV47APPS",
+          "FileDescription": "DroidCam OBS Source Plugin",
+          "OriginalFilename": "droidcam-obs.dll",
+          "ProductName": "DroidCam",
+          "ProductVersion": "7"
+        },
+        "has_debug_pdb_codeview": true,
+        "debug_pdb_basename": "droidcam-obs-x64.pdb",
+        "has_authenticode_dir": false,
+        "has_rich_header": true,
+        "subsystem": 2
+      },
+      "deltas": {
+        "import_dll_delta_pefile_minus_bintra": 0,
+        "import_symbol_delta_pefile_minus_bintra": 0,
+        "missed_delay_import_dlls": [],
+        "export_parsed_delta_pefile_minus_bintra": 0,
+        "blind_internal_function_recall_vs_pdb": null
+      }
+    },
+    {
+      "name": "obs-browser.dll",
+      "level1_blind": {
+        "inspect_ms": 120.38,
+        "bintra_keys": [
+          "format",
+          "pe_type",
+          "pe_offset",
+          "machine",
+          "coff_characteristics",
+          "image_base",
+          "entry_point_rva",
+          "subsystem",
+          "stored_checksum",
+          "windows_security_mitigations",
+          "data_directories",
+          "sections_count",
+          "sections",
+          "sha256",
+          "entry_point_file_offset",
+          "imports",
+          "exports",
+          "delay_imports",
+          "version_info"
+        ],
+        "format": "PE",
+        "pe_type": "PE32+ (64-bit)",
+        "machine": "AMD64 (x86-64)",
+        "image_base": "0x180000000",
+        "entrypoint_rva": "0x62174",
+        "subsystem": 3,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": true,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections_count": 6,
+        "import_dlls": 10,
+        "import_symbols_parsed": 496,
+        "export_count_header": 12,
+        "export_parsed_count": 12,
+        "has_strings_extraction": false,
+        "has_xrefs_extraction": false,
+        "has_compiler_version_info": true,
+        "has_delay_imports": true,
+        "has_delay_import_parsed_list": true,
+        "has_authenticode": false,
+        "has_authenticode_dir_rva": true,
+        "deobfuscator_4kb_entry": {
+          "elapsed_ms": 66.42,
+          "keys": [
+            "total_bytes_analyzed",
+            "opaque_predicates_detected",
+            "dead_instruction_bytes",
+            "predicates",
+            "control_flow_flattening",
+            "complexity_reduction_percentage",
+            "source_file",
+            "analysis_file_offset",
+            "analysis_window_size",
+            "total_file_size",
+            "is_truncated",
+            "truncated"
+          ],
+          "disassembled_count": 0,
+          "opaque_predicates_found": 0,
+          "cff_detected": false,
+          "error": null
+        },
+        "sensory_cortex": {
+          "elapsed_ms": 351.34,
+          "top_keys": [
+            "engine",
+            "platform_target",
+            "active_senses_count",
+            "overall_sensory_efficiency",
+            "score_semantics",
+            "senses"
+          ],
+          "senses_count": 10,
+          "sense_names": [
+            "analytical_vision",
+            "temporal_hearing",
+            "active_touch",
+            "exploratory_smell",
+            "discriminative_taste",
+            "deep_proprioception",
+            "spatial_sense",
+            "vestibular_balance",
+            "metaphorical_pain",
+            "sense_of_rhythm"
+          ]
+        }
+      },
+      "level2_pdb_ground_truth": {
+        "loaded_pdb": null,
+        "sym_type": 5,
+        "num_syms_header": 0,
+        "enumerated_total_symbols": 8495,
+        "enumerated_function_symbols": 2446,
+        "sample_functions": [
+          {
+            "name": "parse_command_line<char>",
+            "rva": "0x6fbf8",
+            "size": 453
+          },
+          {
+            "name": "``anonymous namespace'::media_sink_device_info_callback_on_media_sink_device_info'::`1'::dtor$4",
+            "rva": "0x836b0",
+            "size": 12
+          },
+          {
+            "name": "`CefCppToCRefCounted<CefAppCppToC,CefApp,_cef_app_t>::Wrap'::`1'::dtor$0",
+            "rva": "0x84970",
+            "size": 12
+          },
+          {
+            "name": "`anonymous namespace'::cookie_access_filter_can_save_cookie",
+            "rva": "0x5ded0",
+            "size": 439
+          },
+          {
+            "name": "``anonymous namespace'::media_sink_device_info_callback_on_media_sink_device_info'::`1'::dtor$3",
+            "rva": "0x85a90",
+            "size": 12
+          },
+          {
+            "name": "std::_Func_impl_no_alloc<`BrowserSource::SetActive'::`2'::<lambda_1>,void,scoped_refptr<CefBrowser> >::_Get",
+            "rva": "0x22910",
+            "size": 5
+          },
+          {
+            "name": "`dynamic initializer for 'forced_popups''",
+            "rva": "0x1690",
+            "size": 12
+          },
+          {
+            "name": "`CefV8ValueCToCpp::SetUserData'::`1'::dtor$5",
+            "rva": "0x85470",
+            "size": 29
+          },
+          {
+            "name": "``anonymous namespace'::client_get_frame_handler'::`1'::dtor$11",
+            "rva": "0x857a0",
+            "size": 29
+          },
+          {
+            "name": "``anonymous namespace'::client_get_frame_handler'::`1'::dtor$10",
+            "rva": "0x84c30",
+            "size": 12
+          },
+          {
+            "name": "`std::_System_error::_System_error'::`1'::dtor$4",
+            "rva": "0x83160",
+            "size": 12
+          },
+          {
+            "name": "``dynamic initializer for 'exposedFunctions'''::`1'::dtor$58",
+            "rva": "0x833a0",
+            "size": 12
+          },
+          {
+            "name": "`nlohmann::json_abi_v3_11_3::detail::lexer<nlohmann::json_abi_v3_11_3::basic_json<std::map,std::vector,std::basic_string<char,std::char_traits<char>,std::allocator<char> >,bool,__int64,unsigned __int64,double,std::allocator,nlohmann::json_abi_v3_11_3::adl_serializer,std::vector<unsigned char,std::allocator<unsigned char> >,void>,nlohmann::json_abi_v3_11_3::detail::iterator_input_adapter<std::_String_const_iterator<std::_String_val<std::_Simple_types<char> > > > >::get_token_string'::`1'::dtor$0",
+            "rva": "0x83bf0",
+            "size": 38
+          },
+          {
+            "name": "`std::_Func_impl_no_alloc<`BrowserSource::SendFocus'::`2'::<lambda_1>,void,scoped_refptr<CefBrowser> >::_Do_call'::`1'::dtor$2",
+            "rva": "0x84980",
+            "size": 12
+          },
+          {
+            "name": "`__crt_seh_guarded_call<void>::operator()<<lambda_842d9ff0dc9ef11c61343bbaebe7f885>,<lambda_c5860995281e5c4ce005b3de8f5874ee> &,<lambda_d90129c13df834fdcbf8d2b88dafcf2d> >'::`1'::fin$0",
+            "rva": "0x860d2",
+            "size": 27
+          }
+        ]
+      },
+      "level3_pefile_ground_truth": {
+        "machine": "0x8664",
+        "size_bytes": 807184,
+        "sections_count": 6,
+        "section_names": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".pdata",
+          ".rsrc",
+          ".reloc"
+        ],
+        "entrypoint_rva": "0x62174",
+        "normal_import_dlls": 10,
+        "normal_import_symbols": 496,
+        "delay_import_dlls": [],
+        "delay_import_symbols": 0,
+        "export_total_symbols": 12,
+        "export_named_count": 12,
+        "forwarded_exports": 0,
+        "export_names_sample": [
+          "obs_browser_create_qcef",
+          "obs_browser_initialize",
+          "obs_browser_qcef_version_export",
+          "obs_module_description",
+          "obs_module_free_locale",
+          "obs_module_get_string",
+          "obs_module_load",
+          "obs_module_post_load",
+          "obs_module_set_locale",
+          "obs_module_set_pointer",
+          "obs_module_unload",
+          "obs_module_ver"
+        ],
+        "version_info": {},
+        "has_debug_pdb_codeview": true,
+        "debug_pdb_basename": "obs-browser.pdb",
+        "has_authenticode_dir": true,
+        "has_rich_header": false,
+        "subsystem": 3
+      },
+      "deltas": {
+        "import_dll_delta_pefile_minus_bintra": 0,
+        "import_symbol_delta_pefile_minus_bintra": 0,
+        "missed_delay_import_dlls": [],
+        "export_parsed_delta_pefile_minus_bintra": 0,
+        "blind_internal_function_recall_vs_pdb": "12/2446 (0.49% exported-only)"
+      }
+    },
+    {
+      "name": "avcodec-61.dll",
+      "level1_blind": {
+        "inspect_ms": 405.21,
+        "bintra_keys": [
+          "format",
+          "pe_type",
+          "pe_offset",
+          "machine",
+          "coff_characteristics",
+          "image_base",
+          "entry_point_rva",
+          "subsystem",
+          "stored_checksum",
+          "windows_security_mitigations",
+          "data_directories",
+          "sections_count",
+          "sections",
+          "sha256",
+          "entry_point_file_offset",
+          "imports",
+          "exports",
+          "delay_imports",
+          "version_info"
+        ],
+        "format": "PE",
+        "pe_type": "PE32+ (64-bit)",
+        "machine": "AMD64 (x86-64)",
+        "image_base": "0x180000000",
+        "entrypoint_rva": "0x179b3dc",
+        "subsystem": 2,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": true,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections_count": 8,
+        "import_dlls": 16,
+        "import_symbols_parsed": 474,
+        "export_count_header": 168,
+        "export_parsed_count": 168,
+        "has_strings_extraction": false,
+        "has_xrefs_extraction": false,
+        "has_compiler_version_info": true,
+        "has_delay_imports": true,
+        "has_delay_import_parsed_list": true,
+        "has_authenticode": false,
+        "has_authenticode_dir_rva": true,
+        "deobfuscator_4kb_entry": null,
+        "sensory_cortex": null
+      },
+      "level2_pdb_ground_truth": null,
+      "level3_pefile_ground_truth": {
+        "machine": "0x8664",
+        "size_bytes": 37861248,
+        "sections_count": 8,
+        "section_names": [
+          ".text",
+          ".rodata",
+          ".rdata",
+          ".data",
+          ".pdata",
+          "_RDATA",
+          ".rsrc",
+          ".reloc"
+        ],
+        "entrypoint_rva": "0x179b3dc",
+        "normal_import_dlls": 16,
+        "normal_import_symbols": 474,
+        "delay_import_dlls": [],
+        "delay_import_symbols": 0,
+        "export_total_symbols": 168,
+        "export_named_count": 168,
+        "forwarded_exports": 0,
+        "export_names_sample": [
+          "av_ac3_parse_header",
+          "av_adts_header_parse",
+          "av_bsf_alloc",
+          "av_bsf_flush",
+          "av_bsf_free",
+          "av_bsf_get_by_name",
+          "av_bsf_get_class",
+          "av_bsf_get_null_filter",
+          "av_bsf_init",
+          "av_bsf_iterate",
+          "av_bsf_list_alloc",
+          "av_bsf_list_append",
+          "av_bsf_list_append2",
+          "av_bsf_list_finalize",
+          "av_bsf_list_free",
+          "av_bsf_list_parse_str",
+          "av_bsf_receive_packet",
+          "av_bsf_send_packet",
+          "av_codec_ffversion",
+          "av_codec_is_decoder"
+        ],
+        "version_info": {
+          "CompanyName": "FFmpeg Project",
+          "FileDescription": "FFmpeg codec library",
+          "FileVersion": "61.19.101",
+          "OriginalFilename": "avcodec-61.dll",
+          "ProductName": "FFmpeg",
+          "ProductVersion": "n7.1.1"
+        },
+        "has_debug_pdb_codeview": false,
+        "debug_pdb_basename": null,
+        "has_authenticode_dir": true,
+        "has_rich_header": true,
+        "subsystem": 2
+      },
+      "deltas": {
+        "import_dll_delta_pefile_minus_bintra": 0,
+        "import_symbol_delta_pefile_minus_bintra": 0,
+        "missed_delay_import_dlls": [],
+        "export_parsed_delta_pefile_minus_bintra": 0,
+        "blind_internal_function_recall_vs_pdb": null
+      }
+    },
+    {
+      "name": "Qt6Core.dll",
+      "level1_blind": {
+        "inspect_ms": 1313.77,
+        "bintra_keys": [
+          "format",
+          "pe_type",
+          "pe_offset",
+          "machine",
+          "coff_characteristics",
+          "image_base",
+          "entry_point_rva",
+          "subsystem",
+          "stored_checksum",
+          "windows_security_mitigations",
+          "data_directories",
+          "sections_count",
+          "sections",
+          "sha256",
+          "entry_point_file_offset",
+          "imports",
+          "exports",
+          "delay_imports",
+          "version_info"
+        ],
+        "format": "PE",
+        "pe_type": "PE32+ (64-bit)",
+        "machine": "AMD64 (x86-64)",
+        "image_base": "0x180000000",
+        "entrypoint_rva": "0x381490",
+        "subsystem": 2,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": true,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": true,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections_count": 7,
+        "import_dlls": 29,
+        "import_symbols_parsed": 385,
+        "export_count_header": 8149,
+        "export_parsed_count": 8149,
+        "has_strings_extraction": false,
+        "has_xrefs_extraction": false,
+        "has_compiler_version_info": true,
+        "has_delay_imports": true,
+        "has_delay_import_parsed_list": true,
+        "has_authenticode": false,
+        "has_authenticode_dir_rva": true,
+        "deobfuscator_4kb_entry": {
+          "elapsed_ms": 1245.74,
+          "keys": [
+            "total_bytes_analyzed",
+            "opaque_predicates_detected",
+            "dead_instruction_bytes",
+            "predicates",
+            "control_flow_flattening",
+            "complexity_reduction_percentage",
+            "source_file",
+            "analysis_file_offset",
+            "analysis_window_size",
+            "total_file_size",
+            "is_truncated",
+            "truncated"
+          ],
+          "disassembled_count": 0,
+          "opaque_predicates_found": 0,
+          "cff_detected": false,
+          "error": null
+        },
+        "sensory_cortex": {
+          "elapsed_ms": 3742.6,
+          "top_keys": [
+            "engine",
+            "platform_target",
+            "active_senses_count",
+            "overall_sensory_efficiency",
+            "score_semantics",
+            "senses"
+          ],
+          "senses_count": 10,
+          "sense_names": [
+            "analytical_vision",
+            "temporal_hearing",
+            "active_touch",
+            "exploratory_smell",
+            "discriminative_taste",
+            "deep_proprioception",
+            "spatial_sense",
+            "vestibular_balance",
+            "metaphorical_pain",
+            "sense_of_rhythm"
+          ]
+        }
+      },
+      "level2_pdb_ground_truth": null,
+      "level3_pefile_ground_truth": {
+        "machine": "0x8664",
+        "size_bytes": 6079360,
+        "sections_count": 7,
+        "section_names": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".pdata",
+          ".qtmimed",
+          ".rsrc",
+          ".reloc"
+        ],
+        "entrypoint_rva": "0x381490",
+        "normal_import_dlls": 29,
+        "normal_import_symbols": 385,
+        "delay_import_dlls": [],
+        "delay_import_symbols": 0,
+        "export_total_symbols": 8149,
+        "export_named_count": 8149,
+        "forwarded_exports": 0,
+        "export_names_sample": [
+          "??$qbswap@$01@@YAPEAXPEBX_JPEAX@Z",
+          "??$qbswap@$03@@YAPEAXPEBX_JPEAX@Z",
+          "??$qbswap@$07@@YAPEAXPEBX_JPEAX@Z",
+          "??0?$QBaseIterator@VQMetaAssociation@@@@IEAA@$$QEAV0@@Z",
+          "??0?$QBaseIterator@VQMetaAssociation@@@@IEAA@AEBV0@@Z",
+          "??0?$QBaseIterator@VQMetaAssociation@@@@IEAA@PEAV?$QIterable@VQMetaAssociation@@@@PEAX@Z",
+          "??0?$QBaseIterator@VQMetaAssociation@@@@IEAA@PEBV?$QIterable@VQMetaAssociation@@@@PEAX@Z",
+          "??0?$QBaseIterator@VQMetaAssociation@@@@IEAA@XZ",
+          "??0?$QBaseIterator@VQMetaSequence@@@@IEAA@$$QEAV0@@Z",
+          "??0?$QBaseIterator@VQMetaSequence@@@@IEAA@AEBV0@@Z",
+          "??0?$QBaseIterator@VQMetaSequence@@@@IEAA@PEAV?$QIterable@VQMetaSequence@@@@PEAX@Z",
+          "??0?$QBaseIterator@VQMetaSequence@@@@IEAA@PEBV?$QIterable@VQMetaSequence@@@@PEAX@Z",
+          "??0?$QBaseIterator@VQMetaSequence@@@@IEAA@XZ",
+          "??0?$QConstIterator@VQMetaAssociation@@@@QEAA@AEBU0@@Z",
+          "??0?$QConstIterator@VQMetaAssociation@@@@QEAA@PEBV?$QIterable@VQMetaAssociation@@@@PEAX@Z",
+          "??0?$QConstIterator@VQMetaSequence@@@@QEAA@AEBU0@@Z",
+          "??0?$QConstIterator@VQMetaSequence@@@@QEAA@PEBV?$QIterable@VQMetaSequence@@@@PEAX@Z",
+          "??0?$QIterable@VQMetaAssociation@@@@QEAA@AEBVQMetaAssociation@@_JPEAX@Z",
+          "??0?$QIterable@VQMetaAssociation@@@@QEAA@AEBVQMetaAssociation@@_JPEBX@Z",
+          "??0?$QIterable@VQMetaSequence@@@@QEAA@AEBVQMetaSequence@@_JPEAX@Z"
+        ],
+        "version_info": {
+          "CompanyName": "The Qt Company Ltd.",
+          "FileDescription": "C++ Application Development Framework",
+          "FileVersion": "6.8.3.0",
+          "OriginalFilename": "Qt6Core.dll",
+          "ProductName": "Qt6",
+          "ProductVersion": "6.8.3.0"
+        },
+        "has_debug_pdb_codeview": true,
+        "debug_pdb_basename": "Qt6Core.pdb",
+        "has_authenticode_dir": true,
+        "has_rich_header": true,
+        "subsystem": 2
+      },
+      "deltas": {
+        "import_dll_delta_pefile_minus_bintra": 0,
+        "import_symbol_delta_pefile_minus_bintra": 0,
+        "missed_delay_import_dlls": [],
+        "export_parsed_delta_pefile_minus_bintra": 0,
+        "blind_internal_function_recall_vs_pdb": null
+      }
+    },
+    {
+      "name": "libcef.dll",
+      "level1_blind": {
+        "inspect_ms": 1861.54,
+        "bintra_keys": [
+          "format",
+          "pe_type",
+          "pe_offset",
+          "machine",
+          "coff_characteristics",
+          "image_base",
+          "entry_point_rva",
+          "subsystem",
+          "stored_checksum",
+          "windows_security_mitigations",
+          "data_directories",
+          "sections_count",
+          "sections",
+          "sha256",
+          "entry_point_file_offset",
+          "imports",
+          "exports",
+          "delay_imports",
+          "version_info"
+        ],
+        "format": "PE",
+        "pe_type": "PE32+ (64-bit)",
+        "machine": "AMD64 (x86-64)",
+        "image_base": "0x180000000",
+        "entrypoint_rva": "0x26f8b90",
+        "subsystem": 3,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": true,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": true,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections_count": 16,
+        "import_dlls": 17,
+        "import_symbols_parsed": 632,
+        "export_count_header": 212,
+        "export_parsed_count": 212,
+        "has_strings_extraction": false,
+        "has_xrefs_extraction": false,
+        "has_compiler_version_info": true,
+        "has_delay_imports": true,
+        "has_delay_import_parsed_list": true,
+        "has_authenticode": false,
+        "has_authenticode_dir_rva": true,
+        "deobfuscator_4kb_entry": null,
+        "sensory_cortex": null
+      },
+      "level2_pdb_ground_truth": null,
+      "level3_pefile_ground_truth": {
+        "machine": "0x8664",
+        "size_bytes": 214001712,
+        "sections_count": 16,
+        "section_names": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".pdata",
+          ".gxfg",
+          ".retplne",
+          ".rodata",
+          ".tls",
+          "CPADinfo",
+          "LZMADEC",
+          "_RDATA",
+          "flags_he",
+          "malloc_h",
+          "prot",
+          ".rsrc",
+          ".reloc"
+        ],
+        "entrypoint_rva": "0x26f8b90",
+        "normal_import_dlls": 17,
+        "normal_import_symbols": 632,
+        "delay_import_dlls": [
+          "USER32.dll",
+          "ole32.dll",
+          "COMCTL32.dll",
+          "dwmapi.dll",
+          "ADVAPI32.dll",
+          "dxgi.dll",
+          "MFPlat.DLL",
+          "d3d11.dll",
+          "PROPSYS.dll",
+          "GDI32.dll",
+          "MF.dll",
+          "MFReadWrite.dll",
+          "NETAPI32.dll",
+          "SHELL32.dll",
+          "UIAutomationCore.DLL",
+          "OLEACC.dll",
+          "WTSAPI32.dll",
+          "pdh.dll",
+          "HID.DLL",
+          "SETUPAPI.dll",
+          "api-ms-win-core-winrt-l1-1-0.dll",
+          "CFGMGR32.dll",
+          "api-ms-win-shcore-scaling-l1-1-1.dll",
+          "api-ms-win-power-base-l1-1-0.dll",
+          "SHLWAPI.dll",
+          "api-ms-win-core-winrt-string-l1-1-0.dll",
+          "api-ms-win-core-realtime-l1-1-1.dll",
+          "ncrypt.dll",
+          "api-ms-win-core-handle-l1-1-0.dll",
+          "UxTheme.dll",
+          "FONTSUB.dll",
+          "IMM32.dll",
+          "api-ms-win-power-setting-l1-1-0.dll",
+          "urlmon.dll",
+          "credui.dll",
+          "NDFAPI.DLL",
+          "COMDLG32.dll",
+          "bcryptprimitives.dll",
+          "bthprops.cpl",
+          "wevtapi.dll",
+          "CRYPTUI.dll",
+          "WINUSB.DLL",
+          "WININET.dll",
+          "d3d12.dll",
+          "ESENT.dll"
+        ],
+        "delay_import_symbols": 657,
+        "export_total_symbols": 212,
+        "export_named_count": 212,
+        "forwarded_exports": 0,
+        "export_names_sample": [
+          "CrashForExceptionInNonABICompliantCodeRange",
+          "GetHandleVerifier",
+          "IsCrashReportingEnabledImpl",
+          "IsSandboxedProcess",
+          "RelaunchChromeBrowserWithNewCommandLineIfNeeded",
+          "SetCrashKeyValueImpl",
+          "cef_add_cross_origin_whitelist_entry",
+          "cef_api_hash",
+          "cef_base64decode",
+          "cef_base64encode",
+          "cef_basetime_now",
+          "cef_begin_tracing",
+          "cef_binary_value_create",
+          "cef_browser_host_create_browser",
+          "cef_browser_host_create_browser_sync",
+          "cef_browser_view_create",
+          "cef_browser_view_get_for_browser",
+          "cef_clear_cross_origin_whitelist",
+          "cef_clear_scheme_handler_factories",
+          "cef_command_line_create"
+        ],
+        "version_info": {
+          "FileDescription": "Chromium Embedded Framework (CEF) Dynamic Link Library",
+          "FileVersion": "127.145.7+g2b7d20b+chromium-127.0.6533.120",
+          "OriginalFilename": "libcef.dll",
+          "ProductName": "Chromium Embedded Framework (CEF) Dynamic Link Library",
+          "ProductVersion": "127.145.7+g2b7d20b+chromium-127.0.6533.120"
+        },
+        "has_debug_pdb_codeview": true,
+        "debug_pdb_basename": "libcef.dll.pdb",
+        "has_authenticode_dir": true,
+        "has_rich_header": false,
+        "subsystem": 3
+      },
+      "deltas": {
+        "import_dll_delta_pefile_minus_bintra": 0,
+        "import_symbol_delta_pefile_minus_bintra": 0,
+        "missed_delay_import_dlls": [
+          "USER32.dll",
+          "ole32.dll",
+          "COMCTL32.dll",
+          "dwmapi.dll",
+          "ADVAPI32.dll",
+          "dxgi.dll",
+          "MFPlat.DLL",
+          "d3d11.dll",
+          "PROPSYS.dll",
+          "GDI32.dll",
+          "MF.dll",
+          "MFReadWrite.dll",
+          "NETAPI32.dll",
+          "SHELL32.dll",
+          "UIAutomationCore.DLL",
+          "OLEACC.dll",
+          "WTSAPI32.dll",
+          "pdh.dll",
+          "HID.DLL",
+          "SETUPAPI.dll",
+          "api-ms-win-core-winrt-l1-1-0.dll",
+          "CFGMGR32.dll",
+          "api-ms-win-shcore-scaling-l1-1-1.dll",
+          "api-ms-win-power-base-l1-1-0.dll",
+          "SHLWAPI.dll",
+          "api-ms-win-core-winrt-string-l1-1-0.dll",
+          "api-ms-win-core-realtime-l1-1-1.dll",
+          "ncrypt.dll",
+          "api-ms-win-core-handle-l1-1-0.dll",
+          "UxTheme.dll",
+          "FONTSUB.dll",
+          "IMM32.dll",
+          "api-ms-win-power-setting-l1-1-0.dll",
+          "urlmon.dll",
+          "credui.dll",
+          "NDFAPI.DLL",
+          "COMDLG32.dll",
+          "bcryptprimitives.dll",
+          "bthprops.cpl",
+          "wevtapi.dll",
+          "CRYPTUI.dll",
+          "WINUSB.DLL",
+          "WININET.dll",
+          "d3d12.dll",
+          "ESENT.dll"
+        ],
+        "export_parsed_delta_pefile_minus_bintra": 0,
+        "blind_internal_function_recall_vs_pdb": null
+      }
+    }
+  ]
+}

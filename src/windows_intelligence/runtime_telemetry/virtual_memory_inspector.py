@@ -252,7 +252,7 @@ class ProcessMemoryMapSnapshot:
                 elif r.mem_type == MEM_MAPPED:
                     mapped_bytes += sz
                 elif r.mem_type == MEM_PRIVATE:
-                    if r.category == "STACK":
+                    if r.category in ("STACK", "STACK_GUARD"):
                         stack_bytes += sz
                     else:
                         heap_bytes += sz
@@ -474,6 +474,13 @@ class VirtualMemoryInspector:
                     break
                 current_addr = next_addr
 
+            # Post-processing pass: Associate committed private regions sharing an AllocationBase with STACK_GUARD as STACK
+            stack_alloc_bases = {r.allocation_base for r in snapshot.regions if r.category == "STACK_GUARD" and r.allocation_base}
+            if stack_alloc_bases:
+                for r in snapshot.regions:
+                    if r.mem_type == MEM_PRIVATE and r.category == "HEAP" and r.allocation_base in stack_alloc_bases:
+                        r.category = "STACK"
+
         finally:
             k32.CloseHandle(h_proc)
 
@@ -507,13 +514,19 @@ class VirtualMemoryInspector:
                             sec_hdr = f.read(40)
                             if len(sec_hdr) < 40:
                                 break
-                            name = sec_hdr[:8].rstrip(b"\x00").decode("latin1", errors="replace")
+                            raw_name_bytes = sec_hdr[:8].rstrip(b"\x00")
+                            # Only accept printable ASCII section names (0x20..0x7E)
+                            if raw_name_bytes and all(0x20 <= b <= 0x7E for b in raw_name_bytes):
+                                name = raw_name_bytes.decode("ascii", errors="ignore").strip()
+                            else:
+                                name = None
                             v_size, v_addr = struct.unpack("<II", sec_hdr[8:16])
-                            sections.append({
-                                "name": name,
-                                "va": v_addr,
-                                "size": v_size
-                            })
+                            if name:
+                                sections.append({
+                                    "name": name,
+                                    "va": v_addr,
+                                    "size": v_size
+                                })
         except Exception:
             pass
 
@@ -565,7 +578,10 @@ class VirtualMemoryInspector:
                             return "IMAGE_RELOC", mod_name, mod_path, exact_sec
                         elif "rsrc" in sec_lower:
                             return "IMAGE_RESOURCE", mod_name, mod_path, exact_sec
-                        return f"IMAGE_{exact_sec.upper().lstrip('.')}", mod_name, mod_path, exact_sec
+                        sanitized = "".join(c for c in exact_sec.upper().lstrip(".") if c.isalnum() or c == "_")
+                        if sanitized:
+                            return f"IMAGE_{sanitized}", mod_name, mod_path, exact_sec
+                        return "IMAGE_SECTION", mod_name, mod_path, exact_sec
 
                     # 2. Fallback heuristic based on page protection
                     if protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE):

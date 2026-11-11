@@ -509,10 +509,23 @@ class EtwLiveCaptureSession:
                 try:
                     from windows_intelligence.process_intelligence import ModuleInventory
                     mod_res = ModuleInventory.get_modules_for_process(self.target_pid)
-                    known_modules = {
-                        str(m.get("module_name", "")).lower(): str(m.get("base_address", "0x0"))
-                        for m in mod_res.get("modules", [])
-                    }
+                    known_modules = {}
+                    now_t = time.time()
+                    for m in mod_res.get("modules", []):
+                        m_name = str(m.get("module_name", ""))
+                        low_name = m_name.lower()
+                        b_addr = str(m.get("base_address", "0x0"))
+                        known_modules[low_name] = b_addr
+                        self.record_event(EtwEventRecord(
+                            timestamp=now_t,
+                            provider_name="Bintra-Toolhelp32-ModuleMonitor",
+                            event_id=5,
+                            pid=self.target_pid,
+                            tid=0,
+                            event_type="IMAGE_LOAD",
+                            details={"image_name": m_name, "base_address": b_addr, "baseline": True},
+                            source="toolhelp_module_baseline",
+                        ))
                 except Exception as mod_err:
                     self._consumer_errors.append(f"Module baseline failed: {mod_err}")
 

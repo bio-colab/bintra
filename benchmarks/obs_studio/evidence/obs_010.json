@@ -1,0 +1,85 @@
+{
+  "test_id": "BINTRA-OBS-010",
+  "host_obs_binaries_untouched": true,
+  "checks": {
+    "inplace_overwrite_blocked": {
+      "blocked": true,
+      "exception": "TargetMutationError",
+      "detail": "TARGET_WRITE_FORBIDDEN: In-place binary modification is strictly forbidden by Bintra Safety Policy. Destination '%USERPROFILE%\\AppData\\Local\\Temp\\bintra_obs_guard_zvh_qquu\\target_dir\\obs-frontend-api.dll' matches source."
+    },
+    "target_dir_sibling_write_blocked": {
+      "blocked": true,
+      "exception": "TargetMutationError",
+      "detail": "TARGET_DIRECTORY_WRITE_FORBIDDEN: Output patch cannot be placed in the target's original directory '%USERPROFILE%\\AppData\\Local\\Temp\\bintra_obs_guard_zvh_qquu\\target_dir'."
+    },
+    "workspace_traversal_blocked": {
+      "blocked": true,
+      "exception": "SecurityViolationError",
+      "detail": "CAPABILITY_NOT_GRANTED: Component 'guard_bench' lacks declared capability 'cap.workspace.write'."
+    },
+    "ads_injection_blocked": {
+      "blocked": true,
+      "exception": "SecurityViolationError",
+      "detail": "INVALID_PATH: Alternate Data Streams (:stream) are prohibited: '%USERPROFILE%\\AppData\\Local\\Temp\\bintra_obs_guard_zvh_qquu\\authorized_ws\\clean.dll:hidden_stream'."
+    },
+    "process_mutate_blocked": {
+      "blocked": true,
+      "exception": "SecurityViolationError",
+      "detail": "Hazardous capability 'cap.hazard.process_mutate' is unconditionally forbidden by Bintra Safety Policy."
+    },
+    "shell_free_exec_blocked": {
+      "blocked": true,
+      "exception": "SecurityViolationError",
+      "detail": "Hazardous capability 'cap.hazard.shell_free_exec' is unconditionally forbidden by Bintra Safety Policy."
+    },
+    "subprocess_broker": {
+      "catalog_os_ver_status": "success",
+      "catalog_os_ver_exit": 0,
+      "unapproved_command_blocked": true,
+      "disallowed_flag_blocked": true
+    },
+    "authorized_cow_in_workspace": {
+      "output_exists": true,
+      "patch_result_keys": [
+        "source_file",
+        "output_file",
+        "patch_type",
+        "file_offset",
+        "virtual_rva",
+        "target_section",
+        "is_in_executable_section",
+        "patch_length",
+        "original_hex",
+        "patched_hex",
+        "original_sha256",
+        "patched_sha256",
+        "pe_checksum_recalculated",
+        "new_pe_checksum",
+        "is_safe",
+        "is_stack_safe",
+        "stack_safety_rationale",
+        "nociceptive_pain_score",
+        "pain_score",
+        "nociceptive_hazards",
+        "pain_hazards"
+      ],
+      "original_copy_sha256_unchanged": true
+    },
+    "audit_logger": {
+      "verify_audit_chain": {
+        "is_valid": true,
+        "records_verified": 6,
+        "head_hash": "317c792576ccdea3c38277efc9086ae08afe98b1d76c78bda35d43dcaa144516"
+      },
+      "legacy_broken_chain_rotations_count": 11,
+      "legacy_rotation_filenames_sample": [
+        "audit.jsonl.legacy.1794411435.jsonl",
+        "audit.jsonl.legacy.1794411720.jsonl",
+        "audit.jsonl.legacy.1794411721.jsonl",
+        "audit.jsonl.legacy.1794411807.jsonl",
+        "audit.jsonl.legacy.1794411848.jsonl"
+      ],
+      "recent_denials_count": 4
+    }
+  }
+}

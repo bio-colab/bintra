@@ -297,10 +297,11 @@ def _dispatch_cli():
             parser = argparse.ArgumentParser(description="Audit Windows dynamic link library dependencies")
             parser.add_argument("command")
             parser.add_argument("--binary", "--file", dest="binary", required=True, help="Target PE binary")
+            parser.add_argument("--app-dir", default=None, help="Host application directory to search first for DLL dependencies")
             parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
             args = parser.parse_args()
 
-            report = WindowsDependencyResolver.audit_dependencies(args.binary)
+            report = WindowsDependencyResolver.audit_dependencies(args.binary, app_dir=args.app_dir)
             if args.format == "md":
                 lines = [
                     f"# Dependency Audit for `{os.path.basename(args.binary)}`",
@@ -1139,8 +1140,7 @@ def _dispatch_cli():
             parser = argparse.ArgumentParser(description="Run Ghidra headless analysis with Bintra bridge script")
             parser.add_argument("command")
             parser.add_argument("--binary", "--file", "--input", dest="binary", required=True, help="Path to target executable (PE/ELF)")
-            default_ghidra = os.environ.get("GHIDRA_INSTALL_DIR", r"C:\ghidra" if os.name == "nt" else "/opt/ghidra")
-            parser.add_argument("--ghidra-path", default=default_ghidra, help="Ghidra installation directory")
+            parser.add_argument("--ghidra-path", default=None, help="Ghidra installation directory (default: auto-discover)")
             parser.add_argument("--project-dir", default=None, help="Ghidra project directory (default: temp)")
             parser.add_argument("--project-name", default="BintraHeadless", help="Ghidra project name")
             parser.add_argument("--apply", action="store_true", help="Automatically commit mutations to Ghidra database")
@@ -1148,17 +1148,40 @@ def _dispatch_cli():
 
             import subprocess, tempfile
             from pathlib import Path as P
-            ghidra_dir = P(args.ghidra_path)
+            ghidra_path_val = args.ghidra_path or os.environ.get("GHIDRA_INSTALL_DIR") or os.environ.get("GHIDRA_HOME")
             headless_name = "analyzeHeadless.bat" if os.name == "nt" else "analyzeHeadless"
-            headless_cmd = ghidra_dir / "support" / headless_name
-            if not headless_cmd.exists():
-                alt_name = "analyzeHeadless" if os.name == "nt" else "analyzeHeadless.bat"
-                alt_cmd = ghidra_dir / "support" / alt_name
-                if alt_cmd.exists():
-                    headless_cmd = alt_cmd
-                else:
-                    print(f"Error: {headless_name} not found at: {headless_cmd}")
-                    sys.exit(1)
+            alt_name = "analyzeHeadless" if os.name == "nt" else "analyzeHeadless.bat"
+
+            headless_cmd = None
+            if ghidra_path_val:
+                p = P(ghidra_path_val)
+                cand = p / "support" / headless_name
+                if cand.exists():
+                    headless_cmd = cand
+                elif (p / "support" / alt_name).exists():
+                    headless_cmd = p / "support" / alt_name
+
+            if not headless_cmd:
+                candidates = [
+                    P.home() / "tools" / "ghidra",
+                    P.home() / "ghidra",
+                    P(r"C:\ghidra") if os.name == "nt" else P("/opt/ghidra"),
+                    P(r"C:\tools\ghidra"),
+                    P(r"D:\ghidra"),
+                ]
+                for cand_dir in candidates:
+                    cand = cand_dir / "support" / headless_name
+                    if cand.exists():
+                        headless_cmd = cand
+                        break
+                    alt = cand_dir / "support" / alt_name
+                    if alt.exists():
+                        headless_cmd = alt
+                        break
+
+            if not headless_cmd:
+                print(f"Error: {headless_name} not found. Please set GHIDRA_INSTALL_DIR or pass --ghidra-path.")
+                sys.exit(1)
 
             repo_root = P(__file__).resolve().parent.parent
             script_dir = repo_root / "ghidra_scripts"

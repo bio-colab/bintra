@@ -1,0 +1,108 @@
+{
+  "test_id": "BINTRA-OBS-003",
+  "ghidra_version_dir": "ghidra",
+  "autodiscovery_without_env": {
+    "command": "bintra ghidra-headless --file obs-frontend-api.dll",
+    "returncode": 1,
+    "stdout": "Error: analyzeHeadless.bat not found at: C:\\ghidra\\support\\analyzeHeadless.bat",
+    "stderr": "[Bintra][AuditLogger] Warning: rotated legacy/broken audit log (Audit log sequence discontinuity on disk at index 1: got 0) -> %USERPROFILE%\\.bintra\\logs\\audit.jsonl.legacy.1794411345.jsonl"
+  },
+  "cli_ghidra_headless_java": {
+    "returncode": 0,
+    "elapsed_ms": 32083.31,
+    "project_gpr_created": true,
+    "stdout_tail": "    Shared Return Calls                        0.026 secs\n    Stack                                      0.259 secs\n    Subroutine References                      0.015 secs\n    Subroutine References - One Time           0.002 secs\n    Windows x86 PE Exception Handling          0.012 secs\n    Windows x86 PE RTTI Analyzer               2.335 secs\n    Windows x86 Thread Environment Block (TEB) Analyzer     0.017 secs\n    WindowsResourceReference                   0.574 secs\n    x86 Constant Reference Analyzer            0.426 secs\n-----------------------------------------------------\n     Total Time   12 secs\n-----------------------------------------------------\n (AutoAnalysisManager)  \nINFO  REPORT: Analysis succeeded for file: file:///%USERPROFILE%/AppData/Local/Temp/bintra_ghidra_autodisc_sjo1df34/obs-frontend-api.dll (HeadlessAnalyzer)  \nINFO  REPORT: Execute script: BintraGhidraBridge.java  (HeadlessAnalyzer)  \nINFO  SCRIPT: <REPO_ROOT>\\ghidra_scripts\\BintraGhidraBridge.java (HeadlessAnalyzer)  \nINFO  BintraGhidraBridge.java> ================================================================= (GhidraScript)  \nINFO  BintraGhidraBridge.java>  [Bintra] Initiating Symbiotic Ghidra Bridge (v1.0.0) (GhidraScript)  \nINFO  BintraGhidraBridge.java> ================================================================= (GhidraScript)  \nINFO  BintraGhidraBridge.java> [Bintra] Located Bintra root at: <REPO_ROOT> (GhidraScript)  \nINFO  BintraGhidraBridge.java> [Bintra] Extracting High P-Code, SSA Def-Use, and CFG from program functions... (GhidraScript)  \nINFO  BintraGhidraBridge.java> [Bintra] Extracted High P-Code & Full CFG for 182 / 182 functions. (GhidraScript)  \nINFO  BintraGhidraBridge.java> [Bintra] Exported P-Code & CFG JSON to: %USERPROFILE%\\AppData\\Local\\Temp\\bintra_ghidra_export_7625649588090633259.json (GhidraScript)  \nINFO  BintraGhidraBridge.java> [Bintra] Invoking Bintra Continuous Semantic Engine (ghidra-analyze)... (GhidraScript)  \nINFO  BintraGhidraBridge.java>  [Bintra CLI] { (GhidraScript)  \nINFO  BintraGhidraBridge.java>  [Bintra CLI]   \"status\": \"error\", (GhidraScript)  \nINFO  BintraGhidraBridge.java>  [Bintra CLI]   \"command\": \"ghidra-analyze\", (GhidraScript)  \nINFO  BintraGhidraBridge.java>  [Bintra CLI]   \"error_type\": \"TargetMutationError\", (GhidraScript)  \nINFO  BintraGhidraBridge.java>  [Bintra CLI]   \"error\": \"TARGET_DIRECTORY_WRITE_FORBIDDEN: Writing inside target directory '%USERPROFILE%\\\\AppData\\\\Local\\\\Temp\\\\bintra_ghidra_plan_10746981195465951377.json' is prohibited.\", (GhidraScript)  \nINFO  BintraGhidraBridge.java>  [Bintra CLI]   \"message\": \"TARGET_DIRECTORY_WRITE_FORBIDDEN: Writing inside target directory '%USERPROFILE%\\\\AppData\\\\Local\\\\Temp\\\\bintra_ghidra_plan_10746981195465951377.json' is prohibited.\" (GhidraScript)  \nINFO  BintraGhidraBridge.java>  [Bintra CLI] } (GhidraScript)  \nERROR BintraGhidraBridge.java> [Bintra] Bintra Analysis failed with exit code: 1 (GhidraScript)  \nINFO  ANALYZING changes made by post scripts: file:///%USERPROFILE%/AppData/Local/Temp/bintra_ghidra_autodisc_sjo1df34/obs-frontend-api.dll (HeadlessAnalyzer)  \nINFO  REPORT: Post-analysis succeeded for file: file:///%USERPROFILE%/AppData/Local/Temp/bintra_ghidra_autodisc_sjo1df34/obs-frontend-api.dll (HeadlessAnalyzer)  \nINFO  /obs-frontend-api.dll: file created (<USER>) (LocalFileSystem)  \nINFO  REPORT: Save succeeded for: /obs-frontend-api.dll (BintraObsFrontendJava:/obs-frontend-api.dll) (HeadlessAnalyzer)  \nINFO  REPORT: Import succeeded (HeadlessAnalyzer)  \n[Bintra] Launching Ghidra Headless Analyzer...\n[Bintra] Binary: %USERPROFILE%\\AppData\\Local\\Temp\\bintra_ghidra_autodisc_sjo1df34\\obs-frontend-api.dll\n[Bintra] Script: <REPO_ROOT>\\ghidra_scripts\\BintraGhidraBridge.java",
+    "stderr_tail": ""
+  },
+  "live_bridge_jsonrpc": {
+    "bridge_started": {
+      "status": "running",
+      "host": "127.0.0.1",
+      "port": 39803,
+      "auth_token": "<REDACTED>",
+      "bridge_url": "http://127.0.0.1:39803",
+      "marker_file": "%USERPROFILE%\\.bintra\\workspace\\.bintra_bridge.json",
+      "tempdir_marker_published": false
+    },
+    "unauthorized_protected_rpc_response": {
+      "jsonrpc": "2.0",
+      "error": {
+        "code": -32001,
+        "message": "Authentication failed: Invalid or missing bridge token"
+      },
+      "id": 1
+    },
+    "register_client": {
+      "status": "registered",
+      "auth_token_accepted": true
+    },
+    "rpc_deobfuscate_keys": [
+      "total_pcode_ops",
+      "opaque_predicates_count",
+      "detected_predicates",
+      "prunable_operations",
+      "is_obfuscated"
+    ],
+    "rpc_match_similarity": null,
+    "vad_inject": {
+      "status": "queued",
+      "note_length": 144
+    },
+    "struct_inject": {
+      "status": "queued",
+      "base_address": "0x1000",
+      "structure_name": "ObsFrontendCallbacks",
+      "fields_count": 2,
+      "actions_queued": 3
+    },
+    "pointer_inject": {
+      "status": "queued",
+      "target_address": "0x180003000",
+      "paths_queued": 1,
+      "actions_queued": 3
+    },
+    "polled_commands_count": 7,
+    "polled_actions": [
+      {
+        "action": "SET_PROGRAM_NOTE",
+        "address": null,
+        "address_space": null
+      },
+      {
+        "action": "APPLY_DATA_STRUCTURE",
+        "address": "0x1000",
+        "address_space": "rva"
+      },
+      {
+        "action": "CREATE_BOOKMARK",
+        "address": "0x1000",
+        "address_space": "rva"
+      },
+      {
+        "action": "SET_PROGRAM_NOTE",
+        "address": null,
+        "address_space": null
+      },
+      {
+        "action": "SET_PLATE_COMMENT",
+        "address": "0x1234",
+        "address_space": "rva"
+      },
+      {
+        "action": "CREATE_BOOKMARK",
+        "address": "0x1234",
+        "address_space": "rva"
+      },
+      {
+        "action": "SET_PROGRAM_NOTE",
+        "address": null,
+        "address_space": null
+      }
+    ],
+    "queue_drained_count": 0
+  },
+  "live_bridge_service_script_audit": {
+    "py3_compile_ok": true,
+    "uses_python3_fstrings_incompatible_with_jython27": true
+  }
+}

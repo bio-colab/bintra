@@ -67,12 +67,17 @@ class WindowsDependencyResolver:
         return known
 
     @classmethod
-    def get_search_directories(cls, binary_path: str, is_32bit_on_64bit: bool = False) -> List[str]:
+    def get_search_directories(
+        cls,
+        binary_path: str,
+        is_32bit_on_64bit: bool = False,
+        app_dir: Optional[str] = None
+    ) -> List[str]:
         """
         Builds the ordered list of directories searched by the Windows dynamic loader
         under SafeDllSearchMode (enabled by default on all modern Windows versions).
         """
-        app_dir = os.path.dirname(os.path.abspath(binary_path))
+        target_dir = os.path.dirname(os.path.abspath(binary_path))
         windir = os.environ.get("WINDIR", r"C:\Windows")
         system_root = os.environ.get("SystemRoot", windir)
 
@@ -86,13 +91,34 @@ class WindowsDependencyResolver:
 
         sys16_dir = os.path.join(system_root, "System")
 
-        search_dirs = [
-            app_dir,
+        search_dirs: List[str] = []
+
+        # 1. Primary loader host directory (app_dir override or auto-discovered host executable directory)
+        effective_app_dir = app_dir
+        if not effective_app_dir:
+            cand_parent = os.path.dirname(target_dir)
+            cand_root = os.path.dirname(cand_parent)
+            if os.path.basename(cand_parent).lower() in ("obs-plugins", "plugins"):
+                sub = os.path.basename(target_dir)
+                sibling_bin = os.path.join(cand_root, "bin", sub)
+                if os.path.isdir(sibling_bin):
+                    effective_app_dir = sibling_bin
+
+        if effective_app_dir:
+            can_app = os.path.abspath(effective_app_dir)
+            if can_app not in search_dirs:
+                search_dirs.append(can_app)
+
+        # 2. Binary target directory
+        if target_dir not in search_dirs:
+            search_dirs.append(target_dir)
+
+        search_dirs.extend([
             sys_dir,
             sys16_dir,
             system_root,
             os.getcwd()
-        ]
+        ])
 
         # Append PATH environment variable entries
         path_env = os.environ.get("PATH", "")
@@ -138,7 +164,8 @@ class WindowsDependencyResolver:
     def audit_dependencies(
         cls,
         binary_path: str,
-        custom_imports: Optional[Dict[str, List[str]]] = None
+        custom_imports: Optional[Dict[str, List[str]]] = None,
+        app_dir: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Performs static heuristic verification of an executable's imports against host Windows DLLs.
@@ -173,7 +200,11 @@ class WindowsDependencyResolver:
                       os.environ.get("PROCESSOR_ARCHITEW6432", "").upper() in ("AMD64", "ARM64"))
         is_32bit_on_64bit = (not is_binary_64) and host_is_64
 
-        search_dirs = cls.get_search_directories(binary_path, is_32bit_on_64bit=is_32bit_on_64bit)
+        search_dirs = cls.get_search_directories(
+            binary_path,
+            is_32bit_on_64bit=is_32bit_on_64bit,
+            app_dir=app_dir
+        )
         imports = custom_imports if custom_imports is not None else pe_info.get("imports", {}).get("modules", {})
         known_dlls = cls.get_known_dlls()
 

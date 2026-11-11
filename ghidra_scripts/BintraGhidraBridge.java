@@ -175,8 +175,12 @@ public class BintraGhidraBridge extends GhidraScript {
         payload.put("functions", functionsList);
 
         Gson gson = new GsonBuilder().setPrettyPrinting().create();
-        File tempExport = File.createTempFile("bintra_ghidra_export_", ".json");
-        File tempPlan = File.createTempFile("bintra_ghidra_plan_", ".json");
+        File wsDir = new File(System.getProperty("user.home"), ".bintra" + File.separator + "workspace");
+        if (!wsDir.exists()) {
+            wsDir.mkdirs();
+        }
+        File tempExport = File.createTempFile("bintra_ghidra_export_", ".json", wsDir);
+        File tempPlan = File.createTempFile("bintra_ghidra_plan_", ".json", wsDir);
         tempExport.deleteOnExit();
         tempPlan.deleteOnExit();
 

@@ -1,0 +1,147 @@
+{
+  "test_id": "BINTRA-OBS-012",
+  "initialize_result": {
+    "protocolVersion": "2024-11-05",
+    "capabilities": {
+      "tools": {
+        "listChanged": false
+      }
+    },
+    "serverInfo": {
+      "name": "bintra",
+      "version": "1.0.0"
+    }
+  },
+  "notification_silent_ping_id_preserved": true,
+  "tools_registered_count": 34,
+  "batch_request_responses_count": 2,
+  "empty_batch_error": {
+    "code": -32600,
+    "message": "Invalid Request: empty batch"
+  },
+  "malformed_json_parse_error": {
+    "code": -32700,
+    "message": "Parse error: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)"
+  },
+  "obs_live_tool_calls": {
+    "bintra_inspect_binary_obs_dll": {
+      "isError": false,
+      "parsed_keys": [
+        "format",
+        "pe_type",
+        "pe_offset",
+        "machine",
+        "coff_characteristics",
+        "image_base",
+        "entry_point_rva",
+        "subsystem",
+        "stored_checksum",
+        "windows_security_mitigations",
+        "data_directories",
+        "sections_count",
+        "sections",
+        "sha256",
+        "entry_point_file_offset",
+        "imports",
+        "exports"
+      ],
+      "status": null,
+      "verdict": null,
+      "error": null
+    },
+    "bintra_resolve_dependencies_obs_dll": {
+      "isError": false,
+      "parsed_keys": [
+        "status",
+        "audit_scope",
+        "binary_path",
+        "binary_architecture",
+        "loader_mode",
+        "known_dlls_enforced",
+        "verdict",
+        "total_imported_dlls",
+        "resolved_dlls_count",
+        "missing_dlls_count",
+        "architecture_mismatches_count",
+        "missing_exports_count",
+        "resolved_dlls",
+        "missing_dlls",
+        "architecture_mismatches",
+        "missing_exports",
+        "search_directories"
+      ],
+      "status": "success",
+      "verdict": "HEALTHY",
+      "error": null
+    },
+    "bintra_sensory_audit_obs_frontend": {
+      "isError": false,
+      "parsed_keys": [
+        "engine",
+        "platform_target",
+        "active_senses_count",
+        "overall_sensory_efficiency",
+        "score_semantics",
+        "senses"
+      ],
+      "status": null,
+      "verdict": null,
+      "error": null
+    },
+    "bintra_evidence_graph_obs64": {
+      "isError": false,
+      "parsed_keys": [
+        "status",
+        "binary_path",
+        "total_nodes",
+        "total_edges",
+        "graph",
+        "mermaid_diagram"
+      ],
+      "status": "success",
+      "verdict": null,
+      "error": null
+    }
+  },
+  "security_and_schema_rejections": {
+    "untrusted_workspace_or_overwrite": {
+      "jsonrpc": "2.0",
+      "id": 10,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"status\": \"error\",\n  \"tool\": \"bintra_patch_binary\",\n  \"error\": \"UNTRUSTED_WORKSPACE_OVERRIDE: Client-supplied workspace '%ProgramFiles%\\\\obs-studio\\\\bin\\\\64bit' is not authorized by host MCP configuration.\"\n}"
+          }
+        ],
+        "isError": true
+      }
+    },
+    "schema_wrong_type_vad_pid": {
+      "jsonrpc": "2.0",
+      "id": 11,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"status\": \"error\",\n  \"tool\": \"bintra_vad_inspect\",\n  \"error\": \"Invalid type for parameter 'pid' in 'bintra_vad_inspect': expected integer, got str.\"\n}"
+          }
+        ],
+        "isError": true
+      }
+    },
+    "unknown_tool_call": {
+      "jsonrpc": "2.0",
+      "id": 12,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"status\": \"error\",\n  \"tool\": \"nonexistent_tool_xyz\",\n  \"error\": \"UNREGISTERED_TOOL: Tool 'nonexistent_tool_xyz' has no registered security capability in PolicyEngine.\"\n}"
+          }
+        ],
+        "isError": true
+      }
+    }
+  }
+}

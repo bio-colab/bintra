@@ -327,10 +327,12 @@ class BinaryFormatInspector:
             ep_file_off = BinaryFormatInspector.rva_to_offset(result, entry_point_rva)
             result["entry_point_file_offset"] = hex(ep_file_off) if ep_file_off is not None else None
 
-            # High-Fidelity Import & Export Directory Analysis
+            # High-Fidelity Import, Export & Delay-Load Analysis
             is_64_bit = (pe_type.startswith("PE32+"))
             result["imports"] = BinaryFormatInspector._parse_pe_imports(f, file_size, result, is_64_bit)
             result["exports"] = BinaryFormatInspector._parse_pe_exports(f, file_size, result)
+            result["delay_imports"] = BinaryFormatInspector._parse_pe_delay_imports(f, file_size, result, is_64_bit)
+            result["version_info"] = BinaryFormatInspector._parse_pe_version_info(file_path)
 
             return result
 
@@ -352,7 +354,7 @@ class BinaryFormatInspector:
         mask = 0x8000000000000000 if is_64 else 0x80000000
         fmt = "<Q" if is_64 else "<I"
 
-        while curr + 20 <= max_import_end and len(modules) < 64:
+        while curr + 20 <= max_import_end and len(modules) < 1024:
             f.seek(curr)
             desc = f.read(20)
             if len(desc) < 20:
@@ -376,7 +378,7 @@ class BinaryFormatInspector:
                 funcs = []
                 if thunk_off is not None and 0 <= thunk_off < file_size:
                     t_curr = thunk_off
-                    while t_curr + step <= file_size and len(funcs) < 128:
+                    while t_curr + step <= file_size and len(funcs) < 65536:
                         f.seek(t_curr)
                         t_bytes = f.read(step)
                         if len(t_bytes) < step:
@@ -431,7 +433,7 @@ class BinaryFormatInspector:
 
         exported = []
         if names_off and ords_off and funcs_off:
-            for idx in range(min(num_names, 4096)):
+            for idx in range(min(num_names, 65536)):
                 if names_off + (idx + 1) * 4 > file_size or ords_off + (idx + 1) * 2 > file_size:
                     break
                 f.seek(names_off + idx * 4)
@@ -490,6 +492,155 @@ class BinaryFormatInspector:
             "exported_functions_count": num_funcs,
             "functions": exported
         }
+
+    @staticmethod
+    def _parse_pe_delay_imports(f, file_size: int, pe_info: Dict[str, Any], is_64: bool) -> Dict[str, Any]:
+        """Parses Microsoft Delay-Load Import Directory (DelayImportDescriptor)."""
+        dd = pe_info.get("data_directories", {})
+        if "DelayImportDescriptor" not in dd:
+            return {"imported_dlls_count": 0, "modules": {}}
+        delay_rva = int(dd["DelayImportDescriptor"]["rva"], 16)
+        delay_dir_size = int(dd["DelayImportDescriptor"].get("size", 0))
+        delay_off = BinaryFormatInspector.rva_to_offset(pe_info, delay_rva)
+        if delay_off is None or delay_off + 32 > file_size:
+            return {"imported_dlls_count": 0, "modules": {}}
+
+        max_delay_end = min(file_size, delay_off + delay_dir_size) if delay_dir_size > 0 else file_size
+        modules = {}
+        curr = delay_off
+        step = 8 if is_64 else 4
+        mask = 0x8000000000000000 if is_64 else 0x80000000
+        fmt = "<Q" if is_64 else "<I"
+
+        while curr + 32 <= max_delay_end and len(modules) < 1024:
+            f.seek(curr)
+            desc = f.read(32)
+            if len(desc) < 32:
+                break
+            attrs, name_rva, hmod_rva, iat_rva, int_rva, bound_iat_rva, unload_iat_rva, timestamp = struct.unpack(
+                "<IIIIIIII", desc
+            )
+            if name_rva == 0:
+                break
+            name_off = BinaryFormatInspector.rva_to_offset(pe_info, name_rva)
+            if name_off is not None and 0 <= name_off < file_size:
+                f.seek(name_off)
+                raw_name = bytearray()
+                while len(raw_name) < 256 and f.tell() < file_size:
+                    ch = f.read(1)
+                    if not ch or ch == b"\x00":
+                        break
+                    raw_name.extend(ch)
+                mod_name = raw_name.decode("latin-1", errors="ignore")
+
+                thunk_rva = int_rva if int_rva != 0 else iat_rva
+                thunk_off = BinaryFormatInspector.rva_to_offset(pe_info, thunk_rva)
+                funcs = []
+                if thunk_off is not None and 0 <= thunk_off < file_size:
+                    t_curr = thunk_off
+                    while t_curr + step <= file_size and len(funcs) < 65536:
+                        f.seek(t_curr)
+                        t_bytes = f.read(step)
+                        if len(t_bytes) < step:
+                            break
+                        val = struct.unpack(fmt, t_bytes)[0]
+                        if val == 0:
+                            break
+                        if val & mask:
+                            funcs.append(f"Ordinal_{val & 0xFFFF}")
+                        else:
+                            ibn_off = BinaryFormatInspector.rva_to_offset(pe_info, val)
+                            if ibn_off is not None and 0 <= ibn_off + 2 < file_size:
+                                f.seek(ibn_off + 2)
+                                raw_fn = bytearray()
+                                while len(raw_fn) < 256 and f.tell() < file_size:
+                                    ch = f.read(1)
+                                    if not ch or ch == b"\x00":
+                                        break
+                                    raw_fn.extend(ch)
+                                funcs.append(raw_fn.decode("latin-1", errors="ignore"))
+                        t_curr += step
+                modules[mod_name] = funcs
+            curr += 32
+        return {
+            "imported_dlls_count": len(modules),
+            "modules": modules
+        }
+
+    @staticmethod
+    def _parse_pe_version_info(file_path: str) -> Dict[str, Any]:
+        """Extracts official Windows VS_VERSION_INFO / StringFileInfo metadata."""
+        info: Dict[str, Any] = {
+            "file_version": None,
+            "product_version": None,
+            "company_name": None,
+            "product_name": None,
+            "file_description": None,
+            "original_filename": None,
+            "legal_copyright": None,
+        }
+        if os.name != "nt":
+            return info
+        try:
+            import ctypes
+            from ctypes import wintypes
+            version_dll = getattr(ctypes.windll, "version", None)
+            if not version_dll:
+                return info
+            GetFileVersionInfoSizeW = version_dll.GetFileVersionInfoSizeW
+            GetFileVersionInfoSizeW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD)]
+            GetFileVersionInfoSizeW.restype = wintypes.DWORD
+
+            dummy = wintypes.DWORD(0)
+            size = GetFileVersionInfoSizeW(file_path, ctypes.byref(dummy))
+            if size == 0:
+                return info
+
+            buf = ctypes.create_string_buffer(size)
+            GetFileVersionInfoW = version_dll.GetFileVersionInfoW
+            GetFileVersionInfoW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID]
+            GetFileVersionInfoW.restype = wintypes.BOOL
+            if not GetFileVersionInfoW(file_path, 0, size, buf):
+                return info
+
+            VerQueryValueW = version_dll.VerQueryValueW
+            VerQueryValueW.argtypes = [wintypes.LPCVOID, wintypes.LPCWSTR, ctypes.POINTER(wintypes.LPVOID), ctypes.POINTER(wintypes.UINT)]
+            VerQueryValueW.restype = wintypes.BOOL
+
+            p_trans = wintypes.LPVOID()
+            u_trans_len = wintypes.UINT()
+            trans_pairs = [("0409", "04b0"), ("0409", "04e4"), ("0000", "04b0")]
+            if VerQueryValueW(buf, r"\VarFileInfo\Translation", ctypes.byref(p_trans), ctypes.byref(u_trans_len)):
+                if u_trans_len.value >= 4:
+                    trans_bytes = ctypes.string_at(p_trans.value, u_trans_len.value)
+                    for i in range(0, len(trans_bytes), 4):
+                        if i + 4 <= len(trans_bytes):
+                            lang, cp = struct.unpack("<HH", trans_bytes[i:i+4])
+                            trans_pairs.insert(0, (f"{lang:04x}", f"{cp:04x}"))
+
+            keys = {
+                "FileVersion": "file_version",
+                "ProductVersion": "product_version",
+                "CompanyName": "company_name",
+                "ProductName": "product_name",
+                "FileDescription": "file_description",
+                "OriginalFilename": "original_filename",
+                "LegalCopyright": "legal_copyright",
+            }
+            for lang, cp in trans_pairs:
+                for k, field in keys.items():
+                    if info[field]:
+                        continue
+                    sub_block = f"\\StringFileInfo\\{lang}{cp}\\{k}"
+                    p_val = wintypes.LPVOID()
+                    u_len = wintypes.UINT()
+                    if VerQueryValueW(buf, sub_block, ctypes.byref(p_val), ctypes.byref(u_len)) and u_len.value > 0:
+                        val_str = ctypes.wstring_at(p_val.value)
+                        if val_str:
+                            info[field] = val_str
+        except Exception:
+            pass
+        return info
 
     @staticmethod
     def _parse_elf(file_path: str) -> Dict[str, Any]:

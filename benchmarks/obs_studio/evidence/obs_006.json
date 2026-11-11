@@ -1,0 +1,198 @@
+{
+  "test_id": "BINTRA-OBS-006",
+  "first_scan_writable_string": {
+    "elapsed_ms": 750.19,
+    "regions_scanned": 604,
+    "total_target_regions": 604,
+    "total_candidates": 19,
+    "candidates_sample": [
+      {
+        "address": "0x000001D917EC4CAB",
+        "address_int": 2031920893099,
+        "value": "OBS Studio",
+        "raw_hex": "4f42532053747564696f",
+        "match_len": 10,
+        "category": "HEAP"
+      },
+      {
+        "address": "0x000001D917ED466A",
+        "address_int": 2031920957034,
+        "value": "OBS Studio",
+        "raw_hex": "4f42532053747564696f",
+        "match_len": 10,
+        "category": "HEAP"
+      },
+      {
+        "address": "0x000001D917EE9FFD",
+        "address_int": 2031921045501,
+        "value": "OBS Studio",
+        "raw_hex": "4f42532053747564696f",
+        "match_len": 10,
+        "category": "HEAP"
+      },
+      {
+        "address": "0x000001D917EEA78C",
+        "address_int": 2031921047436,
+        "value": "OBS Studio",
+        "raw_hex": "4f42532053747564696f",
+        "match_len": 10,
+        "category": "HEAP"
+      },
+      {
+        "address": "0x000001D917EEACFD",
+        "address_int": 2031921048829,
+        "value": "OBS Studio",
+        "raw_hex": "4f42532053747564696f",
+        "match_len": 10,
+        "category": "HEAP"
+      }
+    ]
+  },
+  "next_scan_confirmation": {
+    "previous_count": 19,
+    "surviving_count": 19,
+    "keys": [
+      "session_id",
+      "pid",
+      "data_type",
+      "scan_type",
+      "previous_count",
+      "surviving_count",
+      "candidates_sample"
+    ]
+  },
+  "live_cpp_object_probe": {
+    "object_va": null,
+    "vtable_va": null,
+    "vtable_module": null
+  },
+  "structure_dissection": {
+    "fields_count": 16,
+    "vtable_detected": false,
+    "fields_sample": [
+      {
+        "offset": "0x0",
+        "offset_bytes": 0,
+        "size_bytes": 4,
+        "raw_hex": "0x2053424F",
+        "inferred_type": "int32_t",
+        "confidence": "MEDIUM",
+        "alternatives": [
+          "uint32_t",
+          "bitflags"
+        ],
+        "heuristic": true,
+        "description": "Integer32: 542327375 (0x2053424F)"
+      },
+      {
+        "offset": "0x4",
+        "offset_bytes": 4,
+        "size_bytes": 4,
+        "raw_hex": "0x64757453",
+        "inferred_type": "int32_t",
+        "confidence": "MEDIUM",
+        "alternatives": [
+          "uint32_t",
+          "bitflags"
+        ],
+        "heuristic": true,
+        "description": "Integer32: 1685419091 (0x64757453)"
+      },
+      {
+        "offset": "0x8",
+        "offset_bytes": 8,
+        "size_bytes": 4,
+        "raw_hex": "0xD8206F69",
+        "inferred_type": "uint32_t",
+        "confidence": "MEDIUM",
+        "alternatives": [
+          "int32_t",
+          "bitflags"
+        ],
+        "heuristic": true,
+        "description": "Integer32: 3626004329 (0xD8206F69)"
+      },
+      {
+        "offset": "0xC",
+        "offset_bytes": 12,
+        "size_bytes": 4,
+        "raw_hex": "0xD9B0D8A5",
+        "inferred_type": "uint32_t",
+        "confidence": "MEDIUM",
+        "alternatives": [
+          "int32_t",
+          "bitflags"
+        ],
+        "heuristic": true,
+        "description": "Integer32: 3652245669 (0xD9B0D8A5)"
+      },
+      {
+        "offset": "0x10",
+        "offset_bytes": 16,
+        "size_bytes": 4,
+        "raw_hex": "0x2083D986",
+        "inferred_type": "int32_t",
+        "confidence": "MEDIUM",
+        "alternatives": [
+          "uint32_t",
+          "bitflags"
+        ],
+        "heuristic": true,
+        "description": "Integer32: 545511814 (0x2083D986)"
+      },
+      {
+        "offset": "0x14",
+        "offset_bytes": 20,
+        "size_bytes": 4,
+        "raw_hex": "0xAAD884D9",
+        "inferred_type": "uint32_t",
+        "confidence": "MEDIUM",
+        "alternatives": [
+          "int32_t",
+          "bitflags"
+        ],
+        "heuristic": true,
+        "description": "Integer32: 2866316505 (0xAAD884D9)"
+      },
+      {
+        "offset": "0x18",
+        "offset_bytes": 24,
+        "size_bytes": 4,
+        "raw_hex": "0x85D9AAD8",
+        "inferred_type": "uint32_t",
+        "confidence": "MEDIUM",
+        "alternatives": [
+          "int32_t",
+          "bitflags"
+        ],
+        "heuristic": true,
+        "description": "Integer32: 2245634776 (0x85D9AAD8)"
+      },
+      {
+        "offset": "0x1C",
+        "offset_bytes": 28,
+        "size_bytes": 4,
+        "raw_hex": "0x86D983D9",
+        "inferred_type": "uint32_t",
+        "confidence": "MEDIUM",
+        "alternatives": [
+          "int32_t",
+          "bitflags"
+        ],
+        "heuristic": true,
+        "description": "Integer32: 2262402009 (0x86D983D9)"
+      }
+    ],
+    "c_struct_definition": "struct Reconstructed_0x1D917EC4CAB {\n    int32_t    field_0x0; // 0x00: Integer32: 542327375 (0x2053424F)\n    int32_t    field_0x4; // 0x04: Integer32: 1685419091 (0x64757453)\n    uint32_t   field_0x8; // 0x08: Integer32: 3626004329 (0xD8206F69)\n    uint32_t   field_0xC; // 0x0C: Integer32: 3652245669 (0xD9B0D8A5)\n    int32_t    field_0x10; // 0x10: Integer32: 545511814 (0x2083D986)\n    uint32_t   field_0x14; // 0x14: Integer32: 2866316505 (0xAAD884D9)\n    uint32_t   field_0x18; // 0x18: Integer32: 2245634776 (0x85D9AAD8)\n    uint32_t   field_0x1C; // 0x1C: Integer32: 2262402009 (0x86D983D9)\n    uint32_t   field_0x20; // 0x20: Integer32: 3649427744 (0xD985D920)\n    uint32_t   field_0x24; // 0x24: Integer32: 2866290822 (0xAAD82086)\n    uint32_t   field_0x28; // 0x28: Integer32: 2178517209 (0x81D988D9)\n    uint32_t   field_0x2C; // 0x2C: Integer32: 2983758553 (0xB1D88AD9)\n    uint32_t   field_0x30; // 0x30: Integer32: 3649427744 (0xD985D920)\n    uint32_t   field_0x34; // 0x34: Integer32: 3635599498 (0xD8B2D88A)\n    int32_t    field_0x38; // 0x38: Integer32: 548067495 (0x20AAD8A7)\n    float      field_0x3C; // 0x3C: Float value: -0.0004\n};"
+  },
+  "pointer_scan": {
+    "pid": 5224,
+    "target_address": "0x1D917EC4CAB",
+    "max_depth_searched": 2,
+    "alignment": 8,
+    "heuristic": true,
+    "notice": "Pointer chains are heuristic candidates verified immediately via read-only dereferencing; ASLR or heap freeing may invalidate paths later.",
+    "paths_count": 0,
+    "paths": []
+  }
+}

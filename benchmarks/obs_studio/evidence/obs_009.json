@@ -1,0 +1,217 @@
+{
+  "test_id": "BINTRA-OBS-009",
+  "inventory_counts": {
+    "core_bin_64bit_exes": [
+      "obs-amf-test.exe",
+      "obs-ffmpeg-mux.exe",
+      "obs-nvenc-test.exe",
+      "obs-qsv-test.exe",
+      "obs64.exe"
+    ],
+    "core_bin_64bit_dlls_count": 27,
+    "obs_plugins_64bit_exes": [
+      "obs-browser-page.exe"
+    ],
+    "obs_plugins_64bit_dlls_count": 32,
+    "win_capture_hook_dlls": [
+      "graphics-hook32.dll",
+      "graphics-hook64.dll"
+    ],
+    "third_party_plugin_detected": true
+  },
+  "plugin_probe": [
+    {
+      "name": "droidcam-obs.dll",
+      "size_bytes": 2165760,
+      "bintra_exports_count": 10,
+      "has_obs_module_load_and_ver": true,
+      "imports_obs_dll": true,
+      "imports_frontend_api": true,
+      "imports_qt6": true,
+      "pe_version_info": {
+        "CompanyName": "DEV47APPS",
+        "FileDescription": "DroidCam OBS Source Plugin",
+        "OriginalFilename": "droidcam-obs.dll",
+        "ProductName": "DroidCam",
+        "ProductVersion": "7"
+      },
+      "has_pdb_next_to_binary": true,
+      "bintra_dep_verdict": "HEALTHY",
+      "bintra_dep_missing": [],
+      "bintra_dep_missing_exports_count": 0
+    },
+    {
+      "name": "obs-browser.dll",
+      "size_bytes": 807184,
+      "bintra_exports_count": 12,
+      "has_obs_module_load_and_ver": true,
+      "imports_obs_dll": true,
+      "imports_frontend_api": true,
+      "imports_qt6": true,
+      "pe_version_info": {},
+      "has_pdb_next_to_binary": true,
+      "bintra_dep_verdict": "HEALTHY",
+      "bintra_dep_missing": [],
+      "bintra_dep_missing_exports_count": 0
+    },
+    {
+      "name": "win-capture.dll",
+      "size_bytes": 141072,
+      "bintra_exports_count": 8,
+      "has_obs_module_load_and_ver": true,
+      "imports_obs_dll": true,
+      "imports_frontend_api": false,
+      "imports_qt6": false,
+      "pe_version_info": {},
+      "has_pdb_next_to_binary": true,
+      "bintra_dep_verdict": "HEALTHY",
+      "bintra_dep_missing": [],
+      "bintra_dep_missing_exports_count": 0
+    },
+    {
+      "name": "obs-ffmpeg.dll",
+      "size_bytes": 274192,
+      "bintra_exports_count": 8,
+      "has_obs_module_load_and_ver": true,
+      "imports_obs_dll": true,
+      "imports_frontend_api": false,
+      "imports_qt6": false,
+      "pe_version_info": {
+        "CompanyName": "OBS Project",
+        "FileDescription": "OBS FFmpeg module",
+        "FileVersion": "32.1.2",
+        "ProductName": "OBS Studio",
+        "ProductVersion": "32.1.2",
+        "OriginalFilename": "obs-ffmpeg"
+      },
+      "has_pdb_next_to_binary": true,
+      "bintra_dep_verdict": "HEALTHY",
+      "bintra_dep_missing": [],
+      "bintra_dep_missing_exports_count": 0
+    },
+    {
+      "name": "obs-nvenc.dll",
+      "size_bytes": 76048,
+      "bintra_exports_count": 8,
+      "has_obs_module_load_and_ver": true,
+      "imports_obs_dll": true,
+      "imports_frontend_api": false,
+      "imports_qt6": false,
+      "pe_version_info": {
+        "CompanyName": "OBS Project",
+        "FileDescription": "OBS NVENC module",
+        "FileVersion": "32.1.2",
+        "ProductName": "OBS Studio",
+        "ProductVersion": "32.1.2",
+        "OriginalFilename": "obs-nvenc"
+      },
+      "has_pdb_next_to_binary": true,
+      "bintra_dep_verdict": "HEALTHY",
+      "bintra_dep_missing": [],
+      "bintra_dep_missing_exports_count": 0
+    },
+    {
+      "name": "obs-websocket.dll",
+      "size_bytes": 1240336,
+      "bintra_exports_count": 11,
+      "has_obs_module_load_and_ver": true,
+      "imports_obs_dll": true,
+      "imports_frontend_api": true,
+      "imports_qt6": true,
+      "pe_version_info": {},
+      "has_pdb_next_to_binary": true,
+      "bintra_dep_verdict": "HEALTHY",
+      "bintra_dep_missing": [],
+      "bintra_dep_missing_exports_count": 0
+    },
+    {
+      "name": "obs-x264.dll",
+      "size_bytes": 36112,
+      "bintra_exports_count": 7,
+      "has_obs_module_load_and_ver": true,
+      "imports_obs_dll": true,
+      "imports_frontend_api": false,
+      "imports_qt6": false,
+      "pe_version_info": {
+        "CompanyName": "OBS Project",
+        "FileDescription": "OBS x264 encoder",
+        "FileVersion": "32.1.2",
+        "ProductName": "OBS Studio",
+        "ProductVersion": "32.1.2",
+        "OriginalFilename": "obs-x264"
+      },
+      "has_pdb_next_to_binary": true,
+      "bintra_dep_verdict": "HEALTHY",
+      "bintra_dep_missing": [],
+      "bintra_dep_missing_exports_count": 0
+    },
+    {
+      "name": "win-wasapi.dll",
+      "size_bytes": 78096,
+      "bintra_exports_count": 8,
+      "has_obs_module_load_and_ver": true,
+      "imports_obs_dll": true,
+      "imports_frontend_api": false,
+      "imports_qt6": false,
+      "pe_version_info": {
+        "CompanyName": "OBS Project",
+        "FileDescription": "OBS WASAPI module",
+        "FileVersion": "32.1.2",
+        "ProductName": "OBS Studio",
+        "ProductVersion": "32.1.2",
+        "OriginalFilename": "win-wasapi"
+      },
+      "has_pdb_next_to_binary": true,
+      "bintra_dep_verdict": "HEALTHY",
+      "bintra_dep_missing": [],
+      "bintra_dep_missing_exports_count": 0
+    },
+    {
+      "name": "image-source.dll",
+      "size_bytes": 59664,
+      "bintra_exports_count": 7,
+      "has_obs_module_load_and_ver": true,
+      "imports_obs_dll": true,
+      "imports_frontend_api": false,
+      "imports_qt6": false,
+      "pe_version_info": {
+        "CompanyName": "OBS Project",
+        "FileDescription": "OBS image module",
+        "FileVersion": "32.1.2",
+        "ProductName": "OBS Studio",
+        "ProductVersion": "32.1.2",
+        "OriginalFilename": "image-source"
+      },
+      "has_pdb_next_to_binary": true,
+      "bintra_dep_verdict": "HEALTHY",
+      "bintra_dep_missing": [],
+      "bintra_dep_missing_exports_count": 0
+    },
+    {
+      "name": "libcef.dll",
+      "size_bytes": 214001712,
+      "bintra_exports_count": 212,
+      "has_obs_module_load_and_ver": false,
+      "imports_obs_dll": false,
+      "imports_frontend_api": false,
+      "imports_qt6": false,
+      "pe_version_info": {
+        "FileDescription": "Chromium Embedded Framework (CEF) Dynamic Link Library",
+        "FileVersion": "127.145.7+g2b7d20b+chromium-127.0.6533.120",
+        "OriginalFilename": "libcef.dll",
+        "ProductName": "Chromium Embedded Framework (CEF) Dynamic Link Library",
+        "ProductVersion": "127.145.7+g2b7d20b+chromium-127.0.6533.120"
+      },
+      "has_pdb_next_to_binary": false,
+      "bintra_dep_verdict": "HEALTHY",
+      "bintra_dep_missing": [],
+      "bintra_dep_missing_exports_count": 0
+    }
+  ],
+  "bintra_plugin_architecture_capabilities": {
+    "built_in_obs_plugin_classifier": false,
+    "built_in_cef_version_detector": false,
+    "pe_exports_parsed_by_bintra": true,
+    "cross_dir_plugin_to_bin_resolution": "Audit below shows whether obs.dll resolves from plugins dir"
+  }
+}

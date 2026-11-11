@@ -65,11 +65,11 @@ def resolve_bridge_config():
             try:
                 with open(c, "r") as f:
                     cfg = json.load(f)
-                    return cfg.get("url", f"http://127.0.0.1:{DEFAULT_BRIDGE_PORT}"), cfg.get("auth_token", "")
+                    return cfg.get("url", "http://127.0.0.1:%d" % DEFAULT_BRIDGE_PORT), cfg.get("auth_token", "")
             except Exception:
                 pass
 
-    return f"http://127.0.0.1:{DEFAULT_BRIDGE_PORT}", ""
+    return "http://127.0.0.1:%d" % DEFAULT_BRIDGE_PORT, ""
 
 
 def rpc_call(url, token, method, params=None):
@@ -93,7 +93,7 @@ def rpc_call(url, token, method, params=None):
     content = resp.read().decode("utf-8")
     res = json.loads(content)
     if "error" in res:
-        raise RuntimeError(f"RPC Error [{res['error'].get('code')}]: {res['error'].get('message')}")
+        raise RuntimeError("RPC Error [%s]: %s" % (res['error'].get('code'), res['error'].get('message')))
     return res.get("result")
 
 
@@ -133,9 +133,9 @@ def apply_command(prog, cmd):
             if cu:
                 from ghidra.program.model.listing import CodeUnit
                 cu.setComment(CodeUnit.PLATE_COMMENT, comment)
-                log_msg(f"Applied PLATE_COMMENT at {addr.toString()}")
+                log_msg("Applied PLATE_COMMENT at %s" % addr.toString())
             else:
-                log_msg(f"Target code unit not found at {addr.toString()} for plate comment.")
+                log_msg("Target code unit not found at %s for plate comment." % addr.toString())
 
     elif action == "CREATE_BOOKMARK":
         addr = _resolve_addr(details.get("address"), details.get("address_space", "auto"))
@@ -144,7 +144,7 @@ def apply_command(prog, cmd):
         if addr:
             bm = prog.getBookmarkManager()
             bm.setBookmark(addr, "BookmarkCategory", cat, desc)
-            log_msg(f"Created Bookmark at {addr.toString()} [{cat}]: {desc}")
+            log_msg("Created Bookmark at %s [%s]: %s" % (addr.toString(), cat, desc))
 
     elif action == "SET_PROGRAM_NOTE":
         title = details.get("title", "BINTRA_DIAGNOSTIC_NOTE")
@@ -153,10 +153,10 @@ def apply_command(prog, cmd):
         if base_cu:
             from ghidra.program.model.listing import CodeUnit
             cur = base_cu.getComment(CodeUnit.REPEATABLE_COMMENT) or ""
-            note = f"\n\n=== {title} ===\n{content}".strip()
-            new_c = f"{cur}\n{note}".strip() if cur else note
+            note = ("\n\n=== %s ===\n%s" % (title, content)).strip()
+            new_c = ("%s\n%s" % (cur, note)).strip() if cur else note
             base_cu.setComment(CodeUnit.REPEATABLE_COMMENT, new_c)
-            log_msg(f"Applied Program Note '{title}' at image base {image_base.toString()}")
+            log_msg("Applied Program Note '%s' at image base %s" % (title, image_base.toString()))
 
     elif action == "RENAME_FUNCTION":
         addr = _resolve_addr(details.get("address"), details.get("address_space", "auto"))
@@ -168,9 +168,9 @@ def apply_command(prog, cmd):
             if func:
                 from ghidra.program.model.symbol import SourceType
                 func.setName(new_name, SourceType.USER_DEFINED)
-                log_msg(f"Renamed function at {addr.toString()} (entry: {func.getEntryPoint().toString()}) -> '{new_name}'")
+                log_msg("Renamed function at %s (entry: %s) -> '%s'" % (addr.toString(), func.getEntryPoint().toString(), new_name))
             else:
-                log_msg(f"No function found containing {addr.toString()} to rename.")
+                log_msg("No function found containing %s to rename." % addr.toString())
 
     elif action == "APPLY_DATA_STRUCTURE":
         addr = _resolve_addr(details.get("address"), details.get("address_space", "va"))
@@ -184,9 +184,9 @@ def apply_command(prog, cmd):
             cu = listing.getCodeUnitAt(addr)
             if cu:
                 from ghidra.program.model.listing import CodeUnit
-                comment = f"[Bintra Reconstructed Structure: {struct_name}] ({len(fields)} fields, {size} bytes)\n{c_decl}"
+                comment = "[Bintra Reconstructed Structure: %s] (%d fields, %d bytes)\n%s" % (struct_name, len(fields), size, c_decl)
                 cu.setComment(CodeUnit.PLATE_COMMENT, comment)
-                log_msg(f"Applied Structure Plate Comment at {addr.toString()}")
+                log_msg("Applied Structure Plate Comment at %s" % addr.toString())
 
         # 2. Add Composite Structure in Ghidra DataTypeManager if available
         try:
@@ -202,7 +202,7 @@ def apply_command(prog, cmd):
                     offset = int(offset, 16) if offset.startswith("0x") else int(offset)
                 f_type_str = f_info.get("inferred_type", "uint8")
                 f_comment = f_info.get("description", "")
-                f_name = f"field_0x{offset:X}"
+                f_name = "field_0x%X" % offset
 
                 if "void*" in f_type_str or "ptr" in f_type_str.lower():
                     dt = PointerDataType()
@@ -216,9 +216,9 @@ def apply_command(prog, cmd):
                 struct_dt.insertAtOffset(offset, dt, dt.getLength(), f_name, f_comment)
 
             added_dt = dtm.addDataType(struct_dt, None)
-            log_msg(f"Created DataTypeManager structure: {added_dt.getName()} ({added_dt.getLength()} bytes)")
+            log_msg("Created DataTypeManager structure: %s (%d bytes)" % (added_dt.getName(), added_dt.getLength()))
         except Exception as dt_err:
-            log_msg(f"DataTypeManager notice (running headless/fallback): {dt_err}")
+            log_msg("DataTypeManager notice (running headless/fallback): %s" % dt_err)
 
     elif action == "SET_POINTER_CHAIN":
         addr = _resolve_addr(details.get("address"), details.get("address_space", "auto"))
@@ -228,7 +228,7 @@ def apply_command(prog, cmd):
             if cu:
                 from ghidra.program.model.listing import CodeUnit
                 cu.setComment(CodeUnit.EOL_COMMENT, comment)
-                log_msg(f"Applied Pointer Chain EOL comment at {addr.toString()}")
+                log_msg("Applied Pointer Chain EOL comment at %s" % addr.toString())
 
 
 def run():
@@ -241,13 +241,13 @@ def run():
         return
 
     bridge_url, auth_token = resolve_bridge_config()
-    log_msg(f"Connecting to Bintra Bridge at: {bridge_url}")
+    log_msg("Connecting to Bintra Bridge at: %s" % bridge_url)
 
     try:
         ping = rpc_call(bridge_url, auth_token, "ping")
-        log_msg(f"Connected! Bridge status: {ping.get('status')} (version: {ping.get('bridge_version')})")
+        log_msg("Connected! Bridge status: %s (version: %s)" % (ping.get('status'), ping.get('bridge_version')))
     except Exception as e:
-        log_err(f"Connection to Bintra Bridge failed: {e}")
+        log_err("Connection to Bintra Bridge failed: %s" % e)
         log_err("Ensure Bintra bridge daemon is running ('python src/cli.py ghidra-bridge --start')")
         return
 
@@ -260,9 +260,9 @@ def run():
     }
     try:
         rpc_call(bridge_url, auth_token, "ghidra.register_client", reg_params)
-        log_msg(f"Client registered for '{currentProgram.getName()}' (Base: {reg_params['image_base']})")
+        log_msg("Client registered for '%s' (Base: %s)" % (currentProgram.getName(), reg_params['image_base']))
     except Exception as e:
-        log_err(f"Failed to register client: {e}")
+        log_err("Failed to register client: %s" % e)
         return
 
     log_msg("Listening for live annotations and mutations...")
@@ -278,7 +278,7 @@ def run():
             res = rpc_call(bridge_url, auth_token, "ghidra.poll_commands")
             cmds = res.get("commands", [])
             if cmds:
-                log_msg(f"Processing {len(cmds)} diagnostic command(s)...")
+                log_msg("Processing %d diagnostic command(s)..." % len(cmds))
                 tx = currentProgram.startTransaction("Bintra Live Mutations")
                 try:
                     for cmd in cmds:
@@ -287,10 +287,10 @@ def run():
                     log_msg("Transaction committed successfully.")
                 except Exception as ex:
                     currentProgram.endTransaction(tx, False)
-                    log_err(f"Transaction aborted due to error: {ex}")
+                    log_err("Transaction aborted due to error: %s" % ex)
         except Exception as e:
             if loop_count % 30 == 0:
-                log_err(f"Polling error: {e}")
+                log_err("Polling error: %s" % e)
 
         loop_count += 1
         time.sleep(1.0)
@@ -302,4 +302,4 @@ if __name__ == "__main__":
     else:
         print("[Bintra] Ghidra Live Bridge Service Script loaded.")
         u, t = resolve_bridge_config()
-        print(f"Target Bridge URL: {u}")
+        print("Target Bridge URL: %s" % u)

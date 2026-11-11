@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-REA-Neural Unified Command-Line Interface.
+Bintra Unified Command-Line Interface.
 Dispatches to Binary Engine (inspect, deobfuscate, match, patch-binary, scan-hybrid),
 Weight-Space Engine (subspace, decompile, patch-weights, diff-weights, probe-trace, verify-behavior),
 or Metaphorical Sensory Cortex (sense / sensory-audit).
@@ -18,7 +18,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 import binary_neural_engine
-import rea_neural_engine
+import bintra_engine
 from binary_neural_engine import SensoryCortex
 
 
@@ -45,18 +45,18 @@ WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "w
 
 
 def print_help():
-    print("""
-  ____  _____    _         _   _                      _ 
- |  _ \\| ____|  / \\       | \\ | | ___ _   _ _ __ __ _| |
- | |_) |  _|   / _ \\ _____|  \\| |/ _ \\ | | | '__/ _` | |
- |  _ <| |___ / ___ \\_____| |\\  |  __/ |_| | | | (_| | |
- |_| \\_\\_____/_/   \\_\\    |_| \\_|\\___|\\__,_|_|  \\__,_|_|
+    print(r"""
+  ____  _       _             
+ | __ )(_)_ __ | |_ _ __ __ _ 
+ |  _ \| | '_ \| __| '__/ _` |
+ | |_) | | | | | |_| | | (_| |
+ |____/|_|_| |_|\__|_|  \__,_|
 
- REA-Neural Unified CLI v7.4.0 (Windows-Native & 10-Sense Edition)
+ Bintra Unified CLI v1.0.0 (Windows-Native & 10-Sense Edition)
  Autonomous Continuous Semantic Reverse Engineering & Binary Analysis
 
 Usage:
-  python src/cli.py <command> [options]
+  bintra <command> [options]  (or: python src/cli.py <command> [options])
 
 Binary / Windows Executable Commands:
   inspect           Inspect PE32/PE32+/ELF headers, mitigations (ASLR/DEP/CFG), and sections
@@ -82,7 +82,7 @@ Ghidra P-Code & Symbolic Integration Commands:
   deobfuscate-pcode Detect and prune P-code algebraic opaque predicates and dispatcher loops
   ghidra-plan       Generate type-safe Ghidra database mutation and annotation plans
   ghidra-analyze    Batch-analyze exported Ghidra P-Code JSON and generate database mutation plan
-  ghidra-headless   Launch Ghidra analyzeHeadless with REA-Neural bridge script to auto-deobfuscate
+  ghidra-headless   Launch Ghidra analyzeHeadless with Bintra bridge script to auto-deobfuscate
   ghidra-bridge     Run localhost JSON-RPC 2.0 live bridge daemon connecting to Ghidra
 
 Windows System Intelligence & Failure Diagnostic Commands:
@@ -111,7 +111,7 @@ Agent-Native MCP (Model Context Protocol):
   mcp               Launch native JSON-RPC 2.0 stdio MCP server for AI models (Claude, Antigravity, Cursor)
 
 Maintenance & Update Commands:
-  update            Check and automatically update REA-Neural to latest commit from GitHub (or 'self-update')
+  update            Check and automatically update Bintra to latest commit from GitHub (or 'self-update')
 """)
 
 
@@ -121,7 +121,7 @@ def main():
         print_help()
         sys.exit(0)
     if sys.argv[1] in ("-v", "-V", "--version", "version"):
-        print("REA-Neural v7.4.0")
+        print("Bintra v1.0.0")
         sys.exit(0)
 
     cmd_lower = sys.argv[1].lower()
@@ -217,7 +217,7 @@ def main():
             if AuditLogger.is_audit_degraded() or isinstance(e, AuditPersistenceError):
                 err_payload["audit_degraded"] = True
                 err_payload["audit_degraded_reason"] = AuditLogger.get_degraded_reason() or str(e)
-            if os.environ.get("REA_DEBUG") == "1":
+            if os.environ.get("BINTRA_DEBUG") == "1":
                 import traceback
                 err_payload["traceback"] = traceback.format_exc()
             print(json.dumps(err_payload, indent=2, ensure_ascii=False))
@@ -236,9 +236,9 @@ def _dispatch_cli():
         elif "--alpha" in sys.argv or "--mode-index" in sys.argv or "--tensor" in sys.argv or "--operation" in sys.argv:
             cmd = "patch-weights"
         elif "-h" in sys.argv or "--help" in sys.argv or "help" in sys.argv:
-            print("REA-Neural Patch Commands:")
-            print("  Binary patching:  rea-neural patch-binary --binary <path> --offset <offset> --patch-hex <hex>")
-            print("  Weight patching:  rea-neural patch-weights --model <path> --tensor <name> --operation <op>")
+            print("Bintra Patch Commands:")
+            print("  Binary patching:  bintra patch-binary --binary <path> --offset <offset> --patch-hex <hex>")
+            print("  Weight patching:  bintra patch-weights --model <path> --tensor <name> --operation <op>")
             sys.exit(0)
         else:
             print("Ambiguous command 'patch'. Please specify 'patch-binary' for PE files or 'patch-weights' for model tensors.")
@@ -608,7 +608,7 @@ def _dispatch_cli():
 
 
         elif cmd == "file-locks":
-            parser = argparse.ArgumentParser(prog="rea file-locks", description="Detect processes locking a target file")
+            parser = argparse.ArgumentParser(prog="bintra file-locks", description="Detect processes locking a target file")
             parser.add_argument("--file", required=True, help="Path to file to inspect")
             args = parser.parse_args(sys.argv[2:])
             from security import ExecutionGuard, Capability
@@ -625,7 +625,7 @@ def _dispatch_cli():
             return
 
         elif cmd == "proc-modules":
-            parser = argparse.ArgumentParser(prog="rea proc-modules", description="Find processes hosting a loaded DLL")
+            parser = argparse.ArgumentParser(prog="bintra proc-modules", description="Find processes hosting a loaded DLL")
             parser.add_argument("--module", required=True, help="Module/DLL name or keyword")
             args = parser.parse_args(sys.argv[2:])
             from security import ExecutionGuard, Capability
@@ -642,7 +642,7 @@ def _dispatch_cli():
             return
 
         elif cmd == "dev-match":
-            parser = argparse.ArgumentParser(prog="rea dev-match", description="Match PnP devices against Driver Store packages")
+            parser = argparse.ArgumentParser(prog="bintra dev-match", description="Match PnP devices against Driver Store packages")
             parser.add_argument("--query", default=None, help="Device query name, instance ID, or hardware ID")
             parser.add_argument("--class-filter", default=None, help="Filter by device class")
             parser.add_argument("--problems-only", action="store_true", help="Filter to devices with active problem codes")
@@ -665,7 +665,7 @@ def _dispatch_cli():
             return
 
         elif cmd == "vad-inspect":
-            parser = argparse.ArgumentParser(prog="rea vad-inspect", description="Inspect passive virtual memory map (VAD) and classify addresses")
+            parser = argparse.ArgumentParser(prog="bintra vad-inspect", description="Inspect passive virtual memory map (VAD) and classify addresses")
             parser.add_argument("--pid", type=int, required=True, help="Target process PID to inspect")
             parser.add_argument("--address", default=None, help="Optional virtual memory address to classify (e.g. '0x7fff12340000')")
             parser.add_argument("--regions", action="store_true", help="Include full listing of contiguous memory regions")
@@ -709,7 +709,7 @@ def _dispatch_cli():
             return
 
         elif cmd == "mem-scan":
-            parser = argparse.ArgumentParser(prog="rea mem-scan", description="Non-intrusive read-only memory value search (First/Next scan)")
+            parser = argparse.ArgumentParser(prog="bintra mem-scan", description="Non-intrusive read-only memory value search (First/Next scan)")
             parser.add_argument("--pid", type=int, required=True, help="Target process PID to scan")
             parser.add_argument("--type", default="int32", choices=["int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float", "double", "bytes", "string"], help="Data type to scan")
             parser.add_argument("--mode", default="exact", choices=["exact", "between", "unknown", "increased", "decreased", "changed", "unchanged"], help="Scan mode")
@@ -820,7 +820,7 @@ def _dispatch_cli():
             return
 
         elif cmd == "pointer-scan":
-            parser = argparse.ArgumentParser(prog="rea pointer-scan", description="Multi-level static module base pointer path resolver")
+            parser = argparse.ArgumentParser(prog="bintra pointer-scan", description="Multi-level static module base pointer path resolver")
             parser.add_argument("--pid", type=int, required=True, help="Target process PID")
             parser.add_argument("--target", required=True, help="Target dynamic address (e.g. '0x7fff12340000')")
             parser.add_argument("--max-depth", type=int, default=2, choices=[1, 2, 3], help="Maximum pointer indirection depth")
@@ -867,7 +867,7 @@ def _dispatch_cli():
             return
 
         elif cmd == "dissect-struct":
-            parser = argparse.ArgumentParser(prog="rea dissect-struct", description="Runtime object field analysis and C struct generation")
+            parser = argparse.ArgumentParser(prog="bintra dissect-struct", description="Runtime object field analysis and C struct generation")
             parser.add_argument("--pid", type=int, required=True, help="Target process PID")
             parser.add_argument("--address", required=True, help="Target object base address (e.g. '0x7fff12340000')")
             parser.add_argument("--size", type=int, default=64, help="Size of object memory to dissect in bytes (default: 64)")
@@ -914,7 +914,7 @@ def _dispatch_cli():
             return
 
         elif cmd == "crash-rca":
-            parser = argparse.ArgumentParser(prog="rea crash-rca", description="Automated Crash Root Cause Analysis (MiniDump + Disassembly)")
+            parser = argparse.ArgumentParser(prog="bintra crash-rca", description="Automated Crash Root Cause Analysis (MiniDump + Disassembly)")
             parser.add_argument("--dmp", "--file", dest="dmp_path", required=True, help="Path to Windows MiniDump (.dmp) file")
             parser.add_argument("--binary", default=None, help="Optional path to target executable for machine code disassembly")
             parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
@@ -928,8 +928,8 @@ def _dispatch_cli():
             return
 
         elif cmd == "etw-capture":
-            parser = argparse.ArgumentParser(prog="rea etw-capture", description="Start real-time ETW capture session and inspect timeline")
-            parser.add_argument("--session-name", default="REA_Diagnostic_Trace", help="Name for real-time ETW trace session")
+            parser = argparse.ArgumentParser(prog="bintra etw-capture", description="Start real-time ETW capture session and inspect timeline")
+            parser.add_argument("--session-name", default="Bintra_Diagnostic_Trace", help="Name for real-time ETW trace session")
             parser.add_argument("--pid", type=int, default=None, help="Optional target PID to filter events")
             parser.add_argument("--duration", type=float, default=2.0, help="Duration in seconds to capture live trace (default: 2.0s, max: 300s)")
             parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
@@ -1048,7 +1048,7 @@ def _dispatch_cli():
             return
 
     if cmd in SENSORY_COMMANDS:
-        parser = argparse.ArgumentParser(description="REA-Neural 10-Sense Diagnostic Audit")
+        parser = argparse.ArgumentParser(description="Bintra 10-Sense Diagnostic Audit")
         parser.add_argument("command", help="sense or sensory-audit")
         parser.add_argument("--file", "--binary", "--input", dest="file", default=None, help="Optional path to PE executable or .safetensors model")
         parser.add_argument("--hex", default=None, help="Optional hex string of machine code")
@@ -1136,13 +1136,13 @@ def _dispatch_cli():
             print(json.dumps(plan, indent=2))
             return
         elif cmd == "ghidra-headless":
-            parser = argparse.ArgumentParser(description="Run Ghidra headless analysis with REA-Neural bridge script")
+            parser = argparse.ArgumentParser(description="Run Ghidra headless analysis with Bintra bridge script")
             parser.add_argument("command")
             parser.add_argument("--binary", "--file", "--input", dest="binary", required=True, help="Path to target executable (PE/ELF)")
             default_ghidra = os.environ.get("GHIDRA_INSTALL_DIR", r"C:\ghidra" if os.name == "nt" else "/opt/ghidra")
             parser.add_argument("--ghidra-path", default=default_ghidra, help="Ghidra installation directory")
             parser.add_argument("--project-dir", default=None, help="Ghidra project directory (default: temp)")
-            parser.add_argument("--project-name", default="REANeuralHeadless", help="Ghidra project name")
+            parser.add_argument("--project-name", default="BintraHeadless", help="Ghidra project name")
             parser.add_argument("--apply", action="store_true", help="Automatically commit mutations to Ghidra database")
             args = parser.parse_args()
 
@@ -1172,17 +1172,17 @@ def _dispatch_cli():
                 "-import", args.binary,
                 "-overwrite",
                 "-scriptPath", str(script_dir),
-                "-postScript", "ReaNeuralGhidraBridge.java"
+                "-postScript", "BintraGhidraBridge.java"
             ] + script_args
 
-            print(f"[REA-Neural] Launching Ghidra Headless Analyzer...")
-            print(f"[REA-Neural] Binary: {args.binary}")
-            print(f"[REA-Neural] Script: {script_dir / 'ReaNeuralGhidraBridge.java'}")
+            print(f"[Bintra] Launching Ghidra Headless Analyzer...")
+            print(f"[Bintra] Binary: {args.binary}")
+            print(f"[Bintra] Script: {script_dir / 'BintraGhidraBridge.java'}")
             res = subprocess.run(cmd_args)
             sys.exit(res.returncode)
 
         elif cmd == "ghidra-bridge":
-            parser = argparse.ArgumentParser(prog="rea ghidra-bridge", description="REA-Neural Ghidra Live Bidirectional Bridge Daemon")
+            parser = argparse.ArgumentParser(prog="bintra ghidra-bridge", description="Bintra Ghidra Live Bidirectional Bridge Daemon")
             parser.add_argument("--start", action="store_true", help="Start the bridge server daemon")
             parser.add_argument("--stop", action="store_true", help="Stop the running bridge server daemon")
             parser.add_argument("--status", action="store_true", help="Check status of the bridge daemon")
@@ -1235,7 +1235,7 @@ def _dispatch_cli():
                 else:
                     popen_kwargs["start_new_session"] = True
                 proc = subprocess.Popen(daemon_cmd, **popen_kwargs)
-                print(f"[+] Launched REA-Neural Ghidra Bridge background daemon (PID {proc.pid}) on http://127.0.0.1:{args.port}")
+                print(f"[+] Launched Bintra Ghidra Bridge background daemon (PID {proc.pid}) on http://127.0.0.1:{args.port}")
                 return
 
             if args.status:
@@ -1252,7 +1252,7 @@ def _dispatch_cli():
                 rca = CrashRootCauseAnalyzer.analyze_crash(args.annotate_crash)
                 client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
                 try:
-                    inj = client.call_rpc("rea.inject_crash_rca", {"rca_report": rca})
+                    inj = client.call_rpc("bintra.inject_crash_rca", {"rca_report": rca})
                     print(json.dumps(inj, indent=2, ensure_ascii=False))
                 except Exception as e:
                     act = get_active_bridge()
@@ -1268,7 +1268,7 @@ def _dispatch_cli():
                 snap = VirtualMemoryInspector.inspect_process(args.annotate_vad)
                 client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
                 try:
-                    inj = client.call_rpc("rea.inject_vad_snapshot", {"vad_snapshot": snap.to_dict()})
+                    inj = client.call_rpc("bintra.inject_vad_snapshot", {"vad_snapshot": snap.to_dict()})
                     print(json.dumps(inj, indent=2, ensure_ascii=False))
                 except Exception as e:
                     act = get_active_bridge()
@@ -1294,7 +1294,7 @@ def _dispatch_cli():
 
                 client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
                 try:
-                    inj = client.call_rpc("rea.inject_structure_dissection", {"struct_report": struct_rep})
+                    inj = client.call_rpc("bintra.inject_structure_dissection", {"struct_report": struct_rep})
                     print(json.dumps(inj, indent=2, ensure_ascii=False))
                 except Exception as e:
                     act = get_active_bridge()
@@ -1320,7 +1320,7 @@ def _dispatch_cli():
 
                 client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
                 try:
-                    inj = client.call_rpc("rea.inject_pointer_chains", {"pointer_report": ptr_rep})
+                    inj = client.call_rpc("bintra.inject_pointer_chains", {"pointer_report": ptr_rep})
                     print(json.dumps(inj, indent=2, ensure_ascii=False))
                 except Exception as e:
                     act = get_active_bridge()
@@ -1337,7 +1337,7 @@ def _dispatch_cli():
                 auth_token=args.token,
                 publish_temp_marker=not args.no_temp_marker,
             )
-            print(f"[*] REA-Neural Ghidra Live Bridge running on http://127.0.0.1:{server.port}")
+            print(f"[*] Bintra Ghidra Live Bridge running on http://127.0.0.1:{server.port}")
             print(f"[*] Auth Token: {server.auth_token}")
             print(f"[*] Marker File: {getattr(server, '_marker_path', 'None')}")
             print("[*] Press Ctrl+C to shutdown bridge server...")
@@ -1383,7 +1383,7 @@ def _dispatch_cli():
                     out_f = sys.argv[o_idx + 1]
                     if PathIdentity.is_same_file(src_f, out_f):
                         raise TargetMutationError(
-                            "TARGET_WRITE_FORBIDDEN: Direct in-place modification of target binaries is strictly forbidden by REA Safety Policy. Specify a distinct --output file in the workspace."
+                            "TARGET_WRITE_FORBIDDEN: Direct in-place modification of target binaries is strictly forbidden by Bintra Safety Policy. Specify a distinct --output file in the workspace."
                         )
                     scope = ExecutionGuard.get_current_scope()
                     if scope and scope.is_target_directory(out_f):
@@ -1421,15 +1421,15 @@ def _dispatch_cli():
             "status": "decoupled_from_active_scope",
             "command": cmd,
             "message": (
-                "Command 'synthesize-weights' has been decoupled from REA-Neural's active reverse-engineering interface. "
-                "Per SCOPE.md, REA-Neural focuses on continuous semantic reverse engineering, decompilation, "
+                "Command 'synthesize-weights' has been decoupled from Bintra's active reverse-engineering interface. "
+                "Per SCOPE.md, Bintra focuses on continuous semantic reverse engineering, decompilation, "
                 "and embedded neural tensor auditing. Standalone neural model synthesis is preserved only as historical lineage."
             ),
             "reference": "SCOPE.md"
         }
         if "--archived-lineage" in sys.argv:
             print(f"[SCOPE WARNING] Running {cmd} under historical research lineage (--archived-lineage).")
-            rea_neural_engine.main()
+            bintra_engine.main()
             return
         else:
             scope_msg["hint"] = "To invoke for paper reproduction, provide flag: --archived-lineage"
@@ -1448,7 +1448,7 @@ def _dispatch_cli():
                     out_f = sys.argv[o_idx + 1]
                     if PathIdentity.is_same_file(src_f, out_f):
                         raise TargetMutationError(
-                            "TARGET_WRITE_FORBIDDEN: Direct in-place modification of model weights is strictly forbidden by REA Safety Policy. Specify a distinct --output file in the workspace."
+                            "TARGET_WRITE_FORBIDDEN: Direct in-place modification of model weights is strictly forbidden by Bintra Safety Policy. Specify a distinct --output file in the workspace."
                         )
                     scope = ExecutionGuard.get_current_scope()
                     if scope and scope.is_target_directory(out_f):
@@ -1477,7 +1477,7 @@ def _dispatch_cli():
                 idx = sys.argv.index(alt)
                 sys.argv[idx] = "--model"
 
-        rea_neural_engine.main()
+        bintra_engine.main()
 
     elif cmd in ("update", "self-update"):
         _handle_update()
@@ -1489,8 +1489,8 @@ def _dispatch_cli():
 
 def _handle_update() -> None:
     parser = argparse.ArgumentParser(
-        prog="rea-neural update",
-        description="Check and safely update REA-Neural from GitHub (requires --yes/--confirm to modify installation)"
+        prog="bintra update",
+        description="Check and safely update Bintra from GitHub (requires --yes/--confirm to modify installation)"
     )
     parser.add_argument("--check", action="store_true", help="Check for available updates without applying them")
     parser.add_argument("--branch", default="main", help="Target git branch (default: main)")
@@ -1530,7 +1530,7 @@ def _handle_update() -> None:
 
             if local_hash == remote_hash:
                 commit_title = subprocess.check_output(["git", "log", "-1", "--format=%s"], cwd=repo_dir, text=True).strip()
-                print(f"[+] REA-Neural is already at the latest commit: {local_hash[:7]} (\"{commit_title}\")")
+                print(f"[+] Bintra is already at the latest commit: {local_hash[:7]} (\"{commit_title}\")")
                 return
 
             incoming_commits = subprocess.check_output(
@@ -1544,7 +1544,7 @@ def _handle_update() -> None:
             print()
 
             if args.check:
-                print("[*] Update check completed. Run 'rea-neural update --yes' to apply.")
+                print("[*] Update check completed. Run 'bintra update --yes' to apply.")
                 return
 
             if not args.confirm:
@@ -1563,30 +1563,30 @@ def _handle_update() -> None:
 
             new_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_dir, text=True).strip()
             new_title = subprocess.check_output(["git", "log", "-1", "--format=%s"], cwd=repo_dir, text=True).strip()
-            print(f"[+] Successfully updated REA-Neural to latest commit: {new_hash[:7]} (\"{new_title}\")")
+            print(f"[+] Successfully updated Bintra to latest commit: {new_hash[:7]} (\"{new_title}\")")
         except Exception as e:
             print(f"[-] Automatic update failed: {e}")
             sys.exit(1)
     else:
         if args.check:
             print("[*] Package is installed without a local git working tree.")
-            print("[*] Run 'rea-neural update --yes --ref <tag-or-sha>' to reinstall/upgrade directly from GitHub.")
+            print("[*] Run 'bintra update --yes --ref <tag-or-sha>' to reinstall/upgrade directly from GitHub.")
             return
 
         if not args.confirm:
             print("[!] Refusing unconfirmed remote pip installation. Re-run with '--yes' (optionally '--ref <tag-or-sha>') to apply.")
             sys.exit(2)
 
-        pkg_spec = "git+https://github.com/bio-colab/rea-neural.git"
+        pkg_spec = "git+https://github.com/bio-colab/bintra.git"
         if args.ref:
             pkg_spec = f"{pkg_spec}@{args.ref}"
-        print(f"[*] Updating REA-Neural via pip from {pkg_spec}...")
+        print(f"[*] Updating Bintra via pip from {pkg_spec}...")
         try:
             subprocess.run(
                 [sys.executable, "-m", "pip", "install", "--upgrade", pkg_spec],
                 check=True
             )
-            print("[+] Successfully updated REA-Neural via pip!")
+            print("[+] Successfully updated Bintra via pip!")
         except Exception as e:
             print(f"[-] Pip update failed: {e}")
             sys.exit(1)
@@ -1601,7 +1601,7 @@ if __name__ == "__main__":
             "error_type": type(e).__name__,
             "message": str(e)
         }
-        if os.environ.get("REA_DEBUG") == "1":
+        if os.environ.get("BINTRA_DEBUG") == "1":
             import traceback
             err_payload["traceback"] = traceback.format_exc()
         print(json.dumps(err_payload, indent=2))

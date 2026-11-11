@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Evidence Graph & Causality Synthesis Engine.
+Bintra Evidence Graph & Causality Synthesis Engine.
 Binds static binary structures (sections, RVAs, imports, mitigations),
 Ghidra High P-Code AST & CFG topologies, host OS & registry policies,
 PnP hardware health, and empirical crash telemetry into a unified causality graph:

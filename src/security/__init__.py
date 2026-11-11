@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Safety Kernel & Execution Guard Layer.
+Bintra Safety Kernel & Execution Guard Layer.
 Autonomous, non-destructive Reference Monitor for Windows system introspection.
 """
 

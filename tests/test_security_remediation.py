@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Tests for REA-Neural Complete Mediation & Security Architecture Remediation.
+Tests for Bintra Complete Mediation & Security Architecture Remediation.
 Verifies complete mediation across all 27 MCP tools, mandatory workspace confinement
 at the core library engine layer, audit logger cross-process persistence and recovery,
 and Windows intelligence safe query semantics.
@@ -31,8 +31,8 @@ from security import (
     PathIdentity
 )
 from binary_neural_engine import SurgicalBinaryPatcher
-from rea_neural_engine import SafetensorsHandler
-from mcp_server import ReaMcpServer
+from bintra_engine import SafetensorsHandler
+from mcp_server import BintraMcpServer
 
 
 class TestSecurityRemediation(unittest.TestCase):
@@ -40,7 +40,7 @@ class TestSecurityRemediation(unittest.TestCase):
 
     def test_complete_mediation_all_27_mcp_tools(self):
         """Guarantee 1: All 34 MCP tools are registered in security metadata and mediated fail-closed."""
-        server = ReaMcpServer()
+        server = BintraMcpServer()
         tools_list = server.handle_tools_list({})["tools"]
         tool_names = [t["name"] for t in tools_list]
         self.assertEqual(len(tool_names), 34, f"Expected exactly 34 tools, found {len(tool_names)}")
@@ -53,7 +53,7 @@ class TestSecurityRemediation(unittest.TestCase):
 
         # Test unregistered tool rejection fails closed
         unregistered_call = {
-            "name": "rea_malicious_unregistered_tool",
+            "name": "bintra_malicious_unregistered_tool",
             "arguments": {"cmd": "whoami"}
         }
         res = server.handle_tools_call(unregistered_call)
@@ -207,7 +207,7 @@ class TestSecurityRemediation(unittest.TestCase):
 
     def test_mcp_output_path_cannot_auto_derive_workspace(self):
         """GAP-2: MCP server cannot auto-derive workspace from output_path to escape confinement."""
-        server = ReaMcpServer()
+        server = BintraMcpServer()
         with tempfile.TemporaryDirectory() as tgt_dir, tempfile.TemporaryDirectory() as ws_dir, tempfile.TemporaryDirectory() as foreign_dir:
             pe_path = os.path.join(tgt_dir, "victim.exe")
             with open(pe_path, "wb") as f:
@@ -216,7 +216,7 @@ class TestSecurityRemediation(unittest.TestCase):
 
             # Call without explicit workspace_dir - output in foreign_dir must be REJECTED fail-closed
             res = server.handle_tools_call({
-                "name": "rea_patch_binary",
+                "name": "bintra_patch_binary",
                 "arguments": {
                     "file_path": pe_path,
                     "output_path": foreign_out,
@@ -244,7 +244,7 @@ class TestSecurityRemediation(unittest.TestCase):
 
     def test_sycophancy_auditor_scale_adaptive_detection(self):
         """LIM-3: Scale-adaptive sycophancy decision fires on small-norm weight matrices."""
-        from rea_neural_engine import AttentionPatternAuditor
+        from bintra_engine import AttentionPatternAuditor
         import numpy as np
 
         d = 64
@@ -264,7 +264,7 @@ class TestSecurityRemediation(unittest.TestCase):
 
     def test_amenability_scale_recommendation(self):
         """LIM-5: Amenability diagnostic outputs recommended_num_columns and pathology_distribution."""
-        from rea_neural_engine import AmenabilityDiagnostic
+        from bintra_engine import AmenabilityDiagnostic
         import numpy as np
 
         # Concentrated attractor: a few dominant columns
@@ -302,7 +302,7 @@ class TestSecurityRemediation(unittest.TestCase):
         self.assertFalse(res["branch_topology_congruent"])
 
     def test_self_update_check_command(self):
-        """Verifies that 'rea-neural update --check' executes cleanly and verifies remote HEAD."""
+        """Verifies that 'bintra update --check' executes cleanly and verifies remote HEAD."""
         import subprocess
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         src_dir = os.path.join(repo_root, "src")
@@ -312,12 +312,12 @@ class TestSecurityRemediation(unittest.TestCase):
         res = subprocess.run([sys.executable, "-m", "cli", "update", "--check"], cwd=repo_root, env=env, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0)
         self.assertIn("Checking remote repository for updates", res.stdout)
-        self.assertIn("REA-Neural is already at the latest commit", res.stdout)
+        self.assertIn("Bintra is already at the latest commit", res.stdout)
 
     def test_breakout_policy_network_behavioral_rule_consistency(self):
         """Verifies H3 Fix: WeightSpaceCompiler Breakout policy network implements genuine behavioral steering."""
         import numpy as np
-        from rea_neural_engine import WeightSpaceCompiler
+        from bintra_engine import WeightSpaceCompiler
         tensors = WeightSpaceCompiler.compile_breakout_policy_network(input_dim=32, hidden_dim=16, action_dim=3)
         w1 = tensors["policy.layer1.weight"]
         b1 = tensors["policy.layer1.bias"]
@@ -354,8 +354,8 @@ class TestSecurityRemediation(unittest.TestCase):
 
     def test_mcp_json_rpc_batch_and_null_id(self):
         """Verifies L2 Fix: MCP server handles batch array and id: null per JSON-RPC 2.0 specification."""
-        from mcp_server import ReaMcpServer
-        server = ReaMcpServer()
+        from mcp_server import BintraMcpServer
+        server = BintraMcpServer()
 
         # id: null must receive a response with id: null
         req_null = {"jsonrpc": "2.0", "id": None, "method": "ping", "params": {}}
@@ -372,7 +372,7 @@ class TestSecurityRemediation(unittest.TestCase):
     def test_safetensors_json_array_header_typed_error(self):
         """Verifies L8 Fix: Safetensors with JSON-array root raises ValueError, not AttributeError."""
         import tempfile, struct
-        from rea_neural_engine import SafetensorsHandler
+        from bintra_engine import SafetensorsHandler
         with tempfile.NamedTemporaryFile(suffix=".safetensors", delete=False) as tf:
             tf_path = tf.name
             raw_json = b"[]"

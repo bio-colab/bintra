@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Target Scope & Isolation Boundary.
+Bintra Target Scope & Isolation Boundary.
 Defines the boundary between read-only target binaries and controlled-write workspaces.
 Maintains tamper-evident SHA-256 hash baselines to prove zero mutation.
 Enforces read-scope and workspace confinement policies across all execution contexts.
@@ -90,7 +90,7 @@ class TargetScope:
                 )
             self._workspace_dir = can_ws
         else:
-            default_ws = os.path.join(os.path.expanduser("~"), ".rea_neural", "workspace")
+            default_ws = os.path.join(os.path.expanduser("~"), ".bintra", "workspace")
             os.makedirs(default_ws, exist_ok=True)
             self._workspace_dir = PathIdentity.canonicalize(default_ws)
 
@@ -119,9 +119,9 @@ class TargetScope:
             or PathIdentity.is_within_directory(self._workspace_dir, target_dir)
             or PathIdentity.is_within_directory(target_dir, self._workspace_dir)
         ):
-            safe_ws = os.path.join(os.path.expanduser("~"), ".rea_neural", "workspace")
+            safe_ws = os.path.join(os.path.expanduser("~"), ".bintra", "workspace")
             if PathIdentity.is_within_directory(target_dir, safe_ws) or PathIdentity.is_same_file(target_dir, safe_ws):
-                safe_ws = os.path.join(os.path.expanduser("~"), ".rea_neural", "isolated_workspace")
+                safe_ws = os.path.join(os.path.expanduser("~"), ".bintra", "isolated_workspace")
             os.makedirs(safe_ws, exist_ok=True)
             self._workspace_dir = PathIdentity.canonicalize(safe_ws)
 
@@ -218,14 +218,14 @@ class TargetScope:
         )
 
     def record_session_file(self, file_path: str) -> None:
-        """Records a file created by REA during the current session."""
+        """Records a file created by Bintra during the current session."""
         try:
             self._session_created_files.add(PathIdentity.canonicalize(file_path))
         except Exception:
             pass
 
     def is_session_file(self, file_path: str) -> bool:
-        """Verifies if a file was created by REA in the current session."""
+        """Verifies if a file was created by Bintra in the current session."""
         try:
             can = PathIdentity.canonicalize(file_path)
             return can in self._session_created_files

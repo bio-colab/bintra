@@ -28,7 +28,7 @@ from ghidra_live_bridge import (
 
 
 class TestGhidraLiveBridge(unittest.TestCase):
-    """Verifies bidirectional communication and diagnostic annotation between REA-Neural and Ghidra."""
+    """Verifies bidirectional communication and diagnostic annotation between Bintra and Ghidra."""
 
     def setUp(self):
         self.temp_ws = tempfile.TemporaryDirectory()
@@ -46,7 +46,7 @@ class TestGhidraLiveBridge(unittest.TestCase):
         """Verifies server start on dynamic port, marker creation, and clean shutdown."""
         # Use port 0 for automatic free port allocation
         server = GhidraLiveBridgeServer(port=0, auth_token="test-token-1234")
-        marker = os.path.join(self.temp_ws.name, ".rea_bridge.json")
+        marker = os.path.join(self.temp_ws.name, ".bintra_bridge.json")
         res = server.start(marker_path=marker)
 
         try:
@@ -64,7 +64,7 @@ class TestGhidraLiveBridge(unittest.TestCase):
             client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{server.port}", auth_token="test-token-1234")
             ping_res = client.call_rpc("ping")
             self.assertEqual(ping_res["status"], "ok")
-            self.assertEqual(ping_res["bridge_version"], "7.4.0")
+            self.assertEqual(ping_res["bridge_version"], "1.0.0")
         finally:
             stop_res = server.stop()
             self.assertFalse(server.is_running)
@@ -192,13 +192,13 @@ class TestGhidraLiveBridge(unittest.TestCase):
             server.stop()
 
     def test_mcp_tool_ghidra_live_bridge(self):
-        """Verifies rea_ghidra_live_bridge execution through ReaMcpServer."""
-        from mcp_server import ReaMcpServer
-        mcp = ReaMcpServer()
+        """Verifies bintra_ghidra_live_bridge execution through BintraMcpServer."""
+        from mcp_server import BintraMcpServer
+        mcp = BintraMcpServer()
 
         # 1. Start action
         start_req = {
-            "name": "rea_ghidra_live_bridge",
+            "name": "bintra_ghidra_live_bridge",
             "arguments": {
                 "action": "start",
                 "port": 0,
@@ -212,7 +212,7 @@ class TestGhidraLiveBridge(unittest.TestCase):
 
         # 2. Status action
         status_req = {
-            "name": "rea_ghidra_live_bridge",
+            "name": "bintra_ghidra_live_bridge",
             "arguments": {"action": "status"}
         }
         res_status = mcp.handle_tools_call(status_req)
@@ -223,7 +223,7 @@ class TestGhidraLiveBridge(unittest.TestCase):
 
         # 3. Stop action
         stop_req = {
-            "name": "rea_ghidra_live_bridge",
+            "name": "bintra_ghidra_live_bridge",
             "arguments": {"action": "stop"}
         }
         res_stop = mcp.handle_tools_call(stop_req)
@@ -355,7 +355,7 @@ class TestGhidraLiveBridge(unittest.TestCase):
         """Verifies discovery marker is published to system temp dir and cleaned up on stop."""
         server = GhidraLiveBridgeServer(port=0, auth_token="tok-temp-1")
         server.start()
-        temp_marker = os.path.join(tempfile.gettempdir(), ".rea_bridge.json")
+        temp_marker = os.path.join(tempfile.gettempdir(), ".bintra_bridge.json")
         try:
             self.assertTrue(os.path.isfile(temp_marker))
             with open(temp_marker, "r", encoding="utf-8") as f:
@@ -367,20 +367,20 @@ class TestGhidraLiveBridge(unittest.TestCase):
             self.assertFalse(os.path.isfile(temp_marker))
 
     def test_mcp_extended_bridge_actions(self):
-        """Verifies inject_struct and inject_pointers via ReaMcpServer."""
-        from mcp_server import ReaMcpServer
-        mcp = ReaMcpServer()
+        """Verifies inject_struct and inject_pointers via BintraMcpServer."""
+        from mcp_server import BintraMcpServer
+        mcp = BintraMcpServer()
 
         # Start bridge
         mcp.handle_tools_call({
-            "name": "rea_ghidra_live_bridge",
+            "name": "bintra_ghidra_live_bridge",
             "arguments": {"action": "start", "port": 0, "auth_token": "mcp-ext-tok"}
         })
 
         try:
             # Inject struct
             res_struct = mcp.handle_tools_call({
-                "name": "rea_ghidra_live_bridge",
+                "name": "bintra_ghidra_live_bridge",
                 "arguments": {
                     "action": "inject_struct",
                     "struct_report": {
@@ -397,7 +397,7 @@ class TestGhidraLiveBridge(unittest.TestCase):
 
             # Inject pointers
             res_ptr = mcp.handle_tools_call({
-                "name": "rea_ghidra_live_bridge",
+                "name": "bintra_ghidra_live_bridge",
                 "arguments": {
                     "action": "inject_pointers",
                     "pointer_report": {
@@ -411,7 +411,7 @@ class TestGhidraLiveBridge(unittest.TestCase):
             self.assertEqual(data_p["status"], "queued")
         finally:
             mcp.handle_tools_call({
-                "name": "rea_ghidra_live_bridge",
+                "name": "bintra_ghidra_live_bridge",
                 "arguments": {"action": "stop"}
             })
 
@@ -476,7 +476,7 @@ class TestGhidraLiveBridge(unittest.TestCase):
     def test_tempdir_marker_mediation_and_address_space_metadata(self):
         """Verifies tempdir discovery marker is workspace-isolated when opted out and explicitly audited when enabled."""
         from security import AuditLogger
-        temp_marker = os.path.join(tempfile.gettempdir(), ".rea_bridge.json")
+        temp_marker = os.path.join(tempfile.gettempdir(), ".bintra_bridge.json")
         if os.path.exists(temp_marker):
             os.remove(temp_marker)
 

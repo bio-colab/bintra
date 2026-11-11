@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Policy Engine.
+Bintra Policy Engine.
 Evaluates system access requests against the 5 Inviolable Rules,
 CapabilityRegistry grants, and Default Deny matrix.
 Enforces read target scope boundaries and workspace write confinement.
@@ -57,7 +57,7 @@ class PolicyEngine:
         if cap in PROHIBITED_HAZARDS:
             return AccessDecision(
                 verdict="DENY",
-                reason=f"Hazardous capability '{cap.value if hasattr(cap, 'value') else cap}' is unconditionally forbidden by REA Safety Policy.",
+                reason=f"Hazardous capability '{cap.value if hasattr(cap, 'value') else cap}' is unconditionally forbidden by Bintra Safety Policy.",
                 capability=cap
             )
 
@@ -96,7 +96,7 @@ class PolicyEngine:
                         reason=f"CAPABILITY_MISMATCH: TEMPDIR_MARKER_WRITE is reserved exclusively for ghidra_live_bridge marker publication.",
                         capability=cap
                     )
-                expected_temp_marker = os.path.join(tempfile.gettempdir(), ".rea_bridge.json")
+                expected_temp_marker = os.path.join(tempfile.gettempdir(), ".bintra_bridge.json")
                 if not PathIdentity.is_same_file(target, expected_temp_marker):
                     return AccessDecision(
                         verdict="DENY",
@@ -153,12 +153,12 @@ class PolicyEngine:
                         capability=cap
                     )
 
-            # Rule 6: Deletion restricted to REA session files within workspace
+            # Rule 6: Deletion restricted to Bintra session files within workspace
             if mode == "DELETE" and scope:
                 if not scope.is_session_file(target):
                     return AccessDecision(
                         verdict="DENY",
-                        reason=f"UNAUTHORIZED_DELETION: Can only delete files created by REA in current session: '{target}'.",
+                        reason=f"UNAUTHORIZED_DELETION: Can only delete files created by Bintra in current session: '{target}'.",
                         capability=cap
                     )
 

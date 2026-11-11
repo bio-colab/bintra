@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-# REA-Neural Ghidra Live Bi-Directional Bridge Service (Python / PyGhidra)
-# Connects to REA-Neural local JSON-RPC bridge daemon at 127.0.0.1:41718.
+# Bintra Ghidra Live Bi-Directional Bridge Service (Python / PyGhidra)
+# Connects to Bintra local JSON-RPC bridge daemon at 127.0.0.1:41718.
 # Continuously receives Crash RCA bookmarks, VAD memory layout notes,
 # and P-Code deobfuscation plans and commits them directly into the Ghidra Database.
 #
-# @category REA-Neural
-# @menupath Tools.REA-Neural.Start Live Bridge Service
+# @category Bintra
+# @menupath Tools.Bintra.Start Live Bridge Service
 # @keybinding
 # @toolbar
 
@@ -28,37 +28,37 @@ DEFAULT_BRIDGE_PORT = 41718
 
 def log_msg(msg):
     if "println" in globals():
-        println("[REA-Bridge] " + str(msg))
+        println("[Bintra-Bridge] " + str(msg))
     else:
-        print("[REA-Bridge] " + str(msg))
+        print("[Bintra-Bridge] " + str(msg))
 
 
 def log_err(msg):
     if "printerr" in globals():
-        printerr("[REA-Bridge ERROR] " + str(msg))
+        printerr("[Bintra-Bridge ERROR] " + str(msg))
     else:
-        sys.stderr.write("[REA-Bridge ERROR] " + str(msg) + "\n")
+        sys.stderr.write("[Bintra-Bridge ERROR] " + str(msg) + "\n")
 
 
 def resolve_bridge_config():
-    """Locates .rea_bridge.json marker in working tree, temp, or user home, or env override."""
-    env_url = os.environ.get("REA_BRIDGE_URL")
+    """Locates .bintra_bridge.json marker in working tree, temp, or user home, or env override."""
+    env_url = os.environ.get("BINTRA_BRIDGE_URL")
     if env_url:
-        return env_url, os.environ.get("REA_BRIDGE_TOKEN", "")
+        return env_url, os.environ.get("BINTRA_BRIDGE_TOKEN", "")
 
     candidates = [
-        os.path.join(tempfile.gettempdir(), ".rea_bridge.json"),
-        os.path.join(os.getcwd(), ".rea_bridge.json"),
-        os.path.expanduser("~/.rea_bridge.json"),
+        os.path.join(tempfile.gettempdir(), ".bintra_bridge.json"),
+        os.path.join(os.getcwd(), ".bintra_bridge.json"),
+        os.path.expanduser("~/.bintra_bridge.json"),
     ]
-    rea_root = os.environ.get("REA_NEURAL_ROOT")
-    if rea_root:
-        candidates.insert(0, os.path.join(rea_root, ".rea_bridge.json"))
+    bintra_root = os.environ.get("BINTRA_ROOT")
+    if bintra_root:
+        candidates.insert(0, os.path.join(bintra_root, ".bintra_bridge.json"))
 
     # Also search script parent directory
     script_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in locals() else "."
     parent_cand = os.path.dirname(script_dir)
-    candidates.append(os.path.join(parent_cand, ".rea_bridge.json"))
+    candidates.append(os.path.join(parent_cand, ".bintra_bridge.json"))
 
     for c in candidates:
         if os.path.isfile(c):
@@ -73,7 +73,7 @@ def resolve_bridge_config():
 
 
 def rpc_call(url, token, method, params=None):
-    """Executes a JSON-RPC 2.0 call against REA-Neural bridge."""
+    """Executes a JSON-RPC 2.0 call against Bintra bridge."""
     payload = {
         "jsonrpc": "2.0",
         "method": method,
@@ -87,7 +87,7 @@ def rpc_call(url, token, method, params=None):
     req = urllib_req.Request(url, data=data)
     req.add_header("Content-Type", "application/json; charset=utf-8")
     if token:
-        req.add_header("X-REA-Auth-Token", token)
+        req.add_header("X-Bintra-Auth-Token", token)
 
     resp = urllib_req.urlopen(req, timeout=5.0)
     content = resp.read().decode("utf-8")
@@ -98,7 +98,7 @@ def rpc_call(url, token, method, params=None):
 
 
 def apply_command(prog, cmd):
-    """Applies a single REA-Neural diagnostic command into the Ghidra Program Database."""
+    """Applies a single Bintra diagnostic command into the Ghidra Program Database."""
     action = cmd.get("action")
     details = cmd.get("details", {})
     listing = prog.getListing()
@@ -139,7 +139,7 @@ def apply_command(prog, cmd):
 
     elif action == "CREATE_BOOKMARK":
         addr = _resolve_addr(details.get("address"), details.get("address_space", "auto"))
-        cat = details.get("category", "REA_CRASH_FAULT")
+        cat = details.get("category", "BINTRA_CRASH_FAULT")
         desc = details.get("description", "")
         if addr:
             bm = prog.getBookmarkManager()
@@ -147,7 +147,7 @@ def apply_command(prog, cmd):
             log_msg(f"Created Bookmark at {addr.toString()} [{cat}]: {desc}")
 
     elif action == "SET_PROGRAM_NOTE":
-        title = details.get("title", "REA_DIAGNOSTIC_NOTE")
+        title = details.get("title", "BINTRA_DIAGNOSTIC_NOTE")
         content = details.get("content", "")
         base_cu = listing.getCodeUnitAt(image_base)
         if base_cu:
@@ -174,7 +174,7 @@ def apply_command(prog, cmd):
 
     elif action == "APPLY_DATA_STRUCTURE":
         addr = _resolve_addr(details.get("address"), details.get("address_space", "va"))
-        struct_name = details.get("name", "ReaReconstructedStruct")
+        struct_name = details.get("name", "BintraReconstructedStruct")
         c_decl = details.get("c_declaration", "")
         fields = details.get("fields", [])
         size = details.get("size", 0)
@@ -184,7 +184,7 @@ def apply_command(prog, cmd):
             cu = listing.getCodeUnitAt(addr)
             if cu:
                 from ghidra.program.model.listing import CodeUnit
-                comment = f"[REA Reconstructed Structure: {struct_name}] ({len(fields)} fields, {size} bytes)\n{c_decl}"
+                comment = f"[Bintra Reconstructed Structure: {struct_name}] ({len(fields)} fields, {size} bytes)\n{c_decl}"
                 cu.setComment(CodeUnit.PLATE_COMMENT, comment)
                 log_msg(f"Applied Structure Plate Comment at {addr.toString()}")
 
@@ -233,7 +233,7 @@ def apply_command(prog, cmd):
 
 def run():
     log_msg("=================================================================")
-    log_msg(" [REA-Neural] Ghidra Live Bridge Service v7.4.0 (Python)")
+    log_msg(" [Bintra] Ghidra Live Bridge Service v1.0.0 (Python)")
     log_msg("=================================================================")
 
     if "currentProgram" not in globals() or currentProgram is None:
@@ -241,14 +241,14 @@ def run():
         return
 
     bridge_url, auth_token = resolve_bridge_config()
-    log_msg(f"Connecting to REA-Neural Bridge at: {bridge_url}")
+    log_msg(f"Connecting to Bintra Bridge at: {bridge_url}")
 
     try:
         ping = rpc_call(bridge_url, auth_token, "ping")
         log_msg(f"Connected! Bridge status: {ping.get('status')} (version: {ping.get('bridge_version')})")
     except Exception as e:
-        log_err(f"Connection to REA-Neural Bridge failed: {e}")
-        log_err("Ensure REA-Neural bridge daemon is running ('python src/cli.py ghidra-bridge --start')")
+        log_err(f"Connection to Bintra Bridge failed: {e}")
+        log_err("Ensure Bintra bridge daemon is running ('python src/cli.py ghidra-bridge --start')")
         return
 
     # Register client metadata
@@ -279,7 +279,7 @@ def run():
             cmds = res.get("commands", [])
             if cmds:
                 log_msg(f"Processing {len(cmds)} diagnostic command(s)...")
-                tx = currentProgram.startTransaction("REA-Neural Live Mutations")
+                tx = currentProgram.startTransaction("Bintra Live Mutations")
                 try:
                     for cmd in cmds:
                         apply_command(currentProgram, cmd)
@@ -300,6 +300,6 @@ if __name__ == "__main__":
     if "currentProgram" in globals():
         run()
     else:
-        print("[REA-Neural] Ghidra Live Bridge Service Script loaded.")
+        print("[Bintra] Ghidra Live Bridge Service Script loaded.")
         u, t = resolve_bridge_config()
         print(f"Target Bridge URL: {u}")

@@ -3,12 +3,12 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rea-neural"
-version = "7.4.0"
+name = "bintra"
+version = "1.0.0"
 authors = [
   { name="bio-colab", email="contact@bio-colab.org" },
 ]
-description = "Agent-native continuous semantic reverse engineering and binary analysis framework for Windows PE/DLL binaries with 10-Sense Sensory Cortex and runtime telemetry."
+description = "Bintra — Agent-native continuous semantic reverse engineering and binary analysis framework for Windows PE/DLL binaries with 10-Sense Sensory Cortex and runtime telemetry."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -24,14 +24,13 @@ dependencies = [
 ]
 
 [project.scripts]
-rea-neural = "cli:main"
-reaneural = "cli:main"
-rea-cli = "cli:main"
-rea-mcp = "mcp_server:main"
+bintra = "cli:main"
+bintra-cli = "cli:main"
+bintra-mcp = "mcp_server:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = ["cli", "binary_neural_engine", "rea_neural_engine", "sensory_cortex", "ghidra_pcode_vectorizer", "ghidra_live_bridge", "mcp_server"]
+py-modules = ["cli", "binary_neural_engine", "bintra_engine", "sensory_cortex", "ghidra_pcode_vectorizer", "ghidra_live_bridge", "mcp_server"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

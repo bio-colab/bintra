@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Tamper-Evident Security Audit Logger.
+Bintra Tamper-Evident Security Audit Logger.
 Maintains a cryptographically hash-chained, persistent audit journal
 recording every mediated system access attempt.
 Enforces Data Minimization by scrubbing secrets across all record fields.
@@ -44,7 +44,7 @@ class AuditLogger:
     _degraded_reason: Optional[str] = None
 
     # Default persistent log path
-    _log_dir = os.path.join(os.path.expanduser("~"), ".rea_neural", "logs")
+    _log_dir = os.path.join(os.path.expanduser("~"), ".bintra", "logs")
     _log_file = os.path.join(_log_dir, "audit.jsonl")
 
     # Patterns for sensitive credentials to scrub
@@ -197,7 +197,7 @@ class AuditLogger:
                     cls._sequence = 0
                     cls._last_hash = "0" * 64
                     cls._journal.clear()
-                    print(f"[REA-Neural][AuditLogger] Warning: rotated legacy/broken audit log ({err}) -> {rotated}", file=sys.stderr)
+                    print(f"[Bintra][AuditLogger] Warning: rotated legacy/broken audit log ({err}) -> {rotated}", file=sys.stderr)
                     res = {"recovered": False, "records_count": 0, "rotated_legacy_log": rotated, "head_hash": cls._last_hash}
                 except OSError as io_err:
                     cls._audit_degraded = True

@@ -566,7 +566,7 @@ class CrashRootCauseAnalyzer:
             return f"# Crash RCA Error\n{report.get('message', 'Unknown failure')}"
 
         lines = [
-            "# REA-Neural Automated Crash Root-Cause Analysis (RCA)",
+            "# Bintra Automated Crash Root-Cause Analysis (RCA)",
             f"- **Exception Code:** `{report.get('exception_code')}` ({report.get('exception_name')})",
             f"- **Faulting Module:** `{report.get('fault_module')}` (RVA: `{report.get('fault_rva')}`)",
             f"- **Target Address:** `{report.get('target_address')}` (Violation: `{report.get('access_type')}`)",

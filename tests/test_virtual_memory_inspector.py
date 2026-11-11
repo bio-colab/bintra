@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Test Suite for REA-Neural Passive Virtual Memory & VAD Layout Inspector.
+Test Suite for Bintra Passive Virtual Memory & VAD Layout Inspector.
 Verifies spatial memory mapping, page classification, W^X auditing,
 null-pointer trap detection, snapshot diffing, and ExecutionGuard mediation.
 """
@@ -198,22 +198,22 @@ class TestVirtualMemoryInspector(unittest.TestCase):
         self.assertIn(classification["status"], ["COMMITTED", "MEM_COMMIT"])
 
     def test_mcp_vad_inspect_dispatch(self):
-        """Verifies that the native MCP server exposes and dispatches rea_vad_inspect tool."""
-        from mcp_server import ReaMcpServer
-        server = ReaMcpServer()
+        """Verifies that the native MCP server exposes and dispatches bintra_vad_inspect tool."""
+        from mcp_server import BintraMcpServer
+        server = BintraMcpServer()
 
         # Check tool registration
         tool_names = [t["name"] for t in server.handle_tools_list({})["tools"]]
-        self.assertIn("rea_vad_inspect", tool_names)
+        self.assertIn("bintra_vad_inspect", tool_names)
 
         # Execute tool call
-        result = server.dispatch_tool("rea_vad_inspect", {"pid": self.pid})
+        result = server.dispatch_tool("bintra_vad_inspect", {"pid": self.pid})
         self.assertEqual(result["pid"], self.pid)
         self.assertIn("summary", result)
         self.assertGreater(result["summary"]["commit_bytes"], 0)
 
         # Execute address classification via MCP
-        null_res = server.dispatch_tool("rea_vad_inspect", {"pid": self.pid, "address": "0x0"})
+        null_res = server.dispatch_tool("bintra_vad_inspect", {"pid": self.pid, "address": "0x0"})
         self.assertEqual(null_res["status"], "FAULT_NULL_DEREFERENCE")
 
     @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
@@ -346,12 +346,13 @@ class TestVirtualMemoryInspector(unittest.TestCase):
     def test_next_scan_bytes_string_and_small_types(self):
         """Verifies string/bytes next_scan re-verification and int8/unaligned numeric scanning."""
         import ctypes
-        buf = (ctypes.c_char * 32)(*b"A_REA_TAG_V1\x00" + b"\x00" * 19)
+        tag1 = b"A_BINTRA_TAG_V1\x00"
+        buf = (ctypes.c_char * 32)(*(tag1 + b"\x00" * (32 - len(tag1))))
         buf_addr = ctypes.addressof(buf)
 
         # 1. String scan -> mutated string -> CHANGED_VALUE / EXACT_VALUE
         res_str = ProcessMemoryScanner.first_scan(
-            pid=self.pid, data_type="string", scan_type="EXACT_VALUE", value="A_REA_TAG_V1"
+            pid=self.pid, data_type="string", scan_type="EXACT_VALUE", value="A_BINTRA_TAG_V1"
         )
         sid = res_str["session_id"]
         self.assertGreaterEqual(res_str["total_candidates"], 1)
@@ -360,13 +361,14 @@ class TestVirtualMemoryInspector(unittest.TestCase):
         with self.assertRaises(ValueError):
             ProcessMemoryScanner.next_scan(session_id=sid, scan_type="INCREASED_VALUE")
 
-        ctypes.memmove(buf_addr, b"A_REA_TAG_V2\x00", 13)
+        tag2 = b"A_BINTRA_TAG_V2\x00"
+        ctypes.memmove(buf_addr, tag2, len(tag2))
         res_changed = ProcessMemoryScanner.next_scan(session_id=sid, scan_type="CHANGED_VALUE")
         self.assertGreaterEqual(res_changed["surviving_count"], 1)
         self.assertIn(buf_addr, [c["address_int"] for c in res_changed["candidates_sample"]])
 
         res_exact = ProcessMemoryScanner.next_scan(
-            session_id=sid, scan_type="EXACT_VALUE", value="A_REA_TAG_V2"
+            session_id=sid, scan_type="EXACT_VALUE", value="A_BINTRA_TAG_V2"
         )
         self.assertGreaterEqual(res_exact["surviving_count"], 1)
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-REA-Neural Native Model Context Protocol (MCP) Server.
+Bintra Native Model Context Protocol (MCP) Server.
 Standard JSON-RPC 2.0 stdio server providing agent-native reverse engineering
 tools for AI models (Antigravity, Claude Code, Codex, Cursor, Devin, etc.).
 
@@ -31,7 +31,7 @@ try:
         HybridBinaryDissector,
         SensoryCortex,
     )
-    from rea_neural_engine import (
+    from bintra_engine import (
         SafetensorsHandler,
         SubspaceAnalyzer,
         CircuitDecompiler,
@@ -47,17 +47,17 @@ try:
         GhidraAnnotationPlanner,
     )
 except ImportError as err:
-    sys.stderr.write(f"[REA-MCP] Error importing core engines: {err}\n")
+    sys.stderr.write(f"[BINTRA-MCP] Error importing core engines: {err}\n")
 
 
-SERVER_NAME = "rea-neural"
-SERVER_VERSION = "7.4.0"
+SERVER_NAME = "bintra"
+SERVER_VERSION = "1.0.0"
 PROTOCOL_VERSION = "2024-11-05"
 
 
 TOOLS_REGISTRY: List[Dict[str, Any]] = [
     {
-        "name": "rea_inspect_binary",
+        "name": "bintra_inspect_binary",
         "description": "Deep inspection of Windows PE32/PE32+ (or ELF) executable headers, mitigations (ASLR, DEP, CFG), section geometries, and Shannon byte entropy.",
         "inputSchema": {
             "type": "object",
@@ -71,7 +71,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_deobfuscate_binary",
+        "name": "bintra_deobfuscate_binary",
         "description": "Detects algebraic opaque predicates (e.g. xor r8,r8 with REX awareness) and control flow flattening (CFF) dispatcher loops in machine code or executable files.",
         "inputSchema": {
             "type": "object",
@@ -96,7 +96,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_dump_bytes",
+        "name": "bintra_dump_bytes",
         "description": "Extracts and displays raw bytes/machine code hex and ASCII preview from a binary executable at a given offset.",
         "inputSchema": {
             "type": "object",
@@ -118,7 +118,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_match_functions",
+        "name": "bintra_match_functions",
         "description": "Computes continuous behavioral vector embeddings to semantically match assembly routines across compilers and architectures (x86-64 vs ARM64).",
         "inputSchema": {
             "type": "object",
@@ -136,7 +136,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_patch_binary",
+        "name": "bintra_patch_binary",
         "description": "Surgically patches machine code bytes on disk with stack balance proprioception (RSP/RBP guard), PE integrity checksum sync, and atomic write replacement.",
         "inputSchema": {
             "type": "object",
@@ -166,7 +166,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_scan_hybrid",
+        "name": "bintra_scan_hybrid",
         "description": "Scans Windows executables for embedded AI runtimes (DirectML, WinML, ONNX, GGUF, TFLite, Safetensors) and extracts tensor geometries and I/O bridge maps.",
         "inputSchema": {
             "type": "object",
@@ -180,7 +180,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_sensory_audit",
+        "name": "bintra_sensory_audit",
         "description": "Evaluates all 10 Metaphorical Senses (Analytical Vision, Temporal Hearing, Active Touch, Exploratory Smell, Discriminative Taste, Deep Proprioception, Spatial Sense, Vestibular Balance, Metaphorical Pain, Sense of Rhythm) on a binary or code sample.",
         "inputSchema": {
             "type": "object",
@@ -197,7 +197,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_match_pcode",
+        "name": "bintra_match_pcode",
         "description": "Semantically matches two routines using Ghidra High P-Code IR embeddings. Architecture- and compiler-invariant (proves semantic equivalence across x86-64 and ARM64).",
         "inputSchema": {
             "type": "object",
@@ -215,7 +215,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_deobfuscate_pcode",
+        "name": "bintra_deobfuscate_pcode",
         "description": "Detects algebraic opaque predicates (e.g. INT_XOR(V, V) followed by CBRANCH) in Ghidra High P-Code to clean control flow before decompiler AST construction.",
         "inputSchema": {
             "type": "object",
@@ -229,7 +229,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_ghidra_analyze",
+        "name": "bintra_ghidra_analyze",
         "description": "Batch-processes a full Ghidra exported High P-Code program payload. Scans all functions, detects opaque predicates, calculates spectral effective rank, and synthesizes a mutation plan (renames, plate comments).",
         "inputSchema": {
             "type": "object",
@@ -246,8 +246,8 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_ghidra_headless",
-        "description": "Automates running Ghidra analyzeHeadless with ReaNeuralGhidraBridge.java on Windows. Decompiles functions, extracts High P-Code, analyzes semantics, and applies database mutations in one command.",
+        "name": "bintra_ghidra_headless",
+        "description": "Automates running Ghidra analyzeHeadless with BintraGhidraBridge.java on Windows. Decompiles functions, extracts High P-Code, analyzes semantics, and applies database mutations in one command.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -268,7 +268,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_windows_env_audit",
+        "name": "bintra_windows_env_audit",
         "description": "Interrogates the host Windows OS kernel version, architecture, graphics adapters, DirectX runtimes, and token integrity.",
         "inputSchema": {
             "type": "object",
@@ -281,7 +281,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_resolve_dependencies",
+        "name": "bintra_resolve_dependencies",
         "description": "Simulates the Windows dynamic library search order to identify missing DLLs, architecture mismatches (x86 vs x64), and unexported symbols.",
         "inputSchema": {
             "type": "object",
@@ -295,7 +295,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_inspect_crash_reports",
+        "name": "bintra_inspect_crash_reports",
         "description": "Scans Windows Error Reporting (WER) archives, crash dumps, and Application Event Log errors for empirical fault data.",
         "inputSchema": {
             "type": "object",
@@ -308,7 +308,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_correlate_failure_evidence",
+        "name": "bintra_correlate_failure_evidence",
         "description": "Cross-correlates Windows OS telemetry, crash records, and dependency health with static PE sections and Ghidra decompilation to produce an executive Failure Evidence Dossier.",
         "inputSchema": {
             "type": "object",
@@ -330,7 +330,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_win_catalog_cmd",
+        "name": "bintra_win_catalog_cmd",
         "description": "Safely executes a registered read-only Windows diagnostic command from the immutable Command Catalog (e.g. 'os_ver', 'sys_info', 'whoami_privs', 'proc_list', 'service_list', 'driver_list', 'pnp_devices_problem', 'power_cfg') with argument whitelisting and typed JSON output.",
         "inputSchema": {
             "type": "object",
@@ -349,7 +349,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_registry_audit",
+        "name": "bintra_registry_audit",
         "description": "Performs dual-view (64-bit and 32-bit WOW64) inspection across 11 Windows Registry functional domains, detecting redirection divergence and security/loader policy anomalies.",
         "inputSchema": {
             "type": "object",
@@ -366,7 +366,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_hardware_audit",
+        "name": "bintra_hardware_audit",
         "description": "Inspects live Plug and Play (PnP) hardware devices, display adapters, audio endpoints, and queries CM_Get_DevNode_Status for hardware problem codes (CM_PROB_*) via SetupAPI and CfgMgr32.",
         "inputSchema": {
             "type": "object",
@@ -379,7 +379,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_driver_audit",
+        "name": "bintra_driver_audit",
         "description": "Enumerates all currently loaded Windows kernel drivers, their kernel virtual base addresses, image filenames, and highlights display and audio drivers via PSAPI.",
         "inputSchema": {
             "type": "object",
@@ -392,7 +392,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_service_audit",
+        "name": "bintra_service_audit",
         "description": "Interrogates the Windows Service Control Manager (SCM) via Advapi32 to audit active, stopped, or win32 services, their binary paths, and startup configurations.",
         "inputSchema": {
             "type": "object",
@@ -409,7 +409,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_dmp_inspect",
+        "name": "bintra_dmp_inspect",
         "description": "Multi-stream MiniDump (.dmp) inspection and crash telemetry extraction: parses ExceptionRecord, SystemInfo, Loaded Modules, ThreadList, and performs Access Violation parameter analysis (NULL-pointer dereference detection, DEP violation).",
         "inputSchema": {
             "type": "object",
@@ -426,7 +426,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_etw_audit",
+        "name": "bintra_etw_audit",
         "description": "Inspects host Event Tracing for Windows (ETW) infrastructure: queries active/system-protected trace sessions, dynamically enumerates all registered system providers via TDH, and interrogates kernel provider registration and hosting PIDs.",
         "inputSchema": {
             "type": "object",
@@ -458,7 +458,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_vad_inspect",
+        "name": "bintra_vad_inspect",
         "description": "Inspects passive virtual memory (VAD) layout and classifies pointer addresses for a target Windows process (identifies PE modules, private heaps, thread stacks, mapped views, and null-page dereference traps).",
         "inputSchema": {
             "type": "object",
@@ -480,7 +480,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_memory_scan",
+        "name": "bintra_memory_scan",
         "description": "Performs read-only virtual memory scanning across a target Windows process (First Scan / Next Scan) to locate addresses matching specific values (int8..uint64, float, double, bytes, string) and conditions (exact, between, unknown, changed, unchanged, increased, decreased).",
         "inputSchema": {
             "type": "object",
@@ -543,7 +543,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_pointer_scan",
+        "name": "bintra_pointer_scan",
         "description": "Resolves multi-level static module base pointer chains pointing to a target dynamic address ([Module.dll + RVA] + Offset1 + Offset2 -> Target).",
         "inputSchema": {
             "type": "object",
@@ -582,7 +582,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_struct_dissect",
+        "name": "bintra_struct_dissect",
         "description": "Performs runtime object memory field analysis at a target address: classifies virtual method tables (vftables), heap/stack pointers, floats, and integers, and synthesizes a formal C struct definition.",
         "inputSchema": {
             "type": "object",
@@ -610,7 +610,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_crash_rca",
+        "name": "bintra_crash_rca",
         "description": "Performs automated root cause analysis (RCA) on a Windows MiniDump (.dmp): extracts ExceptionRecord, classifies violated memory address (Null-trap, heap, unmapped), disassembles the faulting instruction window using Capstone, identifies the culprit register (e.g. RCX=0x0), and provides actionable developer remediation.",
         "inputSchema": {
             "type": "object",
@@ -628,14 +628,14 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_etw_capture",
+        "name": "bintra_etw_capture",
         "description": "Establishes a passive real-time ETW capture session (or queries active telemetry stream), enables kernel/graphics diagnostic providers (Kernel-Process, Kernel-Memory, Direct3D11, DXGI), and synthesizes a chronological timeline of events leading up to faults.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "session_name": {
                     "type": "string",
-                    "description": "Name for ETW trace session (default: 'REA_Diagnostic_Trace')"
+                    "description": "Name for ETW trace session (default: 'Bintra_Diagnostic_Trace')"
                 },
                 "pid": {
                     "type": "integer",
@@ -649,8 +649,8 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_ghidra_live_bridge",
-        "description": "Bidirectional localhost JSON-RPC 2.0 IPC bridge connecting REA-Neural to Ghidra. Enables starting/stopping the bridge server, querying client connection status, and injecting Phase 1 VAD memory maps, Phase 1.5 structure dissections and pointer scan paths, Phase 2 Crash RCA annotations, and Phase 3 ETW timelines directly into Ghidra's Program Database.",
+        "name": "bintra_ghidra_live_bridge",
+        "description": "Bidirectional localhost JSON-RPC 2.0 IPC bridge connecting Bintra to Ghidra. Enables starting/stopping the bridge server, querying client connection status, and injecting Phase 1 VAD memory maps, Phase 1.5 structure dissections and pointer scan paths, Phase 2 Crash RCA annotations, and Phase 3 ETW timelines directly into Ghidra's Program Database.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -700,7 +700,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_evidence_graph",
+        "name": "bintra_evidence_graph",
         "description": "Generates a formal directed Evidence Graph G = (V, E) and Mermaid flowchart connecting target binary PE sections, imported DLLs, Ghidra AST functions/blocks, host OS build, PnP hardware devices, kernel drivers, and empirical crash telemetry.",
         "inputSchema": {
             "type": "object",
@@ -722,7 +722,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_wsp_audit",
+        "name": "bintra_wsp_audit",
         "description": "Audits neural weights embedded inside Windows executables without execution: computes Roy-Vetterli spectral effective rank, cross-layer induction composition, amenability diagnostic, and scans for dormant backdoor/trojan neurons (>4.5σ).",
         "inputSchema": {
             "type": "object",
@@ -736,7 +736,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_patch_weights",
+        "name": "bintra_patch_weights",
         "description": "Surgically patches linear projection weights in a safetensors file without gradients, using selective column direction subtraction to eliminate pathological looping.",
         "inputSchema": {
             "type": "object",
@@ -762,7 +762,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_device_driver_intelligence",
+        "name": "bintra_device_driver_intelligence",
         "description": "Deep device identity parsing, PnP hardware topology, Driver Store package matching, and Driver Rank evaluation.",
         "inputSchema": {
             "type": "object",
@@ -795,7 +795,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
-        "name": "rea_process_resource_audit",
+        "name": "bintra_process_resource_audit",
         "description": "Inspects running processes, in-memory loaded modules, file lock handles via Windows Restart Manager, and service-to-process hosting mappings.",
         "inputSchema": {
             "type": "object",
@@ -824,7 +824,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
 ]
 
 
-class ReaMcpServer:
+class BintraMcpServer:
     """Standard MCP Stdio JSON-RPC Server."""
 
     def __init__(
@@ -845,8 +845,8 @@ class ReaMcpServer:
         }
         from security import PathIdentity, TargetScope, AuditLogger
         AuditLogger.ensure_chain_continuity(rotate_on_corrupt=True)
-        default_ws = os.path.join(os.path.expanduser("~"), ".rea_neural", "workspace")
-        chosen_ws = workspace_root or os.environ.get("REA_MCP_WORKSPACE") or default_ws
+        default_ws = os.path.join(os.path.expanduser("~"), ".bintra", "workspace")
+        chosen_ws = workspace_root or os.environ.get("BINTRA_MCP_WORKSPACE") or default_ws
         os.makedirs(chosen_ws, exist_ok=True)
         can_host_ws = PathIdentity.canonicalize(chosen_ws)
         unsafe_reason = TargetScope._is_unsafe_workspace_root(can_host_ws)
@@ -859,7 +859,7 @@ class ReaMcpServer:
         raw_allowed = [can_host_ws]
         if allowed_workspace_roots:
             raw_allowed.extend(allowed_workspace_roots)
-        env_allowed = os.environ.get("REA_MCP_ALLOWED_WORKSPACES", "")
+        env_allowed = os.environ.get("BINTRA_MCP_ALLOWED_WORKSPACES", "")
         if env_allowed:
             raw_allowed.extend([p.strip() for p in env_allowed.split(os.pathsep) if p.strip()])
         self._allowed_workspace_roots: List[str] = []
@@ -995,47 +995,47 @@ class ReaMcpServer:
         }
 
     TOOL_SECURITY_METADATA = {
-        "rea_inspect_binary": ("cap.file.read", "READ", "file_path"),
-        "rea_deobfuscate_binary": ("cap.file.read", "READ", "file_path"),
-        "rea_dump_bytes": ("cap.file.read", "READ", "file_path"),
-        "rea_match_functions": ("cap.file.read", "READ", None),
-        "rea_patch_binary": ("cap.workspace.write", "WRITE", "output_path"),
-        "rea_scan_hybrid": ("cap.file.read", "READ", "file_path"),
-        "rea_sensory_audit": ("cap.file.read", "READ", "file_path"),
-        "rea_match_pcode": ("cap.file.read", "READ", None),
-        "rea_deobfuscate_pcode": ("cap.file.read", "READ", None),
-        "rea_ghidra_analyze": ("cap.file.read", "READ", "input_file"),
-        "rea_ghidra_headless": ("cap.file.read", "READ", "binary_path"),
-        "rea_windows_env_audit": ("cap.registry.read", "READ", "file_path"),
-        "rea_resolve_dependencies": ("cap.file.read", "READ", "file_path"),
-        "rea_inspect_crash_reports": ("cap.minidump.read", "READ", "file_path"),
-        "rea_correlate_failure_evidence": ("cap.file.read", "READ", "binary_path"),
-        "rea_win_catalog_cmd": ("cap.subprocess.catalog_exec", "EXECUTE", "command_id"),
-        "rea_registry_audit": ("cap.registry.read", "READ", "domain"),
-        "rea_hardware_audit": ("cap.device.query", "QUERY", None),
-        "rea_driver_audit": ("cap.driver.query", "QUERY", None),
-        "rea_service_audit": ("cap.service.query", "QUERY", None),
-        "rea_dmp_inspect": ("cap.minidump.read", "READ", "dmp_path"),
-        "rea_etw_audit": ("cap.event_log.read", "READ", "session_name"),
-        "rea_etw_capture": ("cap.event_log.read", "READ", "session_name"),
-        "rea_vad_inspect": ("cap.process.query", "QUERY", "pid"),
-        "rea_memory_scan": ("cap.process.query", "READ", "pid"),
-        "rea_pointer_scan": ("cap.process.query", "READ", "pid"),
-        "rea_struct_dissect": ("cap.process.query", "READ", "pid"),
-        "rea_crash_rca": ("cap.minidump.read", "READ", "dmp_path"),
-        "rea_ghidra_live_bridge": ("cap.file.read", "READ", None),
-        "rea_evidence_graph": ("cap.file.read", "READ", "binary_path"),
-        "rea_wsp_audit": ("cap.file.read", "READ", "model_path"),
-        "rea_patch_weights": ("cap.workspace.write", "WRITE", "output_path"),
-        "rea_device_driver_intelligence": ("cap.device.query", "QUERY", "device_query"),
-        "rea_process_resource_audit": ("cap.process.query", "QUERY", "file_path")
+        "bintra_inspect_binary": ("cap.file.read", "READ", "file_path"),
+        "bintra_deobfuscate_binary": ("cap.file.read", "READ", "file_path"),
+        "bintra_dump_bytes": ("cap.file.read", "READ", "file_path"),
+        "bintra_match_functions": ("cap.file.read", "READ", None),
+        "bintra_patch_binary": ("cap.workspace.write", "WRITE", "output_path"),
+        "bintra_scan_hybrid": ("cap.file.read", "READ", "file_path"),
+        "bintra_sensory_audit": ("cap.file.read", "READ", "file_path"),
+        "bintra_match_pcode": ("cap.file.read", "READ", None),
+        "bintra_deobfuscate_pcode": ("cap.file.read", "READ", None),
+        "bintra_ghidra_analyze": ("cap.file.read", "READ", "input_file"),
+        "bintra_ghidra_headless": ("cap.file.read", "READ", "binary_path"),
+        "bintra_windows_env_audit": ("cap.registry.read", "READ", "file_path"),
+        "bintra_resolve_dependencies": ("cap.file.read", "READ", "file_path"),
+        "bintra_inspect_crash_reports": ("cap.minidump.read", "READ", "file_path"),
+        "bintra_correlate_failure_evidence": ("cap.file.read", "READ", "binary_path"),
+        "bintra_win_catalog_cmd": ("cap.subprocess.catalog_exec", "EXECUTE", "command_id"),
+        "bintra_registry_audit": ("cap.registry.read", "READ", "domain"),
+        "bintra_hardware_audit": ("cap.device.query", "QUERY", None),
+        "bintra_driver_audit": ("cap.driver.query", "QUERY", None),
+        "bintra_service_audit": ("cap.service.query", "QUERY", None),
+        "bintra_dmp_inspect": ("cap.minidump.read", "READ", "dmp_path"),
+        "bintra_etw_audit": ("cap.event_log.read", "READ", "session_name"),
+        "bintra_etw_capture": ("cap.event_log.read", "READ", "session_name"),
+        "bintra_vad_inspect": ("cap.process.query", "QUERY", "pid"),
+        "bintra_memory_scan": ("cap.process.query", "READ", "pid"),
+        "bintra_pointer_scan": ("cap.process.query", "READ", "pid"),
+        "bintra_struct_dissect": ("cap.process.query", "READ", "pid"),
+        "bintra_crash_rca": ("cap.minidump.read", "READ", "dmp_path"),
+        "bintra_ghidra_live_bridge": ("cap.file.read", "READ", None),
+        "bintra_evidence_graph": ("cap.file.read", "READ", "binary_path"),
+        "bintra_wsp_audit": ("cap.file.read", "READ", "model_path"),
+        "bintra_patch_weights": ("cap.workspace.write", "WRITE", "output_path"),
+        "bintra_device_driver_intelligence": ("cap.device.query", "QUERY", "device_query"),
+        "bintra_process_resource_audit": ("cap.process.query", "QUERY", "file_path")
     }
 
     def handle_tools_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
         tool_name = params.get("name")
         args = params.get("arguments", {})
-        if tool_name not in self.TOOL_SECURITY_METADATA and f"rea_{tool_name}" in self.TOOL_SECURITY_METADATA:
-            tool_name = f"rea_{tool_name}"
+        if tool_name not in self.TOOL_SECURITY_METADATA and f"bintra_{tool_name}" in self.TOOL_SECURITY_METADATA:
+            tool_name = f"bintra_{tool_name}"
 
         try:
             from security import ExecutionGuard, Capability, SecurityViolationError, TargetMutationError, PathIdentity
@@ -1062,7 +1062,7 @@ class ReaMcpServer:
                 effective_target = tool_name
 
             req_metadata = {}
-            if tool_name == "rea_win_catalog_cmd":
+            if tool_name == "bintra_win_catalog_cmd":
                 req_metadata["is_catalog_command"] = True
 
             with ExecutionGuard.scoped_session(target_binary_path=target_path, workspace_dir=workspace_dir):
@@ -1095,7 +1095,7 @@ class ReaMcpServer:
                 "tool": tool_name,
                 "error": err_msg,
             }
-            if os.environ.get("REA_DEBUG") == "1":
+            if os.environ.get("BINTRA_DEBUG") == "1":
                 err_payload["traceback"] = tb
             return {
                 "content": [
@@ -1108,13 +1108,13 @@ class ReaMcpServer:
             }
 
     def dispatch_tool(self, name: str, args: Dict[str, Any]) -> Any:
-        if name not in self.TOOL_SECURITY_METADATA and f"rea_{name}" in self.TOOL_SECURITY_METADATA:
-            name = f"rea_{name}"
-        if name == "rea_inspect_binary":
+        if name not in self.TOOL_SECURITY_METADATA and f"bintra_{name}" in self.TOOL_SECURITY_METADATA:
+            name = f"bintra_{name}"
+        if name == "bintra_inspect_binary":
             path = args["file_path"]
             return BinaryFormatInspector.inspect(path)
 
-        elif name == "rea_deobfuscate_binary":
+        elif name == "bintra_deobfuscate_binary":
             code_hex = args.get("code_hex")
             file_path = args.get("file_path")
             raw_off = args.get("offset")
@@ -1128,18 +1128,18 @@ class ReaMcpServer:
             else:
                 raise ValueError("Must provide 'code_hex' or valid 'file_path'")
 
-        elif name == "rea_dump_bytes":
+        elif name == "bintra_dump_bytes":
             path = args["file_path"]
             offset = int(str(args["offset"]), 0)
             length = int(args.get("length", 64))
             return SurgicalBinaryPatcher.read_bytes(path, offset, length)
 
-        elif name == "rea_match_functions":
+        elif name == "bintra_match_functions":
             f1_hex = args["func1_hex"]
             f2_hex = args["func2_hex"]
             return SemanticFunctionMatcher.match_functions(f1_hex, f2_hex)
 
-        elif name == "rea_patch_binary":
+        elif name == "bintra_patch_binary":
             path = args["file_path"]
             out_path = args.get("output_path")
             from security import PathIdentity, ExecutionGuard, Capability, TargetMutationError
@@ -1168,26 +1168,26 @@ class ReaMcpServer:
                 enforce_nociception=not force
             )
 
-        elif name == "rea_scan_hybrid":
+        elif name == "bintra_scan_hybrid":
             path = args["file_path"]
             return HybridBinaryDissector.scan_for_embedded_logic(path)
 
-        elif name == "rea_sensory_audit":
+        elif name == "bintra_sensory_audit":
             file_path = args.get("file_path")
             code_hex = args.get("code_hex")
             cortex = SensoryCortex()
             return cortex.evaluate_all_senses(file_path=file_path, code_hex=code_hex)
 
-        elif name == "rea_match_pcode":
+        elif name == "bintra_match_pcode":
             p1 = args["func1_pcode"]
             p2 = args["func2_pcode"]
             return PcodeFunctionMatcher.match(p1, p2)
 
-        elif name == "rea_deobfuscate_pcode":
+        elif name == "bintra_deobfuscate_pcode":
             pcode_ops = args["pcode_ops"]
             return PcodeDeobfuscator.detect_opaque_predicates(pcode_ops)
 
-        elif name == "rea_ghidra_analyze":
+        elif name == "bintra_ghidra_analyze":
             payload = args.get("payload")
             input_file = args.get("input_file")
             if not payload and input_file and os.path.exists(input_file):
@@ -1197,7 +1197,7 @@ class ReaMcpServer:
                 raise ValueError("Must provide 'payload' object or valid 'input_file'")
             return GhidraAnnotationPlanner.analyze_program_export(payload)
 
-        elif name == "rea_ghidra_headless":
+        elif name == "bintra_ghidra_headless":
             import subprocess, tempfile
             bin_path = args["binary_path"]
             ghidra_dir = Path(args.get("ghidra_path") or os.environ.get("GHIDRA_INSTALL_DIR", r"C:\ghidra"))
@@ -1209,10 +1209,10 @@ class ReaMcpServer:
             cmd = [
                 str(headless_bat),
                 tempfile.gettempdir(),
-                "REANeuralMcpHeadless",
+                "BintraMcpHeadless",
                 "-import", bin_path,
                 "-scriptPath", str(script_dir),
-                "-postScript", "ReaNeuralGhidraBridge.java"
+                "-postScript", "BintraGhidraBridge.java"
             ] + script_args
             proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
             return {
@@ -1221,7 +1221,7 @@ class ReaMcpServer:
                 "stderr_tail": proc.stderr[-2000:]
             }
 
-        elif name == "rea_windows_env_audit":
+        elif name == "bintra_windows_env_audit":
             from windows_intelligence import WindowsOSProfiler, WindowsDeviceInspector, WindowsSecurityInspector
             b = args.get("file_path") or args.get("binary_path")
             return {
@@ -1230,30 +1230,30 @@ class ReaMcpServer:
                 "security": WindowsSecurityInspector.audit(b)
             }
 
-        elif name == "rea_resolve_dependencies":
+        elif name == "bintra_resolve_dependencies":
             from windows_intelligence import WindowsDependencyResolver
             b = args.get("file_path") or args.get("binary_path")
             return WindowsDependencyResolver.audit_dependencies(b)
 
-        elif name == "rea_inspect_crash_reports":
+        elif name == "bintra_inspect_crash_reports":
             from windows_intelligence import WindowsCrashAnalyzer
             b = args.get("file_path") or args.get("binary_path")
             return WindowsCrashAnalyzer.collect_crash_evidence(b)
 
-        elif name == "rea_correlate_failure_evidence":
+        elif name == "bintra_correlate_failure_evidence":
             from windows_intelligence import DiagnosticEvidenceCorrelator
             b = args.get("binary_path") or args.get("file_path")
             c = args.get("crash_record")
             g = args.get("ghidra_export")
             return DiagnosticEvidenceCorrelator.correlate(b, crash_record=c, ghidra_export=g)
 
-        elif name == "rea_win_catalog_cmd":
+        elif name == "bintra_win_catalog_cmd":
             from windows_intelligence import CommandExecutor
             cmd_id = args.get("command_id", "")
             flags = tuple(args.get("extra_flags", [])) if args.get("extra_flags") else None
             return CommandExecutor.execute(cmd_id, extra_flags=flags)
 
-        elif name == "rea_registry_audit":
+        elif name == "bintra_registry_audit":
             from windows_intelligence import WindowsRegistryAnalyzer
             domain = args.get("domain")
             target_b = args.get("target_binary")
@@ -1261,7 +1261,7 @@ class ReaMcpServer:
                 return WindowsRegistryAnalyzer.audit_domain(domain)
             return WindowsRegistryAnalyzer.audit_all(target_binary_path=target_b)
 
-        elif name == "rea_hardware_audit":
+        elif name == "bintra_hardware_audit":
             from windows_intelligence import NativeDeviceInspector
             report = NativeDeviceInspector.audit_hardware_health()
             if report.get("status") == "not_applicable":
@@ -1274,7 +1274,7 @@ class ReaMcpServer:
                 }
             return report
 
-        elif name == "rea_driver_audit":
+        elif name == "bintra_driver_audit":
             from windows_intelligence import KernelDriverInspector
             flt = args.get("driver_name_filter")
             if flt:
@@ -1287,7 +1287,7 @@ class ReaMcpServer:
                 }
             return KernelDriverInspector.audit_drivers()
 
-        elif name == "rea_service_audit":
+        elif name == "bintra_service_audit":
             from windows_intelligence import ServiceManagerInspector
             flt = args.get("service_name_filter")
             active_only = args.get("active_only", False)
@@ -1305,7 +1305,7 @@ class ReaMcpServer:
                 }
             return ServiceManagerInspector.audit_services()
 
-        elif name == "rea_dmp_inspect":
+        elif name == "bintra_dmp_inspect":
             from windows_intelligence import MiniDumpParser
             dmp_p = args.get("dmp_path")
             app_flt = args.get("app_name_filter")
@@ -1313,7 +1313,7 @@ class ReaMcpServer:
                 return MiniDumpParser.parse_minidump(dmp_p)
             return MiniDumpParser.audit_dumps(app_name_filter=app_flt)
 
-        elif name == "rea_etw_audit":
+        elif name == "bintra_etw_audit":
             from windows_intelligence import EtwController
             act = args.get("action", "audit")
             sname = args.get("session_name")
@@ -1328,8 +1328,8 @@ class ReaMcpServer:
                 return EtwController.query_provider_instances(guid)
             return EtwController.audit_telemetry_system()
 
-        elif name == "rea_etw_capture":
-            s_name = args.get("session_name", "REA_Diagnostic_Trace")
+        elif name == "bintra_etw_capture":
+            s_name = args.get("session_name", "Bintra_Diagnostic_Trace")
             t_pid = args.get("pid")
             dur = float(args.get("duration_seconds", 1.0))
             import time
@@ -1344,7 +1344,7 @@ class ReaMcpServer:
             report["stop_info"] = stop_info
             return report
 
-        elif name == "rea_ghidra_live_bridge":
+        elif name == "bintra_ghidra_live_bridge":
             from ghidra_live_bridge import (
                 GhidraLiveBridgeServer, GhidraLiveBridgeClient,
                 get_or_create_bridge, get_active_bridge, stop_active_bridge
@@ -1383,7 +1383,7 @@ class ReaMcpServer:
                 if server and server.is_running:
                     return server.inject_crash_rca(rca)
                 client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
-                return client.call_rpc("rea.inject_crash_rca", {"rca_report": rca})
+                return client.call_rpc("bintra.inject_crash_rca", {"rca_report": rca})
             elif act == "inject_vad":
                 pid = int(args.get("pid", 0))
                 if pid <= 0:
@@ -1394,7 +1394,7 @@ class ReaMcpServer:
                 if server and server.is_running:
                     return server.inject_vad_snapshot(snap.to_dict())
                 client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
-                return client.call_rpc("rea.inject_vad_snapshot", {"vad_snapshot": snap.to_dict()})
+                return client.call_rpc("bintra.inject_vad_snapshot", {"vad_snapshot": snap.to_dict()})
             elif act == "inject_etw":
                 tl = args.get("timeline_report")
                 if not tl:
@@ -1409,7 +1409,7 @@ class ReaMcpServer:
                 if server and server.is_running:
                     return server.inject_etw_timeline(tl)
                 client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
-                return client.call_rpc("rea.inject_etw_timeline", {"timeline_report": tl})
+                return client.call_rpc("bintra.inject_etw_timeline", {"timeline_report": tl})
             elif act == "inject_struct":
                 s_rep = args.get("struct_report")
                 if not s_rep:
@@ -1424,7 +1424,7 @@ class ReaMcpServer:
                 if server and server.is_running:
                     return server.inject_structure_dissection(s_rep)
                 client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
-                return client.call_rpc("rea.inject_structure_dissection", {"struct_report": s_rep})
+                return client.call_rpc("bintra.inject_structure_dissection", {"struct_report": s_rep})
             elif act == "inject_pointers":
                 p_rep = args.get("pointer_report")
                 if not p_rep:
@@ -1439,11 +1439,11 @@ class ReaMcpServer:
                 if server and server.is_running:
                     return server.inject_pointer_chains(p_rep)
                 client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
-                return client.call_rpc("rea.inject_pointer_chains", {"pointer_report": p_rep})
+                return client.call_rpc("bintra.inject_pointer_chains", {"pointer_report": p_rep})
             else:
                 raise ValueError(f"Unknown ghidra_live_bridge action: '{act}'")
 
-        elif name == "rea_vad_inspect":
+        elif name == "bintra_vad_inspect":
             pid = int(args.get("pid", 0))
             if pid <= 0:
                 raise ValueError("Valid 'pid' (> 0) is required.")
@@ -1455,7 +1455,7 @@ class ReaMcpServer:
                 return snapshot.classify_address(addr)
             return snapshot.to_dict(include_regions=bool(args.get("include_regions", False)))
 
-        elif name == "rea_memory_scan":
+        elif name == "bintra_memory_scan":
             pid = int(args.get("pid", 0))
             if pid <= 0:
                 raise ValueError("Valid 'pid' (> 0) is required.")
@@ -1531,7 +1531,7 @@ class ReaMcpServer:
                     alignment=int(alignment) if alignment is not None else None,
                 )
 
-        elif name == "rea_pointer_scan":
+        elif name == "bintra_pointer_scan":
             pid = int(args.get("pid", 0))
             if pid <= 0:
                 raise ValueError("Valid 'pid' (> 0) is required.")
@@ -1553,7 +1553,7 @@ class ReaMcpServer:
                 alignment=align,
             )
 
-        elif name == "rea_struct_dissect":
+        elif name == "bintra_struct_dissect":
             pid = int(args.get("pid", 0))
             if pid <= 0:
                 raise ValueError("Valid 'pid' (> 0) is required.")
@@ -1566,7 +1566,7 @@ class ReaMcpServer:
             from windows_intelligence import StructureDissector
             return StructureDissector.dissect(pid=pid, base_address=addr, size=size, struct_name=s_name)
 
-        elif name == "rea_crash_rca":
+        elif name == "bintra_crash_rca":
             dmp_p = args.get("dmp_path")
             if not dmp_p:
                 raise ValueError("'dmp_path' is required.")
@@ -1574,7 +1574,7 @@ class ReaMcpServer:
             from windows_intelligence import CrashRootCauseAnalyzer
             return CrashRootCauseAnalyzer.analyze_crash(dump_target=dmp_p, binary_path=b_path)
 
-        elif name == "rea_evidence_graph":
+        elif name == "bintra_evidence_graph":
             from windows_intelligence import CausalitySynthesizer, MiniDumpParser
             b = args.get("binary_path") or args.get("file_path")
             dmp_p = args.get("crash_dmp_path")
@@ -1603,7 +1603,7 @@ class ReaMcpServer:
                 "mermaid_diagram": graph.to_mermaid()
             }
 
-        elif name == "rea_wsp_audit":
+        elif name == "bintra_wsp_audit":
             path = args["model_path"]
             hdr, _, hdr_sha = SafetensorsHandler.read_header(path)
             t_names = [k for k in hdr.keys() if k != "__metadata__"]
@@ -1631,7 +1631,7 @@ class ReaMcpServer:
                 "cross_layer_induction": induction_report,
             }
 
-        elif name == "rea_patch_weights":
+        elif name == "bintra_patch_weights":
             src = args["source_path"]
             out = args["output_path"]
             tname = args["tensor_name"]
@@ -1651,7 +1651,7 @@ class ReaMcpServer:
             res["metrics"] = metrics
             return res
 
-        elif name == "rea_device_driver_intelligence":
+        elif name == "bintra_device_driver_intelligence":
             from windows_intelligence.device_intelligence import DriverMatcher, DriverPackageInventory
             action = args.get("action", "audit")
             query = args.get("device_query")
@@ -1668,7 +1668,7 @@ class ReaMcpServer:
                 max_devices=int(args.get("max_devices", 64))
             )
 
-        elif name == "rea_process_resource_audit":
+        elif name == "bintra_process_resource_audit":
             from windows_intelligence.process_intelligence import FileUsageInspector, ModuleInventory, ProcessInventory, ServiceProcessMapper
             action = args.get("action", "find_file_locks")
             f_path = args.get("file_path")
@@ -1832,7 +1832,7 @@ class ReaMcpServer:
 
 
 def main():
-    server = ReaMcpServer()
+    server = BintraMcpServer()
     server.run_stdio()
 
 

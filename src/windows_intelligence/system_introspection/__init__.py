@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Native System Introspection Package.
+Bintra Native System Introspection Package.
 Provides low-level Windows hardware and OS introspection using SetupAPI, CfgMgr32,
 PSAPI, Advapi32 (SCM), and Kernel32 mitigation policies via ctypes.
 """

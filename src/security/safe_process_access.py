@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Safe Process Access Gateway.
+Bintra Safe Process Access Gateway.
 Guarantees strictly read-only process inspection (PROCESS_QUERY_LIMITED_INFORMATION).
 Forbids PROCESS_TERMINATE, PROCESS_VM_WRITE, memory injection, and thread hijacking.
 """

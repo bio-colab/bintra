@@ -1,13 +1,13 @@
 ---
-name: rea-etw-telemetry
-description: Inspect Event Tracing for Windows (ETW) sessions/providers and capture process-scoped temporal causality timelines using REA-Neural native Advapi32 OpenTraceW/ProcessTrace consumer, Event Log polling, and Toolhelp32 module-delta tracking.
+name: bintra-etw-telemetry
+description: Inspect Event Tracing for Windows (ETW) sessions/providers and capture process-scoped temporal causality timelines using Bintra native Advapi32 OpenTraceW/ProcessTrace consumer, Event Log polling, and Toolhelp32 module-delta tracking.
 metadata:
-  framework: rea-neural
-  version: "7.4.0"
+  framework: bintra
+  version: "1.0.0"
   tier: runtime-telemetry
 ---
 
-# REA-Neural: ETW Telemetry & Temporal Causality Skill
+# Bintra: ETW Telemetry & Temporal Causality Skill
 
 Use this skill when investigating Windows runtime instability, provider activity, late DLL loading, Windows Error Reporting (`WER 1001`) vs kernel resets (`System 41/1001`), Restart Manager locks, or pre-crash event timelines.
 
@@ -15,7 +15,7 @@ Use this skill when investigating Windows runtime instability, provider activity
 
 ## 1. Execution Modes & Telemetry Provenance Contract
 
-REA-Neural explicitly declares the active event backend in `EtwLiveCaptureSession.start_session()` so agents never confuse Event Log polling or synthetic test inputs with native ETW kernel streams:
+Bintra explicitly declares the active event backend in `EtwLiveCaptureSession.start_session()` so agents never confuse Event Log polling or synthetic test inputs with native ETW kernel streams:
 
 | Host / Privilege State | `mode` | `etw_native_consumer_active` | `event_consumption_backend` |
 |:---|:---|:---|:---|
@@ -42,7 +42,7 @@ Every captured `EtwEventRecord` carries an explicit `"source"` provenance tag:
 **MCP Tool:**
 ```json
 {
-  "name": "rea_etw_audit",
+  "name": "bintra_etw_audit",
   "arguments": {
     "action": "audit"
   }
@@ -52,7 +52,7 @@ Every captured `EtwEventRecord` carries an explicit `"source"` provenance tag:
 
 **CLI Command:**
 ```powershell
-rea-neural etw-audit --format json
+bintra etw-audit --format json
 ```
 
 ### Task B: Capturing & Correlating Pre-Crash Event Timelines
@@ -60,9 +60,9 @@ rea-neural etw-audit --format json
 **MCP Tool:**
 ```json
 {
-  "name": "rea_etw_capture",
+  "name": "bintra_etw_capture",
   "arguments": {
-    "session_name": "REA_Diagnostic_Trace",
+    "session_name": "Bintra_Diagnostic_Trace",
     "target_pid": 1234,
     "duration_seconds": 2.0
   }
@@ -71,7 +71,7 @@ rea-neural etw-audit --format json
 
 **CLI Command:**
 ```powershell
-rea-neural etw-capture --session-name REA_Diagnostic_Trace --pid 1234 --duration 2.0 --format json
+bintra etw-capture --session-name Bintra_Diagnostic_Trace --pid 1234 --duration 2.0 --format json
 ```
 
 ---

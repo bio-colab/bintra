@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Windows System Intelligence Layer.
+Bintra Windows System Intelligence Layer.
 Provides holistic environment profiling, dependency resolution, hardware/driver audits,
 security/privilege inspection, crash telemetry analysis (WER/EventLog/MiniDump),
 immutable read-only command execution, deep dual-view registry intelligence,

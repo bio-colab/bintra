@@ -90,7 +90,7 @@ class EtwLiveCaptureSession:
 
     def __init__(
         self,
-        session_name: str = "REA_Neural_Diagnostic_Trace",
+        session_name: str = "Bintra_Diagnostic_Trace",
         target_pid: Optional[int] = None,
         max_buffer_events: int = 2000
     ):
@@ -567,7 +567,7 @@ class EtwLiveCaptureSession:
                                 known_modules[low_name] = base_addr
                                 self.record_event(EtwEventRecord(
                                     timestamp=now_t,
-                                    provider_name="REA-Toolhelp32-ModuleMonitor",
+                                    provider_name="Bintra-Toolhelp32-ModuleMonitor",
                                     event_id=5,
                                     pid=self.target_pid,
                                     tid=0,
@@ -821,7 +821,7 @@ class EtwTimelineCorrelator:
     def format_markdown(cls, correlation_report: Dict[str, Any]) -> str:
         """Formats the ETW timeline correlation into an executive Markdown report."""
         lines = [
-            "# REA-Neural ETW Diagnostic Timeline Correlation",
+            "# Bintra ETW Diagnostic Timeline Correlation",
             f"- **Events Evaluated:** {correlation_report.get('events_count', 0)}",
             f"- **Temporal Verdict:** **`{correlation_report.get('temporal_verdict')}`**",
         ]

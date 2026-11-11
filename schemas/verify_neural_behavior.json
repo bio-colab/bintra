@@ -1,6 +1,6 @@
 {
   "name": "verify_neural_behavior",
-  "description": "Perform regression verification between baseline and patched model artifacts. Measures behavioral drift, validates resolution of targeted pathology, computes Lipschitz energy bounds, and produces an REA-compatible Evidence record.",
+  "description": "Perform regression verification between baseline and patched model artifacts. Measures behavioral drift, validates resolution of targeted pathology, computes Lipschitz energy bounds, and produces an Bintra-compatible Evidence record.",
   "parameters": {
     "type": "object",
     "properties": {

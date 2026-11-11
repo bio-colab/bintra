@@ -14,7 +14,7 @@ What binary analysis, reverse engineering, or telemetry problem does this solve?
 *(e.g., "Standard compiler outputs for GCC 14 vector loops trigger false positives in dispatcher analysis", or "Need native ETW session real-time consumer")*
 
 **Proposed Solution & Technical Approach**
-How should REA-Neural implement this?
+How should Bintra implement this?
 - Module to modify or introduce: (e.g. `ContinuousDeobfuscator`, `SemanticFunctionMatcher`, `WindowsIntelligence`)
 - Mathematical formulation or Win32 API bindings:
 - Invariance & safety checks:

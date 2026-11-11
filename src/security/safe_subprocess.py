@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Safe Subprocess Broker.
+Bintra Safe Subprocess Broker.
 Mediates external process execution through the ExecutionGuard.
 Enforces shell=False, closed catalog of allowed binaries, argument whitelisting,
 timeout enforcement, and output byte limits to prevent DoS.
@@ -166,7 +166,7 @@ class SafeSubprocessBroker:
 
             stdout = proc.stdout
             if len(stdout) > cls.MAX_OUTPUT_BYTES:
-                stdout = stdout[:cls.MAX_OUTPUT_BYTES] + "\n[REA-SAFETY: Output truncated at 10MB limit]"
+                stdout = stdout[:cls.MAX_OUTPUT_BYTES] + "\n[BINTRA-SAFETY: Output truncated at 10MB limit]"
 
             return {
                 "status": "success",

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Registry Intelligence Engine.
+Bintra Registry Intelligence Engine.
 Provides a structured 11-domain Windows registry catalog, dual 32-bit and 64-bit
 view reading (KEY_WOW64_32KEY / KEY_WOW64_64KEY), and configuration anomaly analysis.
 """

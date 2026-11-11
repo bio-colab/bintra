@@ -1,11 +1,11 @@
 {
-  "name": "rea-neural",
-  "version": "7.4.0",
-  "description": "Continuous Semantic Reverse Engineering & Binary Analysis Framework. Extends REA to continuous semantic program representations, deobfuscation, cross-architecture matching, surgical binary patching, and weight-space programming.",
+  "name": "bintra",
+  "version": "1.0.0",
+  "description": "Continuous Semantic Reverse Engineering & Binary Analysis Framework. Extends Bintra to continuous semantic program representations, deobfuscation, cross-architecture matching, surgical binary patching, and weight-space programming.",
   "main": "src/cli.py",
   "bin": {
-    "rea-neural": "src/cli.py",
-    "rea-mcp": "src/mcp_server.py"
+    "bintra": "src/cli.py",
+    "bintra-mcp": "src/mcp_server.py"
   },
   "scripts": {
     "test": "python -m unittest discover -s tests",
@@ -19,7 +19,7 @@
     "binary-patching",
     "weight-space-programming",
     "hybrid-binaries",
-    "rea"
+    "bintra"
   ],
   "author": "bio-colab",
   "license": "Apache-2.0",

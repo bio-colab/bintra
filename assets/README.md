@@ -1,6 +1,6 @@
-# REA-Neural Visual Identity & Brand Assets
+# Bintra Visual Identity & Brand Assets
 
-This directory houses the official visual identity assets and brand guidelines for **REA-Neural** (`Continuous Semantic Reverse Engineering & Binary Analysis Framework`).
+This directory houses the official visual identity assets and brand guidelines for **Bintra** (`Continuous Semantic Reverse Engineering & Binary Analysis Framework`).
 
 ---
 
@@ -18,7 +18,7 @@ This directory houses the official visual identity assets and brand guidelines f
 
 ## 🔬 Symbology & Design Rationale
 
-1. **The Circuit 'R'**: The left hemisphere features circuit traces and connection terminals configured in the silhouette of a capital letter **R**, honoring the foundation of *Reverse Engineering*.
+1. **The Circuit 'B'**: The left hemisphere features circuit traces and connection terminals configured in the silhouette of a capital letter **B**, symbolizing *Binary & Neural Precision*.
 2. **The Cybernetic Neural Eye**: The focal core represents the **10 Metaphorical Senses (`SensoryCortex`)**, continuous perception of compiled binaries, and deep structural awareness (Analytical Vision, Deep Proprioception, Metaphorical Pain).
 3. **The Neural Tree**: The right hemisphere branches into a synaptic dendritic arbor, embodying continuous weight-space semantics, neural program deobfuscation, and MIT CSAIL research lineage (*Sparks of Weight-Space Programming*).
 4. **The Hexagonal Frame**: Symbolizes rigorous mathematical constraints, PE structural boundaries, and stack-frame equilibrium.
@@ -43,7 +43,7 @@ This directory houses the official visual identity assets and brand guidelines f
 - When embedding the banner in external documentation or web pages, use:
   ```markdown
   <p align="center">
-    <img src="https://raw.githubusercontent.com/bio-colab/rea-neural/main/assets/banner.jpg" alt="REA-Neural Banner" width="100%">
+    <img src="https://raw.githubusercontent.com/bio-colab/bintra/main/assets/banner.jpg" alt="Bintra Banner" width="100%">
   </p>
   ```
 - Do not distort, skew, or recolor the primary gradient marks.

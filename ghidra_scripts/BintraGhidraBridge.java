@@ -1,7 +1,7 @@
-// REA-Neural Ghidra Bridge: Extracts High P-Code, SSA Def-Use chains, and Full CFG, runs evidence-based semantic deobfuscation, and commits verified mutations.
-//@category REA-Neural
+// Bintra Ghidra Bridge: Extracts High P-Code, SSA Def-Use chains, and Full CFG, runs evidence-based semantic deobfuscation, and commits verified mutations.
+//@category Bintra
 //@keybinding 
-//@menupath Tools.REA-Neural.Run Semantic Deobfuscation Bridge
+//@menupath Tools.Bintra.Run Semantic Deobfuscation Bridge
 //@toolbar 
 
 import java.io.File;
@@ -36,32 +36,32 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 
-public class ReaNeuralGhidraBridge extends GhidraScript {
+public class BintraGhidraBridge extends GhidraScript {
 
     @Override
     public void run() throws Exception {
         println("=================================================================");
-        println(" [REA-Neural] Initiating Symbiotic Ghidra Bridge (v7.4.0)");
+        println(" [Bintra] Initiating Symbiotic Ghidra Bridge (v1.0.0)");
         println("=================================================================");
 
         if (currentProgram == null) {
-            printerr("[REA-Neural] No program loaded. Please open a binary in Ghidra.");
+            printerr("[Bintra] No program loaded. Please open a binary in Ghidra.");
             return;
         }
 
-        File reaRoot = resolveReaRoot();
-        if (reaRoot == null || !new File(reaRoot, "src/cli.py").exists()) {
-            printerr("[REA-Neural] Could not locate REA-Neural repository root (containing src/cli.py).");
+        File bintraRoot = resolveBintraRoot();
+        if (bintraRoot == null || !new File(bintraRoot, "src/cli.py").exists()) {
+            printerr("[Bintra] Could not locate Bintra repository root (containing src/cli.py).");
             return;
         }
-        println("[REA-Neural] Located REA-Neural root at: " + reaRoot.getAbsolutePath());
+        println("[Bintra] Located Bintra root at: " + bintraRoot.getAbsolutePath());
 
         // 1. Setup Decompiler
         DecompInterface decomp = new DecompInterface();
         decomp.openProgram(currentProgram);
 
         // 2. Extract Functions, Full CFG, and High P-Code with SSA Def-Use
-        println("[REA-Neural] Extracting High P-Code, SSA Def-Use, and CFG from program functions...");
+        println("[Bintra] Extracting High P-Code, SSA Def-Use, and CFG from program functions...");
         List<Map<String, Object>> functionsList = new ArrayList<>();
         FunctionIterator funcIter = currentProgram.getFunctionManager().getFunctions(true);
         int totalFuncs = 0;
@@ -69,7 +69,7 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
 
         while (funcIter.hasNext()) {
             if (monitor.isCancelled()) {
-                println("[REA-Neural] Extraction cancelled by user.");
+                println("[Bintra] Extraction cancelled by user.");
                 return;
             }
             Function func = funcIter.next();
@@ -165,7 +165,7 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
             functionsList.add(funcData);
         }
 
-        println("[REA-Neural] Extracted High P-Code & Full CFG for " + decompiledCount + " / " + totalFuncs + " functions.");
+        println("[Bintra] Extracted High P-Code & Full CFG for " + decompiledCount + " / " + totalFuncs + " functions.");
 
         // 3. Serialize to JSON
         Map<String, Object> payload = new HashMap<>();
@@ -175,20 +175,20 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
         payload.put("functions", functionsList);
 
         Gson gson = new GsonBuilder().setPrettyPrinting().create();
-        File tempExport = File.createTempFile("rea_ghidra_export_", ".json");
-        File tempPlan = File.createTempFile("rea_ghidra_plan_", ".json");
+        File tempExport = File.createTempFile("bintra_ghidra_export_", ".json");
+        File tempPlan = File.createTempFile("bintra_ghidra_plan_", ".json");
         tempExport.deleteOnExit();
         tempPlan.deleteOnExit();
 
         try (FileWriter writer = new FileWriter(tempExport)) {
             gson.toJson(payload, writer);
         }
-        println("[REA-Neural] Exported P-Code & CFG JSON to: " + tempExport.getAbsolutePath());
+        println("[Bintra] Exported P-Code & CFG JSON to: " + tempExport.getAbsolutePath());
 
-        // 4. Invoke REA Engine
-        println("[REA-Neural] Invoking REA Continuous Semantic Engine (ghidra-analyze)...");
+        // 4. Invoke Bintra Engine
+        println("[Bintra] Invoking Bintra Continuous Semantic Engine (ghidra-analyze)...");
         String pythonExe = resolvePythonExe();
-        File cliPy = new File(reaRoot, "src/cli.py");
+        File cliPy = new File(bintraRoot, "src/cli.py");
 
         ProcessBuilder pb = new ProcessBuilder(
             pythonExe,
@@ -203,13 +203,13 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream()))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                println(" [REA CLI] " + line);
+                println(" [Bintra CLI] " + line);
             }
         }
 
         int exitCode = proc.waitFor();
         if (exitCode != 0 || !tempPlan.exists()) {
-            printerr("[REA-Neural] REA Analysis failed with exit code: " + exitCode);
+            printerr("[Bintra] Bintra Analysis failed with exit code: " + exitCode);
             return;
         }
 
@@ -225,7 +225,7 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
         JsonArray comments = planJson.has("comment_actions") ? planJson.getAsJsonArray("comment_actions") : new JsonArray();
         JsonArray evidenceList = planJson.has("evidence_dossiers") ? planJson.getAsJsonArray("evidence_dossiers") : new JsonArray();
 
-        println("[REA-Neural] Analysis Complete:");
+        println("[Bintra] Analysis Complete:");
         println("  * Proven Invariant Tautologies (Opaque Predicates): " + opaqueDetected);
         println("  * Control Flow Flattening (CFF) Backbones: " + cffDetected);
         println("  * Evidence Dossiers Generated: " + evidenceList.size());
@@ -238,11 +238,11 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
             String[] args = getScriptArgs();
             shouldApply = (args != null && args.length > 0 && "apply".equalsIgnoreCase(args[0]));
             if (!shouldApply) {
-                println("[REA-Neural] Headless mode: evidence dossiers generated but mutations not applied (pass 'apply' argument to commit).");
+                println("[Bintra] Headless mode: evidence dossiers generated but mutations not applied (pass 'apply' argument to commit).");
             }
         } else {
             String confirmMsg = String.format(
-                "REA-Neural Semantic Analysis Complete:\n\n" +
+                "Bintra Semantic Analysis Complete:\n\n" +
                 " - Analyzed Functions: %d\n" +
                 " - Proven Opaque Predicates: %d\n" +
                 " - CFF Dispatcher Backbones: %d\n" +
@@ -252,13 +252,13 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
                 "Do you want to apply these verified mutations directly to the Ghidra Program Database?",
                 decompiledCount, opaqueDetected, cffDetected, evidenceList.size(), renames.size(), comments.size()
             );
-            shouldApply = askYesNo("REA-Neural Mutation Plan", confirmMsg);
+            shouldApply = askYesNo("Bintra Mutation Plan", confirmMsg);
         }
 
         // 7. Apply Verified Mutations in Safe Transaction
         if (shouldApply) {
-            println("[REA-Neural] Committing verified mutations to Ghidra Program Database...");
-            int txId = currentProgram.startTransaction("REA-Neural Semantic Deobfuscation");
+            println("[Bintra] Committing verified mutations to Ghidra Program Database...");
+            int txId = currentProgram.startTransaction("Bintra Semantic Deobfuscation");
             boolean commitSuccess = false;
             try {
                 // Apply Renames
@@ -286,23 +286,23 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
                     if (addr != null) {
                         setPlateComment(addr, commentText);
                         currentProgram.getBookmarkManager().setBookmark(
-                            addr, "REA-Neural", "Evidence-Based Deobfuscation", "Analyzed with High P-Code SSA & CFG"
+                            addr, "Bintra", "Evidence-Based Deobfuscation", "Analyzed with High P-Code SSA & CFG"
                         );
                         println("   [COMMENT] Added verified plate comment at " + addrStr);
                     }
                 }
                 commitSuccess = true;
             } catch (Exception ex) {
-                printerr("[REA-Neural] Error while mutating database: " + ex.getMessage());
+                printerr("[Bintra] Error while mutating database: " + ex.getMessage());
             } finally {
                 currentProgram.endTransaction(txId, commitSuccess);
             }
 
             if (commitSuccess) {
-                println("[REA-Neural] Successfully applied all verified mutations to Program Database!");
+                println("[Bintra] Successfully applied all verified mutations to Program Database!");
             }
         } else {
-            println("[REA-Neural] Database mutation skipped per user request.");
+            println("[Bintra] Database mutation skipped per user request.");
         }
         println("=================================================================");
     }
@@ -388,8 +388,8 @@ public class ReaNeuralGhidraBridge extends GhidraScript {
         }
     }
 
-    private File resolveReaRoot() {
-        String envRoot = System.getenv("REA_NEURAL_ROOT");
+    private File resolveBintraRoot() {
+        String envRoot = System.getenv("BINTRA_ROOT");
         if (envRoot != null && !envRoot.isEmpty()) {
             File f = new File(envRoot);
             if (f.exists()) return f;

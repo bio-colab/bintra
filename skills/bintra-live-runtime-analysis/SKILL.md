@@ -1,18 +1,18 @@
 ---
-name: rea-live-runtime-analysis
-description: Perform strictly read-only runtime memory inspection (VAD layout, PROCESS_VM_READ value scanning, multi-level pointer path discovery, 4-byte-granularity structure dissection, and MiniDump+VAD crash root-cause analysis) using REA-Neural Tier-3 tools.
+name: bintra-live-runtime-analysis
+description: Perform strictly read-only runtime memory inspection (VAD layout, PROCESS_VM_READ value scanning, multi-level pointer path discovery, 4-byte-granularity structure dissection, and MiniDump+VAD crash root-cause analysis) using Bintra Tier-3 tools.
 metadata:
-  framework: rea-neural
-  version: "7.4.0"
+  framework: bintra
+  version: "1.0.0"
   tier: runtime-telemetry
 ---
 
-# REA-Neural: Live Runtime Memory & Crash RCA Skill
+# Bintra: Live Runtime Memory & Crash RCA Skill
 
 Use this skill whenever an agent or engineer needs to inspect the virtual memory layout, read-only value state, pointer chains, heap object structure, or post-mortem crash register/VAD causality of a target process.
 
 > [!IMPORTANT]
-> **Strictly Read-Only Telemetry Guarantee:** Every memory tool in this skill uses passive `PROCESS_QUERY_LIMITED_INFORMATION` / `VirtualQueryEx` / `PROCESS_VM_READ` (`ReadProcessMemory`) only. REA-Neural contains **no** `WriteProcessMemory`, **no** `VirtualProtectEx`, and **no** code/DLL injection.
+> **Strictly Read-Only Telemetry Guarantee:** Every memory tool in this skill uses passive `PROCESS_QUERY_LIMITED_INFORMATION` / `VirtualQueryEx` / `PROCESS_VM_READ` (`ReadProcessMemory`) only. Bintra contains **no** `WriteProcessMemory`, **no** `VirtualProtectEx`, and **no** code/DLL injection.
 
 ---
 
@@ -27,14 +27,14 @@ Use this skill whenever an agent or engineer needs to inspect the virtual memory
 
 ## 2. Tool Matrix: MCP vs CLI
 
-| Capability | MCP Tool | Unified CLI (`rea-neural`) | Core Output Keys |
+| Capability | MCP Tool | Unified CLI (`bintra`) | Core Output Keys |
 |:---|:---|:---|:---|
-| **VAD Space Map** | `rea_vad_inspect` | `vad-inspect --pid <pid> [--address 0x...] [--regions]` | `status`, `is_simulated`, `architecture`, `summary`, `module_count` |
-| **Read-Only Value Scan** | `rea_memory_scan` | `mem-scan --pid <pid> --type <t> --mode <m> --value <v>` | `session_id`, `data_type`, `scan_type`, `total_candidates`, `candidates_sample` |
-| **Pointer Chain Resolution** | `rea_pointer_scan` | `pointer-scan --pid <pid> --target 0x... --max-depth 2` | `pid`, `target_address`, `max_depth_searched`, `alignment`, `heuristic`, `paths_count`, `paths` |
-| **Structure Dissection** | `rea_struct_dissect` | `dissect-struct --pid <pid> --address 0x... --size 64` | `status`, `heuristic`, `fields_count`, `fields`, `c_struct_definition`, `is_partial` |
-| **Crash RCA (DMP+ASM)** | `rea_crash_rca` | `crash-rca --dmp <file.dmp> [--binary <exe>]` | `exception_code`, `access_type`, `root_cause_classification`, `confidence`, `culprit_register` |
-| **Failure Evidence Graph** | `rea_evidence_graph` | `diagnose --binary <exe> [--crash-json <f>]` | `verdict`, `severity`, `epistemic_classification`, `evidence_graph`, `mermaid_diagram` |
+| **VAD Space Map** | `bintra_vad_inspect` | `vad-inspect --pid <pid> [--address 0x...] [--regions]` | `status`, `is_simulated`, `architecture`, `summary`, `module_count` |
+| **Read-Only Value Scan** | `bintra_memory_scan` | `mem-scan --pid <pid> --type <t> --mode <m> --value <v>` | `session_id`, `data_type`, `scan_type`, `total_candidates`, `candidates_sample` |
+| **Pointer Chain Resolution** | `bintra_pointer_scan` | `pointer-scan --pid <pid> --target 0x... --max-depth 2` | `pid`, `target_address`, `max_depth_searched`, `alignment`, `heuristic`, `paths_count`, `paths` |
+| **Structure Dissection** | `bintra_struct_dissect` | `dissect-struct --pid <pid> --address 0x... --size 64` | `status`, `heuristic`, `fields_count`, `fields`, `c_struct_definition`, `is_partial` |
+| **Crash RCA (DMP+ASM)** | `bintra_crash_rca` | `crash-rca --dmp <file.dmp> [--binary <exe>]` | `exception_code`, `access_type`, `root_cause_classification`, `confidence`, `culprit_register` |
+| **Failure Evidence Graph** | `bintra_evidence_graph` | `diagnose --binary <exe> [--crash-json <f>]` | `verdict`, `severity`, `epistemic_classification`, `evidence_graph`, `mermaid_diagram` |
 
 ---
 
@@ -47,7 +47,7 @@ Supported `scan_mode` values: `EXACT_VALUE`, `BETWEEN`, `UNKNOWN_INITIAL`, `INCR
 **First Scan:**
 ```json
 {
-  "name": "rea_memory_scan",
+  "name": "bintra_memory_scan",
   "arguments": {
     "pid": 1234,
     "value_type": "float",
@@ -63,7 +63,7 @@ Supported `scan_mode` values: `EXACT_VALUE`, `BETWEEN`, `UNKNOWN_INITIAL`, `INCR
 **Next Scan (pass `session_id` returned above, or explicit `candidate_addresses`):**
 ```json
 {
-  "name": "rea_memory_scan",
+  "name": "bintra_memory_scan",
   "arguments": {
     "pid": 1234,
     "session_id": "<16-hex-session-id>",
@@ -77,8 +77,8 @@ Supported `scan_mode` values: `EXACT_VALUE`, `BETWEEN`, `UNKNOWN_INITIAL`, `INCR
 ### Modality B: CLI Iterative Scan (Workspace-Confined Session File)
 ```powershell
 mkdir workspace -Force
-rea-neural mem-scan --pid 1234 --type int32 --mode exact --value 42 --session-file .\workspace\scan_state.json
-rea-neural mem-scan --pid 1234 --type int32 --mode changed --session-file .\workspace\scan_state.json
+bintra mem-scan --pid 1234 --type int32 --mode exact --value 42 --session-file .\workspace\scan_state.json
+bintra mem-scan --pid 1234 --type int32 --mode changed --session-file .\workspace\scan_state.json
 ```
 *(Safety Kernel enforces that `--session-file` stays inside the authorized workspace directory.)*
 
@@ -86,11 +86,11 @@ rea-neural mem-scan --pid 1234 --type int32 --mode changed --session-file .\work
 
 ## 4. Pointer Path Resolution & Structure Dissection Caveats
 
-1. **Pointer Scanning (`rea_pointer_scan` / `pointer-scan`):**
+1. **Pointer Scanning (`bintra_pointer_scan` / `pointer-scan`):**
    - Resolves chains up to `max_depth = 3` (`static -> heap2 -> heap1 -> target`) with configurable `alignment` (default `4`).
    - Every returned path is verified by immediate read-only pointer dereference (`"verified": true`, `"heuristic": true`), yet subsequent ASLR/heap reallocation can invalidate paths over time.
-2. **Structure Dissection (`rea_struct_dissect` / `dissect-struct`):**
+2. **Structure Dissection (`bintra_struct_dissect` / `dissect-struct`):**
    - Evaluates objects at 4-byte granularity with 64-bit pointer / `.rdata` vftable lookahead and emits per-field `size_bytes`, `confidence`, and `alternatives`.
    - Always inspect `"heuristic": true`, `"is_partial"`, `"bytes_read"` vs `"bytes_requested"`, and `"alternatives"` before treating inferred scalar types (`int32_t`, `float`, `uint64_t`) as final C types without PDB/DWARF symbols.
-3. **Crash Root Cause Analysis (`rea_crash_rca` / `crash-rca`):**
+3. **Crash Root Cause Analysis (`bintra_crash_rca` / `crash-rca`):**
    - Cross-checks parsed MiniDump exception `operation` / `access_type`, Capstone instruction decoding, and register blame heuristics against memory spatial boundaries. Inspect `confidence` and `memory_spatial_classification` to separate high-confidence NULL dereferences (`< 0x10000`) from dynamic heap/stack faults.

@@ -1,12 +1,12 @@
-# REA-Neural -- Declared Scope & Boundaries
+# Bintra -- Declared Scope & Boundaries
 
 This document draws an explicit line so the project is not pulled toward the original
 agenda of *"Sparks of Weight-Space Programming"* (modifying standalone AI models).
 
-## In scope (what REA-Neural IS)
+## In scope (what Bintra IS)
 A reverse-engineering & security framework for **Windows compiled software**
 (`.exe`, `.dll`, PE32/PE32+). Where a Windows binary **embeds** neural weights
-(ONNX / TFLite / GGUF / Safetensors / DirectML / WinML), REA-Neural may:
+(ONNX / TFLite / GGUF / Safetensors / DirectML / WinML), Bintra may:
 - **Read / audit** those embedded weights WITHOUT executing the host binary
   (effective rank, backdoor/trojan spikes, induction structure, amenability verdict,
   SVD subspace inspection).
@@ -15,8 +15,8 @@ A reverse-engineering & security framework for **Windows compiled software**
 
 These are legitimate reverse-engineering operations on a shipped artifact.
 
-## Out of scope (what REA-Neural is NOT)
-REA-Neural does **not** pursue the WSP paper's own research goals of **improving,
+## Out of scope (what Bintra is NOT)
+Bintra does **not** pursue the WSP paper's own research goals of **improving,
 training, merging, or synthesizing standalone AI models**. The following modules are
 retained ONLY as archived historical/experimental lineage. They are **not** part of the
 supported reverse-engineering surface and must not be presented as product capabilities:

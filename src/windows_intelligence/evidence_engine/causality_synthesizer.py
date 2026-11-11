@@ -800,7 +800,7 @@ class CausalitySynthesizer:
     def format_markdown(cls, dossier: Dict[str, Any]) -> str:
         """Renders the Failure Evidence Dossier as an executive Markdown report."""
         lines = [
-            "# REA-Neural Failure Evidence Dossier",
+            "# Bintra Failure Evidence Dossier",
             "",
             f"**Target Binary:** `{dossier.get('binary_path')}`  ",
             f"**Diagnosis Verdict:** `{dossier.get('verdict')}`  ",

@@ -14,7 +14,7 @@ class DiagnosticEvidenceCorrelator:
     """
     Unified Failure Evidence Correlation Gateway.
     Delegates directly to CausalitySynthesizer, providing a single consolidated
-    diagnostic engine across REA-Neural.
+    diagnostic engine across Bintra.
     """
 
     @classmethod

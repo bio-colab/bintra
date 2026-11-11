@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-REA-Neural: Windows-First Binary & Program Reverse Engineering Engine.
+Bintra: Windows-First Binary & Program Reverse Engineering Engine.
 Provides Deep PE32/PE32+ Inspection & Spatial RVA Mapping, REX-Aware Continuous Deobfuscation,
 Cross-Architecture Semantic Function Matching with Transition Bigrams,
 Instruction-Boundary Proprioceptive Surgical Binary Patching with Nociceptive Guards,
@@ -1541,7 +1541,7 @@ class SurgicalBinaryPatcher:
             from security import PathIdentity, TargetMutationError, OutOfScopeError, ExecutionGuard, Capability
             if PathIdentity.is_same_file(src_abs, out_abs):
                 raise TargetMutationError(
-                    f"TARGET_WRITE_FORBIDDEN: In-place binary modification is strictly forbidden by REA Safety Policy. Destination '{out_abs}' matches source."
+                    f"TARGET_WRITE_FORBIDDEN: In-place binary modification is strictly forbidden by Bintra Safety Policy. Destination '{out_abs}' matches source."
                 )
             scope = ExecutionGuard.get_current_scope()
             if scope and scope.is_target_directory(out_abs):
@@ -1668,7 +1668,7 @@ class SurgicalBinaryPatcher:
         # Atomic write on Windows so in-place patching never corrupts the file
         out_dir = os.path.dirname(out_abs) or "."
         os.makedirs(out_dir, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(prefix=".rea_pe_", suffix=".tmp", dir=out_dir)
+        fd, tmp_path = tempfile.mkstemp(prefix=".bintra_pe_", suffix=".tmp", dir=out_dir)
         os.close(fd)
         try:
             with open(tmp_path, "wb") as f:
@@ -1914,7 +1914,7 @@ class HybridBinaryDissector:
 
 
 class SensoryCortex:
-    """Unified 10-Sense Perception & Diagnostic Engine for REA-Neural."""
+    """Unified 10-Sense Perception & Diagnostic Engine for Bintra."""
 
     SENSE_REGISTRY = [
         {"id": 1, "key": "analytical_vision", "name_ar": "البصر التحليلي", "name_en": "Analytical Vision", "importance_rank": 1, "importance_weight": 1.00},
@@ -1953,7 +1953,7 @@ class SensoryCortex:
         file_path: Optional[str] = None,
         code_hex: Optional[str] = None
     ) -> Dict[str, Any]:
-        from rea_neural_engine import (
+        from bintra_engine import (
             SafetensorsHandler, SubspaceAnalyzer, CircuitDecompiler, WeightPatcher,
             ActivationTraceProber, NeuralBehaviorVerifier, CrossLayerCircuitAnalyzer,
             AmenabilityDiagnostic, WeightSecurityAuditor
@@ -2131,7 +2131,7 @@ class SensoryCortex:
 
         scores = [s["efficiency_score"] for s in senses_output.values()]
         return {
-            "engine": "REA-Neural Sensory Cortex v7.4.0",
+            "engine": "Bintra Sensory Cortex v1.0.0",
             "platform_target": "Windows 10 / 11 / Server (PE32/PE32+ & Safetensors)",
             "active_senses_count": len(senses_output),
             "overall_sensory_efficiency": round(float(np.mean(scores)), 4),
@@ -2148,7 +2148,7 @@ class SensoryCortex:
 
 def main():
     _ensure_utf8_stdio()
-    parser = argparse.ArgumentParser(description="REA-Neural Binary Reverse Engineering Engine")
+    parser = argparse.ArgumentParser(description="Bintra Binary Reverse Engineering Engine")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     insp_p = subparsers.add_parser("inspect", help="Inspect executable PE/ELF header")

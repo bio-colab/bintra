@@ -436,7 +436,7 @@ class EtwController:
     @classmethod
     def capture_bounded_session(
         cls,
-        session_name: str = "REA_Diagnostic_Trace",
+        session_name: str = "Bintra_Diagnostic_Trace",
         duration_sec: float = 2.0,
         provider_name: str = "Microsoft-Windows-Kernel-Process",
         workspace_dir: Optional[str] = None

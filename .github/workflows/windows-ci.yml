@@ -1,4 +1,4 @@
-name: REA-Neural Cross-Platform CI
+name: Bintra Cross-Platform CI
 
 on:
   push:

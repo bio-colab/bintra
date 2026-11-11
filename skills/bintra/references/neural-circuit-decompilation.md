@@ -7,7 +7,7 @@ In classical reverse engineering, Ghidra or IDA Pro translates assembly opcodes 
 push ebp; mov ebp, esp; cmp eax, 0 -> if (x == 0) return;
 ```
 
-In `REA-Neural`, the **Circuit Decompiler** translates continuous weight matrices into symbolic mechanistic logic:
+In `Bintra`, the **Circuit Decompiler** translates continuous weight matrices into symbolic mechanistic logic:
 ```
 W_QK[Layer 14, Head 3] + W_OV[Layer 14, Head 3] -> 
 "Induction circuit: Copies token at t - k when preceded by token at t - (k + 1)"

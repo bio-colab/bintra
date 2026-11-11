@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Capability Registry.
+Bintra Capability Registry.
 Defines formal, typed capabilities required by analysis tools and providers.
 Enforces the Principle of Least Privilege and No Ambient Authority.
 """

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Audit Remediation & Regression Test Suite for REA-Neural (F1-F14).
+Audit Remediation & Regression Test Suite for Bintra (F1-F14).
 Verifies:
 - F1/F4/F9: Honest simulation flags and fail-loud memory read contracts.
-- F2: Live Ghidra Bridge P-Code RPCs (rea.deobfuscate_function, rea.match_functions).
-- F3/F8: Broken MCP tools fixed (rea_memory_scan, rea_wsp_audit, rea_patch_binary hex offset, KeyError envelopes).
+- F2: Live Ghidra Bridge P-Code RPCs (bintra.deobfuscate_function, bintra.match_functions).
+- F3/F8: Broken MCP tools fixed (bintra_memory_scan, bintra_wsp_audit, bintra_patch_binary hex offset, KeyError envelopes).
 - F5: Bridge auth token file permission hardening (0o600 on POSIX / isolated permissions).
 - F6: CausalitySynthesizer consistent binary_mapping schema across branches.
 - F7: Clean JSON error envelopes in CLI on ordinary user errors (zero raw tracebacks).
@@ -66,13 +66,13 @@ def _build_minimal_pe64() -> bytes:
 class TestAuditRemediations(unittest.TestCase):
 
     def test_f2_ghidra_bridge_pcode_rpcs_live_roundtrip(self):
-        """F2: Verifies rea.deobfuscate_function and rea.match_functions work end-to-end via live bridge RPC."""
+        """F2: Verifies bintra.deobfuscate_function and bintra.match_functions work end-to-end via live bridge RPC."""
         from ghidra_live_bridge import GhidraLiveBridgeServer
         import random
         port = random.randint(43000, 46000)
         srv = GhidraLiveBridgeServer(port=port)
         with tempfile.TemporaryDirectory() as ws_dir:
-            marker_path = os.path.join(ws_dir, ".rea_bridge.json")
+            marker_path = os.path.join(ws_dir, ".bintra_bridge.json")
             from security import ExecutionGuard
             with ExecutionGuard.scoped_session(workspace_dir=ws_dir):
                 info = srv.start(marker_path=marker_path)
@@ -103,20 +103,20 @@ class TestAuditRemediations(unittest.TestCase):
                         req = urllib.request.Request(
                             url,
                             data=req_data,
-                            headers={"Content-Type": "application/json", "X-REA-Auth-Token": token},
+                            headers={"Content-Type": "application/json", "X-Bintra-Auth-Token": token},
                             method="POST"
                         )
                         with urllib.request.urlopen(req, timeout=5.0) as resp:
                             return json.loads(resp.read().decode("utf-8"))
 
-                    # rea.deobfuscate_function
-                    res_deob = rpc("rea.deobfuscate_function", {"pcode_ops": pcode_ops})
+                    # bintra.deobfuscate_function
+                    res_deob = rpc("bintra.deobfuscate_function", {"pcode_ops": pcode_ops})
                     self.assertIn("result", res_deob, f"RPC failed: {res_deob}")
                     self.assertIn("is_obfuscated", res_deob["result"])
                     self.assertTrue(res_deob["result"]["is_obfuscated"])
 
-                    # rea.match_functions
-                    res_match = rpc("rea.match_functions", {
+                    # bintra.match_functions
+                    res_match = rpc("bintra.match_functions", {
                         "func1": {"pcode_ops": pcode_ops},
                         "func2": {"pcode_ops": pcode_ops}
                     })
@@ -126,12 +126,12 @@ class TestAuditRemediations(unittest.TestCase):
                     srv.stop()
 
     def test_f3_f8_mcp_broken_tools_and_keyerror_envelopes(self):
-        """F3/F8: Verifies all 34 MCP tools schema, hex offsets, rea_wsp_audit, rea_memory_scan, and KeyError formatting."""
-        from mcp_server import ReaMcpServer
+        """F3/F8: Verifies all 34 MCP tools schema, hex offsets, bintra_wsp_audit, bintra_memory_scan, and KeyError formatting."""
+        from mcp_server import BintraMcpServer
         import numpy as np
-        from rea_neural_engine import SafetensorsHandler
+        from bintra_engine import SafetensorsHandler
 
-        srv = ReaMcpServer()
+        srv = BintraMcpServer()
         tools = srv.handle_tools_list({})["tools"]
         self.assertEqual(len(tools), 34)
         for t in tools:
@@ -139,14 +139,14 @@ class TestAuditRemediations(unittest.TestCase):
             self.assertIn("inputSchema", t)
 
         # F8: Missing required arg returns structured schema validation message, not raw KeyError string
-        err_resp = srv.handle_tools_call({"name": "rea_inspect_binary", "arguments": {}})
+        err_resp = srv.handle_tools_call({"name": "bintra_inspect_binary", "arguments": {}})
         self.assertTrue(err_resp["isError"])
         err_json = json.loads(err_resp["content"][0]["text"])
         self.assertIn("Missing required parameter", err_json["error"])
 
         # F8b: Invalid enum value caught by inputSchema validator
         enum_err = srv.handle_tools_call({
-            "name": "rea_process_resource_audit",
+            "name": "bintra_process_resource_audit",
             "arguments": {"action": "invalid_nonexistent_action"}
         })
         self.assertTrue(enum_err["isError"])
@@ -159,11 +159,11 @@ class TestAuditRemediations(unittest.TestCase):
             with open(pe_path, "wb") as f:
                 f.write(_build_minimal_pe64())
 
-            # F3a: Default ReaMcpServer rejects untrusted client workspace_dir override;
-            # host-configured ReaMcpServer(allowed_workspace_roots=[ws_dir]) authorizes ws_dir.
-            srv_ws = ReaMcpServer(allowed_workspace_roots=[ws_dir])
+            # F3a: Default BintraMcpServer rejects untrusted client workspace_dir override;
+            # host-configured BintraMcpServer(allowed_workspace_roots=[ws_dir]) authorizes ws_dir.
+            srv_ws = BintraMcpServer(allowed_workspace_roots=[ws_dir])
             patch_resp = srv_ws.handle_tools_call({
-                "name": "rea_patch_binary",
+                "name": "bintra_patch_binary",
                 "arguments": {
                     "file_path": pe_path,
                     "output_path": out_path,
@@ -172,40 +172,40 @@ class TestAuditRemediations(unittest.TestCase):
                     "workspace_dir": ws_dir
                 }
             })
-            self.assertFalse(patch_resp["isError"], f"rea_patch_binary failed: {patch_resp}")
+            self.assertFalse(patch_resp["isError"], f"bintra_patch_binary failed: {patch_resp}")
             patch_data = json.loads(patch_resp["content"][0]["text"])
             self.assertEqual(patch_data["file_offset"], "0x200")
             self.assertTrue(patch_data["pe_checksum_recalculated"])
             self.assertTrue(patch_data["is_safe"])
 
-            # F3b: rea_dump_bytes with hex offset string "0x200"
+            # F3b: bintra_dump_bytes with hex offset string "0x200"
             dump_resp = srv.handle_tools_call({
-                "name": "rea_dump_bytes",
+                "name": "bintra_dump_bytes",
                 "arguments": {
                     "file_path": out_path,
                     "offset": "0x200",
                     "length": 4
                 }
             })
-            self.assertFalse(dump_resp["isError"], f"rea_dump_bytes failed: {dump_resp}")
+            self.assertFalse(dump_resp["isError"], f"bintra_dump_bytes failed: {dump_resp}")
 
-            # F3c: rea_wsp_audit with valid safetensors file
+            # F3c: bintra_wsp_audit with valid safetensors file
             model_path = os.path.join(ws_dir, "test_model.safetensors")
             arr = np.random.randn(8, 8).astype(np.float32)
             _save_safetensors(model_path, "layer.weight", arr)
             wsp_resp = srv.handle_tools_call({
-                "name": "rea_wsp_audit",
+                "name": "bintra_wsp_audit",
                 "arguments": {"model_path": model_path}
             })
-            self.assertFalse(wsp_resp["isError"], f"rea_wsp_audit failed: {wsp_resp}")
+            self.assertFalse(wsp_resp["isError"], f"bintra_wsp_audit failed: {wsp_resp}")
             wsp_data = json.loads(wsp_resp["content"][0]["text"])
             self.assertEqual(wsp_data["status"], "success")
             self.assertIn("effective_rank_analysis", wsp_data)
             self.assertIn("zero_eval_security_audit", wsp_data)
 
-            # F3d: rea_memory_scan does not raise TypeError(ProcessMemoryScanner() takes no arguments)
+            # F3d: bintra_memory_scan does not raise TypeError(ProcessMemoryScanner() takes no arguments)
             scan_resp = srv.handle_tools_call({
-                "name": "rea_memory_scan",
+                "name": "bintra_memory_scan",
                 "arguments": {
                     "pid": os.getpid(),
                     "value_type": "int32",
@@ -280,7 +280,7 @@ class TestAuditRemediations(unittest.TestCase):
     def test_f11_f12_epistemic_honesty_and_truncation(self):
         """F11/F12: Verifies probe-trace steps>=1 + simulation label, amenability column clamping, and deobfuscation truncation."""
         import numpy as np
-        from rea_neural_engine import ActivationTraceProber, AmenabilityDiagnostic, SafetensorsHandler
+        from bintra_engine import ActivationTraceProber, AmenabilityDiagnostic, SafetensorsHandler
         from binary_neural_engine import ContinuousDeobfuscator
 
         with tempfile.TemporaryDirectory() as ws_dir:
@@ -303,7 +303,7 @@ class TestAuditRemediations(unittest.TestCase):
             self.assertIn("estimated_loop_rate", amen)
 
             # F11c: CircuitDecompiler discloses single-metric spectral heuristic confidence
-            from rea_neural_engine import CircuitDecompiler, SubspaceAnalyzer
+            from bintra_engine import CircuitDecompiler, SubspaceAnalyzer
             svd_m = SubspaceAnalyzer.analyze_svd(arr, top_k=4)
             dec = CircuitDecompiler.decompile_attention_head(svd_m, layer_idx=0, head_idx=0)
             self.assertEqual(dec["classification_confidence"], "HEURISTIC_SPECTRAL_RATIO")
@@ -319,14 +319,14 @@ class TestAuditRemediations(unittest.TestCase):
             self.assertEqual(deob["total_file_size"], 512)
 
     def test_second_audit_security_and_math_remediations(self):
-        """Second Audit S-1/S-2 & F-1..F-5: Workspace override block, rea_patch_weights, fail-closed imports, small-layer backdoors."""
+        """Second Audit S-1/S-2 & F-1..F-5: Workspace override block, bintra_patch_weights, fail-closed imports, small-layer backdoors."""
         import builtins
         import unittest.mock as mock
         import numpy as np
-        from mcp_server import ReaMcpServer
+        from mcp_server import BintraMcpServer
         from security import ExecutionGuard, TargetScope, AuditLogger, SafeFileAccess, TargetMutationError
         from binary_neural_engine import SurgicalBinaryPatcher
-        from rea_neural_engine import SafetensorsHandler, WeightSecurityAuditor
+        from bintra_engine import SafetensorsHandler, WeightSecurityAuditor
 
         # S-1 / F-1a: TargetScope rejects filesystem root & user home root
         root_dir = os.path.abspath(os.sep)
@@ -335,8 +335,8 @@ class TestAuditRemediations(unittest.TestCase):
         with self.assertRaises(PermissionError):
             TargetScope(workspace_dir=os.path.expanduser("~"))
 
-        # S-1 / F-1b: Default ReaMcpServer rejects untrusted client workspace_dir overrides fail-closed
-        default_srv = ReaMcpServer()
+        # S-1 / F-1b: Default BintraMcpServer rejects untrusted client workspace_dir overrides fail-closed
+        default_srv = BintraMcpServer()
         with tempfile.TemporaryDirectory() as tgt_dir, tempfile.TemporaryDirectory() as ws_dir:
             pe_path = os.path.join(tgt_dir, "victim.exe")
             with open(pe_path, "wb") as f:
@@ -344,7 +344,7 @@ class TestAuditRemediations(unittest.TestCase):
             evil_out = os.path.join(ws_dir, "pwn.exe")
             for evil_ws in (root_dir, ws_dir):
                 resp = default_srv.handle_tools_call({
-                    "name": "rea_patch_binary",
+                    "name": "bintra_patch_binary",
                     "arguments": {
                         "file_path": pe_path,
                         "output_path": evil_out,
@@ -362,14 +362,14 @@ class TestAuditRemediations(unittest.TestCase):
                 with self.assertRaises(TargetMutationError):
                     SafeFileAccess.write_workspace_file(pe_path, b"overwrite")
 
-        # F-2: rea_patch_weights works end-to-end inside authorized workspace
+        # F-2: bintra_patch_weights works end-to-end inside authorized workspace
         with tempfile.TemporaryDirectory() as src_dir, tempfile.TemporaryDirectory() as ws_dir:
             src_st = os.path.join(src_dir, "model.safetensors")
             out_st = os.path.join(ws_dir, "patched_model.safetensors")
             _save_safetensors(src_st, "attn.o_proj.weight", np.ones((16, 16), dtype=np.float32))
-            auth_srv = ReaMcpServer(allowed_workspace_roots=[ws_dir])
+            auth_srv = BintraMcpServer(allowed_workspace_roots=[ws_dir])
             pw_resp = auth_srv.handle_tools_call({
-                "name": "rea_patch_weights",
+                "name": "bintra_patch_weights",
                 "arguments": {
                     "source_path": src_st,
                     "output_path": out_st,
@@ -378,7 +378,7 @@ class TestAuditRemediations(unittest.TestCase):
                     "workspace_dir": ws_dir,
                 },
             })
-            self.assertFalse(pw_resp["isError"], f"rea_patch_weights failed: {pw_resp}")
+            self.assertFalse(pw_resp["isError"], f"bintra_patch_weights failed: {pw_resp}")
             pw_data = json.loads(pw_resp["content"][0]["text"])
             self.assertEqual(pw_data["status"], "success")
             self.assertTrue(os.path.isfile(out_st))
@@ -544,10 +544,10 @@ class TestAuditRemediations(unittest.TestCase):
 
         # F-17: resolve_bridge_marker ignores untrusted CWD marker outside workspace
         with tempfile.TemporaryDirectory() as rogue_cwd, tempfile.TemporaryDirectory() as real_ws:
-            cwd_marker = os.path.join(rogue_cwd, ".rea_bridge.json")
+            cwd_marker = os.path.join(rogue_cwd, ".bintra_bridge.json")
             with open(cwd_marker, "w", encoding="utf-8") as f:
                 json.dump({"port": 59999, "auth_token": "rogue"}, f)
-            tmp_marker = os.path.join(tempfile.gettempdir(), ".rea_bridge.json")
+            tmp_marker = os.path.join(tempfile.gettempdir(), ".bintra_bridge.json")
             if not os.path.exists(tmp_marker):
                 with ExecutionGuard.scoped_session(workspace_dir=real_ws):
                     with mock.patch("os.getcwd", return_value=rogue_cwd):
@@ -560,7 +560,7 @@ class TestAuditRemediations(unittest.TestCase):
             capture_output=True, text=True
         )
         self.assertEqual(ver_proc.returncode, 0)
-        self.assertIn("7.4.0", ver_proc.stdout)
+        self.assertIn("1.0.0", ver_proc.stdout)
 
         # ghidra-analyze --output outside workspace is rejected fail-closed
         with tempfile.TemporaryDirectory() as in_dir, tempfile.TemporaryDirectory() as ws_dir, tempfile.TemporaryDirectory() as foreign_dir:
@@ -612,13 +612,13 @@ class TestAuditRemediations(unittest.TestCase):
             self.assertFalse(os.path.exists(foreign_sess))
 
     def test_mcp_all_34_tools_schema_strict_validation_and_memscan_parity(self):
-        """Validates strict schema enforcement across all 34 MCP tools and rea_memory_scan parity."""
+        """Validates strict schema enforcement across all 34 MCP tools and bintra_memory_scan parity."""
         import inspect
         import numpy as np
         import mcp_server as mcp_mod
 
         self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 34)
-        dispatch_src = inspect.getsource(mcp_mod.ReaMcpServer.dispatch_tool)
+        dispatch_src = inspect.getsource(mcp_mod.BintraMcpServer.dispatch_tool)
 
         with tempfile.TemporaryDirectory() as td:
             ws_dir = os.path.join(td, "ws")
@@ -637,7 +637,7 @@ class TestAuditRemediations(unittest.TestCase):
             with open(dummy_dmp, "wb") as f:
                 f.write(b"MDMP" + b"\x00" * 64)
 
-            server = mcp_mod.ReaMcpServer(workspace_root=ws_dir)
+            server = mcp_mod.BintraMcpServer(workspace_root=ws_dir)
 
             def _base_args_for(tool_name, schema):
                 props = schema.get("properties", {})
@@ -651,7 +651,7 @@ class TestAuditRemediations(unittest.TestCase):
                     elif req == "dmp_path":
                         args[req] = dummy_dmp
                     elif req == "output_path":
-                        ext = "safetensors" if tool_name == "rea_patch_weights" else "exe"
+                        ext = "safetensors" if tool_name == "bintra_patch_weights" else "exe"
                         args[req] = os.path.join(ws_dir, f"out_{tool_name}.{ext}")
                     elif req == "offset":
                         args[req] = "0x10"
@@ -682,11 +682,11 @@ class TestAuditRemediations(unittest.TestCase):
                     else:
                         args[req] = "val"
                 # Populate target path needed by ExecutionGuard before _validate_tool_arguments
-                if tool_name == "rea_patch_binary":
+                if tool_name == "bintra_patch_binary":
                     args.setdefault("file_path", dummy_pe)
-                elif tool_name == "rea_patch_weights":
+                elif tool_name == "bintra_patch_weights":
                     args.setdefault("source_path", dummy_st)
-                elif tool_name == "rea_win_catalog_cmd":
+                elif tool_name == "bintra_win_catalog_cmd":
                     args["command_id"] = "os_ver"
                 return args
 
@@ -729,13 +729,13 @@ class TestAuditRemediations(unittest.TestCase):
                         f"{tname}.{prop_name} unexpected error: {err_bad}"
                     )
 
-            # 3. Verify rea_memory_scan schema-dispatch parity and optional parameter acceptance
-            mem_schema = next(t["inputSchema"] for t in mcp_mod.TOOLS_REGISTRY if t["name"] == "rea_memory_scan")
+            # 3. Verify bintra_memory_scan schema-dispatch parity and optional parameter acceptance
+            mem_schema = next(t["inputSchema"] for t in mcp_mod.TOOLS_REGISTRY if t["name"] == "bintra_memory_scan")
             for prop in mem_schema["properties"]:
-                self.assertIn(prop, dispatch_src, f"rea_memory_scan property '{prop}' missing from dispatch_tool")
+                self.assertIn(prop, dispatch_src, f"bintra_memory_scan property '{prop}' missing from dispatch_tool")
 
             # Valid optional params pass _validate_tool_arguments without error
-            server._validate_tool_arguments("rea_memory_scan", {
+            server._validate_tool_arguments("bintra_memory_scan", {
                 "pid": os.getpid(),
                 "session_id": "scan_alpha",
                 "value_type": "int32",
@@ -748,7 +748,7 @@ class TestAuditRemediations(unittest.TestCase):
             })
 
             res_bad_items = server.handle_tools_call({
-                "name": "rea_memory_scan",
+                "name": "bintra_memory_scan",
                 "arguments": {"pid": os.getpid(), "candidate_addresses": ["bad_addr"]}
             })
             self.assertTrue(res_bad_items["isError"])
@@ -756,7 +756,7 @@ class TestAuditRemediations(unittest.TestCase):
 
             for bad_field, bad_val in [("value_type", "int128"), ("scan_mode", "fuzzy")]:
                 res_mem_bad = server.handle_tools_call({
-                    "name": "rea_memory_scan",
+                    "name": "bintra_memory_scan",
                     "arguments": {"pid": os.getpid(), bad_field: bad_val}
                 })
                 self.assertTrue(res_mem_bad["isError"])
@@ -769,12 +769,12 @@ class TestAuditRemediations(unittest.TestCase):
             home_dir = os.path.join(td, "blocked_home")
             ws_dir = os.path.join(td, "ws")
             target_dir = os.path.join(td, "targets")
-            os.makedirs(os.path.join(home_dir, ".rea_neural"), exist_ok=True)
+            os.makedirs(os.path.join(home_dir, ".bintra"), exist_ok=True)
             os.makedirs(ws_dir, exist_ok=True)
             os.makedirs(target_dir, exist_ok=True)
 
-            # Regular file at ~/.rea_neural/logs blocks directory/log creation portably on Windows & POSIX
-            with open(os.path.join(home_dir, ".rea_neural", "logs"), "w", encoding="utf-8") as f:
+            # Regular file at ~/.bintra/logs blocks directory/log creation portably on Windows & POSIX
+            with open(os.path.join(home_dir, ".bintra", "logs"), "w", encoding="utf-8") as f:
                 f.write("unwritable_log_blocker")
 
             dummy_pe = os.path.join(target_dir, "sample.exe")
@@ -832,7 +832,7 @@ class TestAuditRemediations(unittest.TestCase):
             "docs/RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md",
             "docs/ROADMAP.md",
             "docs/architecture.md",
-            "docs/releases/v7.4.0.md",
+            "docs/releases/v1.0.0.md",
             "pyproject.toml",
         ]
         skills_dir = os.path.join(repo_root, "skills")
@@ -869,6 +869,11 @@ class TestAuditRemediations(unittest.TestCase):
             "classicalrea",
             "الشوكة الدلالية",
             "في الشوكة",
+            "rea-neural",
+            "reverse-engineer-anything",
+            "reamcpserver",
+            "rea_inspect_binary",
+            "7.4.0",
         ]
         for rel, body in texts.items():
             lower_body = body.lower()
@@ -883,7 +888,7 @@ class TestAuditRemediations(unittest.TestCase):
         for rel in (
             "AGENTS.md",
             "README.md",
-            "skills/reverse-engineer-anything/SKILL.md",
+            "skills/bintra/SKILL.md",
             "docs/RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md",
         ):
             self.assertIn("34", texts[rel], f"Expected '34' tool count in {rel}")
@@ -895,7 +900,7 @@ class TestAuditRemediations(unittest.TestCase):
             "README.md",
             "docs/RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md",
             "docs/ROADMAP.md",
-            "docs/releases/v7.4.0.md",
+            "docs/releases/v1.0.0.md",
             ".github/PULL_REQUEST_TEMPLATE.md",
         ):
             self.assertIn("195", texts[rel], f"Expected '195' test count in {rel}")

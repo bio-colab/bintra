@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-End-to-End Pipeline Integration Test for REA-Neural Runtime Telemetry & Crash Intelligence.
+End-to-End Pipeline Integration Test for Bintra Runtime Telemetry & Crash Intelligence.
 Validates the complete 4-stage pipeline execution:
 Stage 1: Virtual Memory VAD Mapping & Spatial Bounds Classification
 Stage 2: Deterministic Crash Root Cause Analysis (MiniDump + Disassembly + Registers)
@@ -219,17 +219,17 @@ class TestRuntimeTelemetryPipeline(unittest.TestCase):
 
             # Verify actions received in exact order
             self.assertEqual(cmds[0]["action"], "SET_PROGRAM_NOTE")
-            self.assertIn("REA_VAD_SPATIAL_LAYOUT", cmds[0]["details"]["title"])
+            self.assertIn("BINTRA_VAD_SPATIAL_LAYOUT", cmds[0]["details"]["title"])
 
             self.assertEqual(cmds[1]["action"], "SET_PLATE_COMMENT")
             self.assertEqual(cmds[1]["details"]["address"], "0x1020")
             self.assertIn("NULL_POINTER_DEREFERENCE", cmds[1]["details"]["comment"])
 
             self.assertEqual(cmds[2]["action"], "CREATE_BOOKMARK")
-            self.assertEqual(cmds[2]["details"]["category"], "REA_CRASH_FAULT")
+            self.assertEqual(cmds[2]["details"]["category"], "BINTRA_CRASH_FAULT")
 
             self.assertEqual(cmds[3]["action"], "SET_PROGRAM_NOTE")
-            self.assertIn("REA_ETW_PRE_CRASH_TIMELINE", cmds[3]["details"]["title"])
+            self.assertIn("BINTRA_ETW_PRE_CRASH_TIMELINE", cmds[3]["details"]["title"])
 
             # 6. Verify server queue is completely drained
             empty_poll = client.call_rpc("ghidra.poll_commands")

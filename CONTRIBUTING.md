@@ -1,7 +1,7 @@
-# Contributing to REA-Neural
+# Contributing to Bintra
 
-Thank you for your interest in contributing to **REA-Neural**!  
-REA-Neural is an open-source, agent-native framework that unites continuous weight-space semantics, symbolic decompilation, deterministic deobfuscation, and Windows system forensics.
+Thank you for your interest in contributing to **Bintra**!  
+Bintra is an open-source, agent-native framework that unites continuous weight-space semantics, symbolic decompilation, deterministic deobfuscation, and Windows system forensics.
 
 We welcome contributions from researchers, reverse engineers, security professionals, and systems programmers of all experience levels.
 
@@ -35,7 +35,7 @@ All contributors and maintainers are expected to adhere to our [Code of Conduct]
 ## How Can I Contribute?
 
 ### Reporting Bugs & Telemetry Edge-Cases
-- Before filing an issue, search the [existing issue tracker](https://github.com/bio-colab/rea-neural/issues) to ensure it hasn't been reported or resolved.
+- Before filing an issue, search the [existing issue tracker](https://github.com/bio-colab/bintra/issues) to ensure it hasn't been reported or resolved.
 - Use the **[Bug Report Template](.github/ISSUE_TEMPLATE/bug_report.md)**.
 - Include:
   - Windows version (`winver` or build number).
@@ -60,12 +60,12 @@ Areas where contributions are especially valuable:
 
 ## Development Environment Setup
 
-REA-Neural is designed natively for Windows 10, 11, and Windows Server (with graceful cross-platform fallback for testing on Linux/macOS).
+Bintra is designed natively for Windows 10, 11, and Windows Server (with graceful cross-platform fallback for testing on Linux/macOS).
 
 ### 1. Fork & Clone
 ```powershell
-git clone https://github.com/<your-username>/rea-neural.git
-cd rea-neural
+git clone https://github.com/<your-username>/bintra.git
+cd bintra
 ```
 
 ### 2. Set Up Virtual Environment (Python 3.10, 3.11, or 3.12)
@@ -90,7 +90,7 @@ pip install pytest pytest-cov
 
 ## Core Architectural Invariants
 
-Every contribution must preserve REA-Neural's foundational safety and reliability invariants:
+Every contribution must preserve Bintra's foundational safety and reliability invariants:
 
 ### 1. Fail-Closed Security & Target Immutability
 - All file mutations are governed by `ExecutionGuard`.
@@ -109,7 +109,7 @@ Every contribution must preserve REA-Neural's foundational safety and reliabilit
 
 ## Testing Guidelines
 
-REA-Neural enforces a **100% pass requirement** on all test suites before any pull request is merged.
+Bintra enforces a **100% pass requirement** on all test suites before any pull request is merged.
 
 ### Run Full Test Suite
 ```powershell

@@ -1,4 +1,4 @@
-# REA-Neural Safety Policy & Non-Destructive Execution Contract
+# Bintra Safety Policy & Non-Destructive Execution Contract
 
 **Version:** 1.0.0  
 **Status:** Active & Mandatory  
@@ -9,9 +9,9 @@
 ## 1. Foundational Axiom
 
 > **التحليل لا يمنح سلطة الإصلاح (Analysis Does Not Grant Repair Authority)**  
-> Discovering a defect, an invalid pointer, a missing dependency, a corrupt driver, or an active file lock grants `REA-Neural` the authority to isolate, analyze, and formulate evidence hypotheses—**never the ambient authority to mutate the host system or modify target binaries**.
+> Discovering a defect, an invalid pointer, a missing dependency, a corrupt driver, or an active file lock grants `Bintra` the authority to isolate, analyze, and formulate evidence hypotheses—**never the ambient authority to mutate the host system or modify target binaries**.
 
-`REA-Neural` is an intelligence and forensic reverse-engineering engine, not a system cleanup or maintenance utility. All operations executed against host system targets must be strictly non-destructive and read-only.
+`Bintra` is an intelligence and forensic reverse-engineering engine, not a system cleanup or maintenance utility. All operations executed against host system targets must be strictly non-destructive and read-only.
 
 ---
 
@@ -20,11 +20,11 @@
 1. **No Ambient Authority:** No module, tool, or agent inherits unverified privileges. Every operation must present a declared, typed capability.
 2. **Default Deny:** Any operation, path, registry key, process handle, or command flag not explicitly recognized and whitelisted is rejected.
 3. **Target Read-Only Scope:** The target binary, its directory, system binaries, running processes, PnP devices, and SCM services are strictly immutable.
-4. **Workspace-Only Controlled Writes:** Writes are strictly quarantined to designated REA workspace paths (reports, temporary session scratchpads). Analysis outputs must never be written into the target executable's directory.
+4. **Workspace-Only Controlled Writes:** Writes are strictly quarantined to designated Bintra workspace paths (reports, temporary session scratchpads). Analysis outputs must never be written into the target executable's directory.
 5. **Complete Mediation & Audit:** Every OS interaction is inspected, evaluated, and recorded by the central Safety Kernel (`ExecutionGuard`). Both permitted and denied operations produce hash-chained, tamper-evident audit logs.
    - **Strict Mutation Fail-Closed:** Mutating CLI paths (`patch-binary`, `patch-weights`, confirmed `update --yes`) refuse execution (`AUDIT_INIT_FAILED`) if the persistent audit log cannot be initialized, verified, or written.
    - **Explicit Degradation Telemetry:** Read-only diagnostic runs surface audit persistence failures via `"audit_degraded": true` and `stderr` warnings rather than failing silently.
-   - **Scoped Operational Exceptions:** Explicitly documented exceptions outside the catalog/workspace envelope are self-update (`update --yes`), `ghidra-bridge --daemon` launch + `Capability.TEMPDIR_MARKER_WRITE` marker (opt-out via `--no-temp-marker`), `ghidra-headless`, `~/.rea_neural/logs/audit.jsonl`, and non-writing Restart Manager handle probes; none weaken target binary immutability (see `SECURITY.md`).
+   - **Scoped Operational Exceptions:** Explicitly documented exceptions outside the catalog/workspace envelope are self-update (`update --yes`), `ghidra-bridge --daemon` launch + `Capability.TEMPDIR_MARKER_WRITE` marker (opt-out via `--no-temp-marker`), `ghidra-headless`, `~/.bintra/logs/audit.jsonl`, and non-writing Restart Manager handle probes; none weaken target binary immutability (see `SECURITY.md`).
 
 ---
 

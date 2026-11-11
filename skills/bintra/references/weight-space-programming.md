@@ -5,13 +5,13 @@ Based on MIT CSAIL research (*"Sparks of Weight-Space Programming: LLMs can nati
 
 ---
 
-## Important Scope & Architectural Positioning in REA-Neural
+## Important Scope & Architectural Positioning in Bintra
 
-> **REA-Neural is an autonomous continuous semantic reverse engineering framework designed for Windows compiled software (`.exe`, `.dll`, PE32/PE32+) and modern hybrid binaries embedding AI runtimes (DirectML, WinML, ONNX, Safetensors).**
+> **Bintra is an autonomous continuous semantic reverse engineering framework designed for Windows compiled software (`.exe`, `.dll`, PE32/PE32+) and modern hybrid binaries embedding AI runtimes (DirectML, WinML, ONNX, Safetensors).**
 >
-> While the original MIT CSAIL paper explores LLMs directly reading and writing parameters of small toy models, **REA-Neural adapts these mathematical and algorithmic breakthroughs to solve real binary analysis, deobfuscation, and security auditing problems in native Windows software**:
+> While the original MIT CSAIL paper explores LLMs directly reading and writing parameters of small toy models, **Bintra adapts these mathematical and algorithmic breakthroughs to solve real binary analysis, deobfuscation, and security auditing problems in native Windows software**:
 >
-> 1. **Inspecting Embedded Neural Runtimes:** Modern Windows executables (multimedia suites, simulation engines, endpoint agents) embed neural weights in `.rsrc` or `.rodata` sections. REA-Neural inspects, extracts, and analyzes these models without running unsafe host binaries.
+> 1. **Inspecting Embedded Neural Runtimes:** Modern Windows executables (multimedia suites, simulation engines, endpoint agents) embed neural weights in `.rsrc` or `.rodata` sections. Bintra inspects, extracts, and analyzes these models without running unsafe host binaries.
 > 2. **Auditing Without Evaluation (Security & Backdoors):** Detecting hidden Trojan triggers, abnormal rank-1 spikes, and unauthorized decision paths in embedded models prior to execution.
 > 3. **Zero-Gradient Surgical Intervention:** Performing precision modifications on linear projection tables, heuristic matrices, and embedded weights (e.g. `column_direction_subtract` editing 0.016% of weights) without requiring full retraining datasets or compilation toolchains.
 > 4. **Cross-Architecture & Continuous Semantic Representation:** Transferring the continuous representation concepts (SVD decomposition, effective rank, behavioral trajectory modeling) to native machine code instructions (x86-64 / ARM64).

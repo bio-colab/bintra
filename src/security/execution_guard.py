@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Execution Guard.
+Bintra Execution Guard.
 The Central Reference Monitor.
 All interactions with Windows files, registries, processes, and subprocesses
 must pass through this gateway to ensure Complete Mediation.
@@ -18,7 +18,7 @@ from .audit_logger import AuditLogger
 
 
 class SecurityViolationError(PermissionError):
-    """Raised when an operation is rejected by the REA-Neural Safety Kernel."""
+    """Raised when an operation is rejected by the Bintra Safety Kernel."""
     def __init__(self, message: str, decision: Optional[AccessDecision] = None):
         super().__init__(message)
         self.decision = decision

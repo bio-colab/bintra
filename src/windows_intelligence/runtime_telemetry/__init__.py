@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Windows Runtime Telemetry & Crash Intelligence Subsystem.
+Bintra Windows Runtime Telemetry & Crash Intelligence Subsystem.
 Provides deep multi-stream MiniDump parsing, multi-event Application/System Log collection,
 Event Tracing for Windows (ETW) provider inspection, and passive Virtual Memory (VAD) layout inspection.
 """

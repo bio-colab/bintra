@@ -79,7 +79,7 @@ class TestCrashRootCauseAnalyzer(unittest.TestCase):
 
         # Check Markdown formatting
         md_text = CrashRootCauseAnalyzer.format_markdown(report)
-        self.assertIn("# REA-Neural Automated Crash Root-Cause Analysis (RCA)", md_text)
+        self.assertIn("# Bintra Automated Crash Root-Cause Analysis (RCA)", md_text)
         self.assertIn("STATUS_ACCESS_VIOLATION", md_text)
 
     def test_poisoned_heap_use_after_free_attribution(self):
@@ -158,15 +158,15 @@ class TestCrashRootCauseAnalyzer(unittest.TestCase):
         self.assertEqual(blame["operand_expression"], "[rcx+0x28]")
 
     def test_mcp_crash_rca_dispatch(self):
-        """Verifies that native MCP server exposes rea_crash_rca and dispatches cleanly."""
-        from mcp_server import ReaMcpServer
-        server = ReaMcpServer()
+        """Verifies that native MCP server exposes bintra_crash_rca and dispatches cleanly."""
+        from mcp_server import BintraMcpServer
+        server = BintraMcpServer()
 
         tool_names = [t["name"] for t in server.handle_tools_list({})["tools"]]
-        self.assertIn("rea_crash_rca", tool_names)
+        self.assertIn("bintra_crash_rca", tool_names)
 
         # Test tool metadata
-        cap, mode, target = server.TOOL_SECURITY_METADATA["rea_crash_rca"]
+        cap, mode, target = server.TOOL_SECURITY_METADATA["bintra_crash_rca"]
         self.assertEqual(cap, "cap.minidump.read")
         self.assertEqual(mode, "READ")
         self.assertEqual(target, "dmp_path")

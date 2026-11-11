@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Safe Command Engine.
+Bintra Safe Command Engine.
 Enforces an immutable Command Catalog, parameter whitelisting, timeout sandboxing,
 and typed JSON schema parsing without dynamic shell execution (shell=False).
 """

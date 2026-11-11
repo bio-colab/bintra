@@ -1,6 +1,6 @@
-# REA-Neural Ghidra Bridge (Python / PyGhidra variant)
-# @category REA-Neural
-# @menupath Tools.REA-Neural.Run Python Semantic Deobfuscation Bridge
+# Bintra Ghidra Bridge (Python / PyGhidra variant)
+# @category Bintra
+# @menupath Tools.Bintra.Run Python Semantic Deobfuscation Bridge
 
 import os
 import sys
@@ -52,24 +52,24 @@ def serialize_varnode(vn, current_prog):
 
 def run():
     print("=================================================================")
-    print(" [REA-Neural] Initiating Python Ghidra Bridge (v7.4.0)")
+    print(" [Bintra] Initiating Python Ghidra Bridge (v1.0.0)")
     print("=================================================================")
 
     if currentProgram is None:
-        print("[REA-Neural] Error: No program loaded in Ghidra.")
+        print("[Bintra] Error: No program loaded in Ghidra.")
         return
 
-    rea_root = os.environ.get("REA_NEURAL_ROOT")
-    if not rea_root:
+    bintra_root = os.environ.get("BINTRA_ROOT")
+    if not bintra_root:
         script_dir = os.path.dirname(os.path.abspath(__file__)) if "__file__" in locals() else "."
         candidate = os.path.dirname(script_dir)
         if os.path.exists(os.path.join(candidate, "src", "cli.py")):
-            rea_root = candidate
+            bintra_root = candidate
         else:
-            rea_root = "."
-    cli_py = os.path.join(rea_root, "src", "cli.py")
+            bintra_root = "."
+    cli_py = os.path.join(bintra_root, "src", "cli.py")
     if not os.path.exists(cli_py):
-        print("[REA-Neural] Error: Could not locate REA CLI at: " + cli_py)
+        print("[Bintra] Error: Could not locate Bintra CLI at: " + cli_py)
         return
 
     # Decompile and extract High P-Code
@@ -80,7 +80,7 @@ def run():
     funcs_data = []
     fm = currentProgram.getFunctionManager()
     total_funcs = fm.getFunctionCount()
-    print("[REA-Neural] Scanning %d functions for High P-Code..." % total_funcs)
+    print("[Bintra] Scanning %d functions for High P-Code..." % total_funcs)
 
     for func in fm.getFunctions(True):
         if monitor.isCancelled():
@@ -129,24 +129,24 @@ def run():
     }
 
     # Write export JSON
-    fd_exp, export_path = tempfile.mkstemp(prefix="rea_exp_", suffix=".json")
+    fd_exp, export_path = tempfile.mkstemp(prefix="bintra_exp_", suffix=".json")
     os.close(fd_exp)
-    fd_plan, plan_path = tempfile.mkstemp(prefix="rea_plan_", suffix=".json")
+    fd_plan, plan_path = tempfile.mkstemp(prefix="bintra_plan_", suffix=".json")
     os.close(fd_plan)
 
     with open(export_path, "w") as f:
         json.dump(payload, f, indent=2)
 
-    # Invoke REA
+    # Invoke Bintra
     python_exe = os.environ.get("PYTHON_EXE", "python")
     cmd = [python_exe, cli_py, "ghidra-analyze", "--input", export_path, "--output", plan_path]
-    print("[REA-Neural] Running: " + " ".join(cmd))
+    print("[Bintra] Running: " + " ".join(cmd))
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = proc.communicate()
     print(stdout)
 
     if proc.returncode != 0 or not os.path.exists(plan_path):
-        print("[REA-Neural] Analysis failed: " + stderr)
+        print("[Bintra] Analysis failed: " + stderr)
         return
 
     with open(plan_path, "r") as f:
@@ -154,31 +154,31 @@ def run():
 
     renames = plan.get("rename_actions", [])
     comments = plan.get("comment_actions", [])
-    print("[REA-Neural] Analysis found %d renames and %d comments." % (len(renames), len(comments)))
+    print("[Bintra] Analysis found %d renames and %d comments." % (len(renames), len(comments)))
 
     # Security confirmation: In Ghidra Jython, askYesNo is injected into script globals(), not __builtins__.
-    # Default to False (fail-closed) unless the user explicitly confirms or REA_GHIDRA_AUTO_APPLY is set.
+    # Default to False (fail-closed) unless the user explicitly confirms or BINTRA_GHIDRA_AUTO_APPLY is set.
     should_apply = False
     msg = "Apply %d renames and %d comments to Ghidra Database?" % (len(renames), len(comments))
     try:
         ask_func = globals().get("askYesNo")
         if ask_func is not None and callable(ask_func):
-            should_apply = ask_func("REA-Neural Mutations", msg)
+            should_apply = ask_func("Bintra Mutations", msg)
         elif "askYesNo" in dir(__builtins__):
-            should_apply = askYesNo("REA-Neural Mutations", msg)
-        elif os.environ.get("REA_GHIDRA_AUTO_APPLY", "").lower() in ("1", "true", "yes"):
+            should_apply = askYesNo("Bintra Mutations", msg)
+        elif os.environ.get("BINTRA_GHIDRA_AUTO_APPLY", "").lower() in ("1", "true", "yes"):
             # Authorized automated headless workflow
             should_apply = True
         else:
-            print("[REA-Neural] Interactive prompt 'askYesNo' unavailable in headless context; mutations not applied (set REA_GHIDRA_AUTO_APPLY=1 to permit).")
+            print("[Bintra] Interactive prompt 'askYesNo' unavailable in headless context; mutations not applied (set BINTRA_GHIDRA_AUTO_APPLY=1 to permit).")
     except Exception as e:
-        print("[REA-Neural] Confirmation check error: %s; fail-closed." % e)
+        print("[Bintra] Confirmation check error: %s; fail-closed." % e)
         should_apply = False
 
     if should_apply:
         from ghidra.program.model.symbol import SourceType
         from ghidra.program.model.listing import CodeUnit
-        tx = currentProgram.startTransaction("REA-Neural Semantic Mutations")
+        tx = currentProgram.startTransaction("Bintra Semantic Mutations")
         try:
             for r in renames:
                 addr = currentProgram.getAddressFactory().getAddress(r["address"])
@@ -188,7 +188,7 @@ def run():
             for c in comments:
                 addr = currentProgram.getAddressFactory().getAddress(c["address"])
                 currentProgram.getListing().setComment(addr, CodeUnit.PLATE_COMMENT, c["comment"])
-            print("[REA-Neural] Successfully applied mutations to Ghidra Program Database.")
+            print("[Bintra] Successfully applied mutations to Ghidra Program Database.")
         finally:
             currentProgram.endTransaction(tx, True)
 

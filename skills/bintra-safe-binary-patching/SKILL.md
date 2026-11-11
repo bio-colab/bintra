@@ -1,13 +1,13 @@
 ---
-name: rea-safe-binary-patching
+name: bintra-safe-binary-patching
 description: Surgically patch compiled Windows executables (.exe, .dll) and machine code with stack frame balance proprioception (RSP/RBP guard), automated PE checksum recalculation, and strict workspace isolation. Use when modifying binary instructions, NOPing out calls, bypassing checks, or applying hotfixes without corrupting the target or violating Windows security policies.
 metadata:
-  framework: rea-neural
-  version: "7.4.0"
+  framework: bintra
+  version: "1.0.0"
   tier: binary-mutation
 ---
 
-# REA-Neural: Safe Surgical Binary Patching Skill
+# Bintra: Safe Surgical Binary Patching Skill
 
 Use this skill whenever an AI coding agent or user needs to modify bytes, NOP out instructions, bypass conditional jumps, or inject hotfixes into a Windows executable (`.exe`, `.dll`) on disk.
 
@@ -15,7 +15,7 @@ Use this skill whenever an AI coding agent or user needs to modify bytes, NOP ou
 
 ## 1. Absolute Guardrails for AI Agents (MUST FOLLOW)
 
-The REA-Neural **Safety Kernel & Execution Guard** strictly enforces complete mediation and fail-closed security. Any violation will instantly abort the operation:
+The Bintra **Safety Kernel & Execution Guard** strictly enforces complete mediation and fail-closed security. Any violation will instantly abort the operation:
 
 > [!CAUTION]
 > **RULE 1: TARGET IMMUTABILITY (NO IN-PLACE PATCHING)**  
@@ -27,7 +27,7 @@ The REA-Neural **Safety Kernel & Execution Guard** strictly enforces complete me
 
 > [!IMPORTANT]
 > **RULE 3: NOCICEPTIVE STACK BALANCE REFLEX**  
-> REA-Neural tracks stack frame alignment ($\Delta RSP / RBP$). If your patch injects stack-altering instructions (like `sub rsp, 0x28` or unaligned `push`/`pop`) over neutral code, the engine's **Nociceptive Reflex** will block execution with `RuntimeError: Stack frame balance violated` to protect the host OS from silent corruption.
+> Bintra tracks stack frame alignment ($\Delta RSP / RBP$). If your patch injects stack-altering instructions (like `sub rsp, 0x28` or unaligned `push`/`pop`) over neutral code, the engine's **Nociceptive Reflex** will block execution with `RuntimeError: Stack frame balance violated` to protect the host OS from silent corruption.
 
 ---
 
@@ -39,7 +39,7 @@ flowchart TD
     Step1 --> Step2[2. Verify Target Section is Executable e.g. .text]
     Step2 --> Step3[3. Compute Clean Patch Hex e.g. 90 90 for NOP]
     Step3 --> Step4[4. Create Dedicated Workspace Directory]
-    Step4 --> Step5[5. Invoke SurgicalBinaryPatcher / rea_patch_binary]
+    Step4 --> Step5[5. Invoke SurgicalBinaryPatcher / bintra_patch_binary]
     Step5 --> Step6{Nociceptive Reflex Verdict?}
     Step6 -->|Stack Frame Safe| Success[6. Automatic PE Checksum Recalculated & Written]
     Step6 -->|Stack Imbalance Detected| Rollback[Blocked by Guard! Inspect delta_rsp or assert force]
@@ -51,11 +51,11 @@ flowchart TD
 
 ### Modality A: Agent MCP Tool
 
-Use the `rea_patch_binary` tool:
+Use the `bintra_patch_binary` tool:
 
 ```json
 {
-  "name": "rea_patch_binary",
+  "name": "bintra_patch_binary",
   "arguments": {
     "file_path": "C:\\path\\to\\original\\target.exe",
     "output_path": "C:\\path\\to\\workspace\\target_patched.exe",
@@ -73,21 +73,21 @@ Use the `rea_patch_binary` tool:
 - `patch_hex` (string, required): Hex string of bytes to write (e.g. `"90 90"` for two NOP instructions, `"EB 05"` for short relative JMP).
 - `force` (boolean, optional): If `true`, overrides the nociceptive stack frame warning.
 
-### Modality B: Unified CLI (`rea-neural`)
+### Modality B: Unified CLI (`bintra`)
 
 ```powershell
 # 1. Create a segregated workspace folder
 mkdir workspace -Force
 
 # 2. Surgically patch an instruction (e.g., NOP out a conditional jump at offset 0x1A40)
-rea-neural patch-binary `
+bintra patch-binary `
   --file "C:\path\to\target.exe" `
   --output ".\workspace\target_patched.exe" `
   --offset 0x1A40 `
   --patch-hex "90 90"
 
 # 3. Verify the patched binary integrity
-rea-neural inspect --file ".\workspace\target_patched.exe"
+bintra inspect --file ".\workspace\target_patched.exe"
 ```
 
 ---
@@ -110,7 +110,7 @@ When vibe-coding patches for the user, use these canonical, stack-safe patterns:
 
 ## 5. Post-Patch Verification Checklist
 
-After `rea_patch_binary` or `patch-binary` completes, inspect these exact returned fields:
+After `bintra_patch_binary` or `patch-binary` completes, inspect these exact returned fields:
 1. `is_safe` / `is_stack_safe`: `true` (heuristic stack balance guard passed).
 2. `pe_checksum_recalculated` & `new_pe_checksum`: `true` and updated PE header checksum hex.
 3. `original_sha256` & `patched_sha256`: Distinct digests confirming source binary remained untouched (`Safety Kernel` `source_file` immutability).

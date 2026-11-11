@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Formal Evidence Graph Data Structures for REA-Neural.
+Formal Evidence Graph Data Structures for Bintra.
 Models the system and binary diagnostic space as a directed multigraph G = (V, E)
 and provides Mermaid diagram rendering and causal path resolution.
 """

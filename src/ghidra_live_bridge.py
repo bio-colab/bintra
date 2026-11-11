@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Ghidra Live Bidirectional IPC Bridge.
+Bintra Ghidra Live Bidirectional IPC Bridge.
 Establishes a multithreaded, localhost-bound, authenticated JSON-RPC 2.0 channel
-between REA-Neural's diagnostic engine and Ghidra. Queues Crash RCA annotations,
+between Bintra's diagnostic engine and Ghidra. Queues Crash RCA annotations,
 VAD summaries, P-Code plans, and heuristic structure/pointer artifacts for the
 Ghidra-side service script to poll (default 1.0 s) and commit in database transactions.
 Strictly localhost (127.0.0.1); governed by ExecutionGuard, Capability.WORKSPACE_WRITE,
@@ -90,7 +90,7 @@ class GhidraBridgeRequestHandler(BaseHTTPRequestHandler):
 
         # Authenticate request token (except handshake ping)
         if method != "ping" and server.auth_token:
-            auth = params.get("auth_token") or self.headers.get("X-REA-Auth-Token")
+            auth = params.get("auth_token") or self.headers.get("X-Bintra-Auth-Token")
             if auth != server.auth_token:
                 self._send_json_error(req_id, -32001, "Authentication failed: Invalid or missing bridge token")
                 return
@@ -124,7 +124,7 @@ class GhidraBridgeRequestHandler(BaseHTTPRequestHandler):
 
 class GhidraLiveBridgeServer:
     """
-    Localhost-bound bidirectional JSON-RPC 2.0 server connecting REA-Neural to Ghidra.
+    Localhost-bound bidirectional JSON-RPC 2.0 server connecting Bintra to Ghidra.
     """
 
     def __init__(self, port: int = DEFAULT_BRIDGE_PORT, auth_token: Optional[str] = None):
@@ -165,7 +165,7 @@ class GhidraLiveBridgeServer:
         """Starts the multithreaded localhost bridge server in a background thread."""
         scope = ExecutionGuard.get_current_scope()
         ws_dir = scope.workspace_dir if scope else os.path.abspath(".")
-        target_marker = marker_path or os.path.join(ws_dir, ".rea_bridge.json")
+        target_marker = marker_path or os.path.join(ws_dir, ".bintra_bridge.json")
 
         ExecutionGuard.request_access(
             component="ghidra_live_bridge",
@@ -199,11 +199,11 @@ class GhidraLiveBridgeServer:
         try:
             self._write_marker_secure(target_marker, marker_payload)
         except Exception as err:
-            sys.stderr.write(f"[REA-Bridge] Warning writing workspace marker '{target_marker}': {err}\n")
+            sys.stderr.write(f"[Bintra-Bridge] Warning writing workspace marker '{target_marker}': {err}\n")
 
         # Explicitly mediate optional tempdir marker write under Capability.TEMPDIR_MARKER_WRITE
         if publish_temp_marker:
-            temp_candidate = os.path.join(tempfile.gettempdir(), ".rea_bridge.json")
+            temp_candidate = os.path.join(tempfile.gettempdir(), ".bintra_bridge.json")
             if os.path.abspath(temp_candidate) != os.path.abspath(target_marker):
                 ExecutionGuard.request_access(
                     component="ghidra_live_bridge",
@@ -216,7 +216,7 @@ class GhidraLiveBridgeServer:
                 try:
                     self._write_marker_secure(temp_candidate, marker_payload)
                 except Exception as err:
-                    sys.stderr.write(f"[REA-Bridge] Warning writing tempdir marker '{temp_candidate}': {err}\n")
+                    sys.stderr.write(f"[Bintra-Bridge] Warning writing tempdir marker '{temp_candidate}': {err}\n")
 
         return {
             "status": "running",
@@ -251,9 +251,9 @@ class GhidraLiveBridgeServer:
         }
 
     def dispatch_rpc_method(self, method: str, params: Dict[str, Any]) -> Any:
-        """Routes incoming JSON-RPC methods from Ghidra client or REA-Neural."""
+        """Routes incoming JSON-RPC methods from Ghidra client or Bintra."""
         if method == "ping":
-            return {"status": "ok", "timestamp": time.time(), "bridge_version": "7.4.0"}
+            return {"status": "ok", "timestamp": time.time(), "bridge_version": "1.0.0"}
 
         elif method == "get_status":
             with self._queue_lock:
@@ -297,13 +297,13 @@ class GhidraLiveBridgeServer:
             self._decompiled_functions.move_to_end(fn_name)
             return {"status": "cached", "function": fn_name}
 
-        elif method == "rea.deobfuscate_function":
+        elif method == "bintra.deobfuscate_function":
             pcode_ops = params.get("pcode_ops", [])
             blocks = params.get("basic_blocks", [])
             analysis = PcodeDeobfuscator.analyze_function(pcode_ops, blocks)
             return analysis
 
-        elif method == "rea.match_functions":
+        elif method == "bintra.match_functions":
             func1 = params.get("func1", {})
             func2 = params.get("func2", {})
             v1 = PcodeVectorizer.vectorize_high_function(func1.get("pcode_ops", []), func1.get("basic_blocks", []))
@@ -311,23 +311,23 @@ class GhidraLiveBridgeServer:
             match_res = PcodeFunctionMatcher.match_vectors(v1, v2)
             return match_res
 
-        elif method == "rea.inject_crash_rca":
+        elif method == "bintra.inject_crash_rca":
             rca_report = params.get("rca_report", {})
             return self.inject_crash_rca(rca_report)
 
-        elif method == "rea.inject_vad_snapshot":
+        elif method == "bintra.inject_vad_snapshot":
             vad_snapshot = params.get("vad_snapshot", {})
             return self.inject_vad_snapshot(vad_snapshot)
 
-        elif method == "rea.inject_etw_timeline":
+        elif method == "bintra.inject_etw_timeline":
             timeline_report = params.get("timeline_report", {})
             return self.inject_etw_timeline(timeline_report)
 
-        elif method == "rea.inject_structure_dissection":
+        elif method == "bintra.inject_structure_dissection":
             struct_report = params.get("struct_report", {})
             return self.inject_structure_dissection(struct_report)
 
-        elif method == "rea.inject_pointer_chains":
+        elif method == "bintra.inject_pointer_chains":
             pointer_report = params.get("pointer_report", {})
             return self.inject_pointer_chains(pointer_report)
 
@@ -364,7 +364,7 @@ class GhidraLiveBridgeServer:
         """
         Translates a Phase 2 Crash RCA Report into live Ghidra annotations:
         1. Plate Comment with root-cause attribution at faulting RVA.
-        2. Bookmark at faulting RVA (Category: REA_CRASH_FAULT).
+        2. Bookmark at faulting RVA (Category: BINTRA_CRASH_FAULT).
         3. Renames faulting function to prefix 'FAULT_' if deterministic.
         """
         fault_rva = rca_report.get("fault_rva", "0x0")
@@ -375,7 +375,7 @@ class GhidraLiveBridgeServer:
         advice = rca_report.get("remediation_advice", "")
 
         comment_lines = [
-            f"[REA-Neural CRASH RCA]: {rca_report.get('exception_name')} ({rca_report.get('exception_code')})",
+            f"[Bintra CRASH RCA]: {rca_report.get('exception_name')} ({rca_report.get('exception_code')})",
             f"Root Cause: {root_cause} (Confidence: {rca_report.get('confidence')})",
             f"Target Address: {target_addr} ({rca_report.get('access_type')} violation)",
         ]
@@ -397,7 +397,7 @@ class GhidraLiveBridgeServer:
         self.queue_command("CREATE_BOOKMARK", {
             "address": fault_rva,
             "address_space": "rva",
-            "category": "REA_CRASH_FAULT",
+            "category": "BINTRA_CRASH_FAULT",
             "description": f"{root_cause} on target {target_addr}"
         })
 
@@ -415,12 +415,12 @@ class GhidraLiveBridgeServer:
         summary = vad_snapshot.get("summary", {})
         proc_name = vad_snapshot.get("process_name", "target.exe")
         note = (
-            f"[REA-Neural VAD MAP]: Process `{proc_name}` (PID {vad_snapshot.get('pid')})\n"
+            f"[Bintra VAD MAP]: Process `{proc_name}` (PID {vad_snapshot.get('pid')})\n"
             f"Commit: {summary.get('commit_mb')} MB | Image: {summary.get('image_mb')} MB | Heap: {summary.get('heap_mb')} MB\n"
             f"W^X Violations: {summary.get('wx_regions_count')} | Contiguous Regions: {summary.get('total_regions')}"
         )
         self.queue_command("SET_PROGRAM_NOTE", {
-            "title": "REA_VAD_SPATIAL_LAYOUT",
+            "title": "BINTRA_VAD_SPATIAL_LAYOUT",
             "content": note
         })
         return {"status": "queued", "note_length": len(note)}
@@ -433,12 +433,12 @@ class GhidraLiveBridgeServer:
         findings = timeline_report.get("causality_findings", [])
         desc = "; ".join(f"{f.get('category')}: {f.get('description')}" for f in findings)
         note = (
-            f"[REA-Neural ETW TIMELINE]: Verdict `{verdict}`\n"
+            f"[Bintra ETW TIMELINE]: Verdict `{verdict}`\n"
             f"Findings: {desc if desc else 'Stable execution prior to fault'}\n"
             f"Events Evaluated: {timeline_report.get('events_count', 0)}"
         )
         self.queue_command("SET_PROGRAM_NOTE", {
-            "title": "REA_ETW_PRE_CRASH_TIMELINE",
+            "title": "BINTRA_ETW_PRE_CRASH_TIMELINE",
             "content": note
         })
         return {"status": "queued", "verdict": verdict}
@@ -447,7 +447,7 @@ class GhidraLiveBridgeServer:
         """
         Translates a runtime Structure Dissection report into Ghidra annotations and composite data types:
         1. Queues APPLY_DATA_STRUCTURE with reconstructed C declaration and fields.
-        2. Queues CREATE_BOOKMARK at structure base address (Category: REA_STRUCT_DISSECTION).
+        2. Queues CREATE_BOOKMARK at structure base address (Category: BINTRA_STRUCT_DISSECTION).
         3. Queues SET_PROGRAM_NOTE with the full C struct code.
         """
         base_addr = struct_report.get("base_address", "0x0")
@@ -474,13 +474,13 @@ class GhidraLiveBridgeServer:
         self.queue_command("CREATE_BOOKMARK", {
             "address": base_addr,
             "address_space": addr_space,
-            "category": "REA_STRUCT_DISSECTION",
+            "category": "BINTRA_STRUCT_DISSECTION",
             "description": f"Reconstructed struct {struct_name} ({len(fields)} fields, {size} bytes, heuristic)"
         })
 
         # 3. Queue Program Note
         self.queue_command("SET_PROGRAM_NOTE", {
-            "title": f"REA_STRUCT_{struct_name}",
+            "title": f"BINTRA_STRUCT_{struct_name}",
             "content": c_decl or f"// Reconstructed struct at {base_addr} ({len(fields)} fields)"
         })
 
@@ -503,7 +503,7 @@ class GhidraLiveBridgeServer:
         queued_count = 0
 
         note_lines = [
-            f"[REA-Neural Pointer Scanner Paths]: Target = {target_addr}",
+            f"[Bintra Pointer Scanner Paths]: Target = {target_addr}",
             f"Discovered Paths Count: {len(paths)}",
             "-----------------------------------------------------------------"
         ]
@@ -522,7 +522,7 @@ class GhidraLiveBridgeServer:
                 "address": rva,
                 "address_space": "rva",
                 "module": mod,
-                "comment": f"[REA Pointer Root]: Points to target {target_addr}\nExpression: {expr}\nModule: {mod}"
+                "comment": f"[Bintra Pointer Root]: Points to target {target_addr}\nExpression: {expr}\nModule: {mod}"
             })
 
             # 2. Queue Bookmark at static base RVA
@@ -530,7 +530,7 @@ class GhidraLiveBridgeServer:
                 "address": rva,
                 "address_space": "rva",
                 "module": mod,
-                "category": "REA_POINTER_ROOT",
+                "category": "BINTRA_POINTER_ROOT",
                 "description": f"Root for {target_addr} via {expr}"
             })
             queued_count += 2
@@ -538,7 +538,7 @@ class GhidraLiveBridgeServer:
         if paths:
             clean_tgt = str(target_addr).replace("0x", "")
             self.queue_command("SET_PROGRAM_NOTE", {
-                "title": f"REA_POINTER_PATHS_{clean_tgt}",
+                "title": f"BINTRA_POINTER_PATHS_{clean_tgt}",
                 "content": "\n".join(note_lines)
             })
             queued_count += 1
@@ -573,7 +573,7 @@ class GhidraLiveBridgeClient:
         req = urllib.request.Request(
             self.bridge_url,
             data=data,
-            headers={"Content-Type": "application/json", "X-REA-Auth-Token": self.auth_token or ""}
+            headers={"Content-Type": "application/json", "X-Bintra-Auth-Token": self.auth_token or ""}
         )
         with urllib.request.urlopen(req, timeout=5.0) as resp:
             raw = resp.read()
@@ -600,19 +600,19 @@ class GhidraLiveBridgeClient:
         return self.call_rpc("ghidra.poll_commands")
 
     def inject_crash_rca(self, rca_report: Dict[str, Any]) -> Dict[str, Any]:
-        return self.call_rpc("rea.inject_crash_rca", {"rca_report": rca_report})
+        return self.call_rpc("bintra.inject_crash_rca", {"rca_report": rca_report})
 
     def inject_vad_snapshot(self, vad_snapshot: Dict[str, Any]) -> Dict[str, Any]:
-        return self.call_rpc("rea.inject_vad_snapshot", {"vad_snapshot": vad_snapshot})
+        return self.call_rpc("bintra.inject_vad_snapshot", {"vad_snapshot": vad_snapshot})
 
     def inject_etw_timeline(self, timeline_report: Dict[str, Any]) -> Dict[str, Any]:
-        return self.call_rpc("rea.inject_etw_timeline", {"timeline_report": timeline_report})
+        return self.call_rpc("bintra.inject_etw_timeline", {"timeline_report": timeline_report})
 
     def inject_structure_dissection(self, struct_report: Dict[str, Any]) -> Dict[str, Any]:
-        return self.call_rpc("rea.inject_structure_dissection", {"struct_report": struct_report})
+        return self.call_rpc("bintra.inject_structure_dissection", {"struct_report": struct_report})
 
     def inject_pointer_chains(self, pointer_report: Dict[str, Any]) -> Dict[str, Any]:
-        return self.call_rpc("rea.inject_pointer_chains", {"pointer_report": pointer_report})
+        return self.call_rpc("bintra.inject_pointer_chains", {"pointer_report": pointer_report})
 
 
 _GLOBAL_BRIDGE_SERVER: Optional[GhidraLiveBridgeServer] = None
@@ -670,12 +670,12 @@ def _read_trusted_marker_file(marker_path: str) -> Optional[Dict[str, Any]]:
 def resolve_bridge_marker() -> Optional[Dict[str, Any]]:
     """Resolves active bridge discovery marker from trusted workspace or verified tempdir locations."""
     scope = ExecutionGuard.get_current_scope()
-    default_ws = os.path.join(os.path.expanduser("~"), ".rea_neural", "workspace")
+    default_ws = os.path.join(os.path.expanduser("~"), ".bintra", "workspace")
     ws_dir = scope.workspace_dir if scope else default_ws
     candidates = [
-        os.path.join(ws_dir, ".rea_bridge.json"),
-        os.path.join(tempfile.gettempdir(), ".rea_bridge.json"),
-        os.path.join(default_ws, ".rea_bridge.json"),
+        os.path.join(ws_dir, ".bintra_bridge.json"),
+        os.path.join(tempfile.gettempdir(), ".bintra_bridge.json"),
+        os.path.join(default_ws, ".bintra_bridge.json"),
     ]
     seen = set()
     for c in candidates:

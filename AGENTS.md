@@ -7,28 +7,28 @@
 
 ## 1. Quick Start: The 3 Operational Modalities
 
-Autonomous agents can interact with `rea-neural` via three direct modalities:
+Autonomous agents can interact with `bintra` via three direct modalities:
 
 ### Modality 1: Model Context Protocol (MCP) -- Recommended for Direct Tool Calls
 Launch the native zero-dependency MCP server via stdio:
 ```json
 {
   "mcpServers": {
-    "rea-neural": {
-      "command": "rea-mcp",
+    "bintra": {
+      "command": "bintra-mcp",
       "args": []
     }
   }
 }
 ```
 Exposes **34 type-safe tools**:
-- **Core Binary & Decompilation (13 Tools):** `rea_inspect_binary`, `rea_dump_bytes`, `rea_deobfuscate_binary`, `rea_match_functions`, `rea_patch_binary`, `rea_scan_hybrid`, `rea_sensory_audit`, `rea_match_pcode`, `rea_deobfuscate_pcode`, `rea_ghidra_analyze`, `rea_ghidra_headless`, `rea_wsp_audit`, `rea_patch_weights`.
-- **Windows System Intelligence & Forensics (14 Tools):** `rea_windows_env_audit`, `rea_resolve_dependencies`, `rea_inspect_crash_reports`, `rea_correlate_failure_evidence`, `rea_win_catalog_cmd`, `rea_registry_audit`, `rea_hardware_audit`, `rea_driver_audit`, `rea_service_audit`, `rea_dmp_inspect`, `rea_etw_audit`, `rea_evidence_graph`, `rea_device_driver_intelligence`, `rea_process_resource_audit`.
-- **Runtime Telemetry, Crash RCA & Live Ghidra Bridge (7 Tools):** `rea_vad_inspect`, `rea_memory_scan`, `rea_pointer_scan`, `rea_struct_dissect`, `rea_crash_rca`, `rea_etw_capture`, `rea_ghidra_live_bridge`.
+- **Core Binary & Decompilation (13 Tools):** `bintra_inspect_binary`, `bintra_dump_bytes`, `bintra_deobfuscate_binary`, `bintra_match_functions`, `bintra_patch_binary`, `bintra_scan_hybrid`, `bintra_sensory_audit`, `bintra_match_pcode`, `bintra_deobfuscate_pcode`, `bintra_ghidra_analyze`, `bintra_ghidra_headless`, `bintra_wsp_audit`, `bintra_patch_weights`.
+- **Windows System Intelligence & Forensics (14 Tools):** `bintra_windows_env_audit`, `bintra_resolve_dependencies`, `bintra_inspect_crash_reports`, `bintra_correlate_failure_evidence`, `bintra_win_catalog_cmd`, `bintra_registry_audit`, `bintra_hardware_audit`, `bintra_driver_audit`, `bintra_service_audit`, `bintra_dmp_inspect`, `bintra_etw_audit`, `bintra_evidence_graph`, `bintra_device_driver_intelligence`, `bintra_process_resource_audit`.
+- **Runtime Telemetry, Crash RCA & Live Ghidra Bridge (7 Tools):** `bintra_vad_inspect`, `bintra_memory_scan`, `bintra_pointer_scan`, `bintra_struct_dissect`, `bintra_crash_rca`, `bintra_etw_capture`, `bintra_ghidra_live_bridge`.
 
-### Modality 2: Unified CLI (`rea-neural`) -- Recommended for Terminal / Bash / PowerShell
+### Modality 2: Unified CLI (`bintra`) -- Recommended for Terminal / Bash / PowerShell
 ```powershell
-rea-neural <command> [options]
+bintra <command> [options]
 # Or: python -m cli <command> [options]
 ```
 All commands produce machine-readable JSON on `stdout` and exit with code `0` on success.
@@ -61,21 +61,21 @@ from security import ExecutionGuard, Capability
 
 ## 2. Agent Skills Architecture (`skills/`)
 
-REA-Neural provides **7 specialized sub-skills** (plus the [`reverse-engineer-anything`](skills/reverse-engineer-anything/SKILL.md) master router = 8 total skills):
+Bintra provides **7 specialized sub-skills** (plus the [`bintra`](skills/bintra/SKILL.md) master router = 8 total skills):
 
-1. **[`rea-binary-dissection`](skills/rea-binary-dissection/SKILL.md):**  
+1. **[`bintra-binary-dissection`](skills/bintra-binary-dissection/SKILL.md):**  
    Anatomy inspection, ASLR/DEP/CFG mitigations, REX-aware opaque predicates, CFF dispatcher loops, cross-architecture matching (x86-64 vs ARM64), 10 Metaphorical Senses.
-2. **[`rea-safe-binary-patching`](skills/rea-safe-binary-patching/SKILL.md):**  
+2. **[`bintra-safe-binary-patching`](skills/bintra-safe-binary-patching/SKILL.md):**  
    Safe byte modification, stack frame balance proprioception ($\Delta RSP/RBP$ guard), automated PE checksum recalculation, strict workspace isolation.
-3. **[`rea-windows-troubleshooter`](skills/rea-windows-troubleshooter/SKILL.md):**  
+3. **[`bintra-windows-troubleshooter`](skills/bintra-windows-troubleshooter/SKILL.md):**  
    Crash diagnostics (0xc0000005, NULL dereference), MiniDump (.dmp) inspection, Restart Manager file locks, loaded DLL tracking, driver problem codes (`CM_PROB_*`).
-4. **[`rea-neural-weight-security`](skills/rea-neural-weight-security/SKILL.md):**  
+4. **[`bintra-neural-weight-security`](skills/bintra-neural-weight-security/SKILL.md):**  
    Safetensors weight auditing without execution, backdoor/trojan outlier neurons ($>4.5\sigma$), spectral effective rank, selective column direction subtraction without training.
-5. **[`rea-live-runtime-analysis`](skills/rea-live-runtime-analysis/SKILL.md):**  
+5. **[`bintra-live-runtime-analysis`](skills/bintra-live-runtime-analysis/SKILL.md):**  
    Passive VAD layout (`VirtualQueryEx`), read-only `PROCESS_VM_READ` First/Next scans (`session_id`, zero-fill-free reads), depth 1-3 pointer path discovery, 4-byte-granularity struct dissection, Crash RCA.
-6. **[`rea-etw-telemetry`](skills/rea-etw-telemetry/SKILL.md):**  
+6. **[`bintra-etw-telemetry`](skills/bintra-etw-telemetry/SKILL.md):**  
    Native `OpenTraceW`/`ProcessTrace` ETW consumption (elevated), `WEVTAPI` Event Log + Toolhelp32 `IMAGE_LOAD` fallback, explicit source provenance, strict PID filtering, temporal crash correlation.
-7. **[`rea-ghidra-integration`](skills/rea-ghidra-integration/SKILL.md):**  
+7. **[`bintra-ghidra-integration`](skills/bintra-ghidra-integration/SKILL.md):**  
    64-D High P-Code IR matching, headless automation, authenticated localhost JSON-RPC queue+poll bridge (`cap.tempdir.marker.write`, explicit `rva`/`va` resolution).
 
 ---
@@ -108,7 +108,7 @@ REA-Neural provides **7 specialized sub-skills** (plus the [`reverse-engineer-an
 | `match-pcode` | Architecture-invariant P-code matching | `--func1 <file.json> --func2 <file.json>` | `pcode_cosine_similarity`, `is_semantic_match`, `confidence` |
 | `deobfuscate-pcode`| Simplify P-code dead branches | `--file <pcode.json>` | `is_obfuscated`, `opaque_predicates_count`, `prunable_operations` |
 | `ghidra-analyze`| Batch-analyze exported Ghidra P-Code | `--input <export.json> --output <plan.json>` | `analyzed_functions`, `rename_actions`, `comment_actions`, `summary` |
-| `ghidra-headless`| Run Ghidra headless deobfuscation | `--binary <path> [--apply]` | Executes `ReaNeuralGhidraBridge.java` via `analyzeHeadless.bat` |
+| `ghidra-headless`| Run Ghidra headless deobfuscation | `--binary <path> [--apply]` | Executes `BintraGhidraBridge.java` via `analyzeHeadless.bat` |
 | `wsp-audit` | Audit embedded weights | `--model <model.safetensors>` | `primary_tensor`, `effective_rank_analysis`, `surgical_amenability`, `zero_eval_security_audit` |
 | `patch-weights` | Column direction subtraction | `--source <in> --output <out> --tensor <t>` | `output_path`, `output_sha256`, `patched_tensor_names`, `metrics` |
 | `win-audit` | Profile host OS, graphics, security | `[--binary <path>] [--format json\|md]` | `os`, `devices`, `security` |
@@ -142,22 +142,22 @@ REA-Neural provides **7 specialized sub-skills** (plus the [`reverse-engineer-an
 ### Scenario 1: User says "Why is this desktop application crashing on startup?"
 1. Inspect the MiniDump file (or run full disassembly-backed Crash RCA):
    ```powershell
-   rea-neural dmp-inspect --file "C:\path\to\crash.dmp"
-   rea-neural crash-rca --dmp "C:\path\to\crash.dmp" --binary "C:\path\to\target.exe"
+   bintra dmp-inspect --file "C:\path\to\crash.dmp"
+   bintra crash-rca --dmp "C:\path\to\crash.dmp" --binary "C:\path\to\target.exe"
    ```
 2. Check for missing DLL dependencies:
    ```powershell
-   rea-neural resolve-deps --binary "C:\path\to\target.exe"
+   bintra resolve-deps --binary "C:\path\to\target.exe"
    ```
 3. Synthesize the complete causality dossier (passing a JSON crash record to `--crash-json`, never a raw binary `.dmp` path):
    ```powershell
-   rea-neural diagnose --binary "C:\path\to\target.exe" --crash-json ".\workspace\crash_record.json"
+   bintra diagnose --binary "C:\path\to\target.exe" --crash-json ".\workspace\crash_record.json"
    ```
 
 ### Scenario 2: User says "This file is locked and I can't replace it."
 1. Interrogate the Windows Restart Manager:
    ```powershell
-   rea-neural file-locks --file "C:\path\to\locked.dll"
+   bintra file-locks --file "C:\path\to\locked.dll"
    ```
 2. Inform the user which application (PID, Name, Service) holds the lock without forcefully killing system processes.
 
@@ -168,6 +168,6 @@ REA-Neural provides **7 specialized sub-skills** (plus the [`reverse-engineer-an
    ```
 2. Surgically apply the patch to the workspace destination:
    ```powershell
-   rea-neural patch-binary --file "C:\path\to\target.exe" --output ".\workspace\target_patched.exe" --offset 0x2400 --patch-hex "90 90"
+   bintra patch-binary --file "C:\path\to\target.exe" --output ".\workspace\target_patched.exe" --offset 0x2400 --patch-hex "90 90"
    ```
 3. Verify that `is_safe: true`, `pe_checksum_recalculated: true`, and `original_sha256 != patched_sha256`.

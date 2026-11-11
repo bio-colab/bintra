@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-REA-Neural Engine: Autonomous Neural Reverse Engineering & Weight-Space Programming.
+Bintra Engine: Autonomous Neural Reverse Engineering & Weight-Space Programming.
 Treats neural network weights as compiled machine code in continuous space.
 Provides Windows-safe memory-mapped Safetensors inspection, SVD/Extreme/Slice subspace analysis,
 circuit decompilation (Attention, MLP, LayerNorm), temporal activation probing,
@@ -217,7 +217,7 @@ class SafetensorsHandler:
             from security import PathIdentity, TargetMutationError, OutOfScopeError, ExecutionGuard, Capability
             if PathIdentity.is_same_file(src_abs, out_abs):
                 raise TargetMutationError(
-                    f"TARGET_WRITE_FORBIDDEN: In-place model weight modification is strictly forbidden by REA Safety Policy. Destination '{out_abs}' cannot match source '{src_abs}'."
+                    f"TARGET_WRITE_FORBIDDEN: In-place model weight modification is strictly forbidden by Bintra Safety Policy. Destination '{out_abs}' cannot match source '{src_abs}'."
                 )
             scope = ExecutionGuard.get_current_scope()
             if scope and scope.is_target_directory(out_abs):
@@ -290,7 +290,7 @@ class SafetensorsHandler:
 
         out_dir = os.path.dirname(out_abs) or "."
         os.makedirs(out_dir, exist_ok=True)
-        fd, tmp_path = tempfile.mkstemp(prefix=".rea_st_", suffix=".tmp", dir=out_dir)
+        fd, tmp_path = tempfile.mkstemp(prefix=".bintra_st_", suffix=".tmp", dir=out_dir)
         os.close(fd)
 
         sha = hashlib.sha256()
@@ -1658,7 +1658,7 @@ class WeightSecurityAuditor:
 
 def main():
     _ensure_utf8_stdio()
-    parser = argparse.ArgumentParser(description="REA-Neural Engine")
+    parser = argparse.ArgumentParser(description="Bintra Engine")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Subspace command
@@ -1824,8 +1824,8 @@ def main():
 
     elif args.command == "synthesize-weights":
         sys.stderr.write(
-            "[REA-Neural SCOPE WARNING] 'synthesize-weights' BUILDS a neural network from "
-            "scratch. This is out of REA-Neural's reverse-engineering scope (it creates a "
+            "[Bintra SCOPE WARNING] 'synthesize-weights' BUILDS a neural network from "
+            "scratch. This is out of Bintra's reverse-engineering scope (it creates a "
             "standalone AI model, the WSP paper's own agenda) and is kept only as archived "
             "lineage. See SCOPE.md. It reverse-engineers no Windows binary.\n"
         )

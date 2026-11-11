@@ -1,17 +1,17 @@
-# REA-Neural: Runtime Telemetry, Crash Root-Cause Analysis & Symbiotic Decompiler Bridge
+# Bintra: Runtime Telemetry, Crash Root-Cause Analysis & Symbiotic Decompiler Bridge
 ## دليل الهندسة المعمارية والقياس الحي عن بُعد والتحليل الجنائي للأعطال
 
 ---
 
 ## 1. الهوية الهندسية ونظرة عامة (Executive Overview)
 
-يقدم هذا التوثيق البنية المعمارية الشاملة لمنظومة **القياس الحي عن بُعد (Runtime Telemetry)** والتحليل الجنائي للانهيارات البرمجية والربط التفاعلي المباشر مع بيئات فك التجميع الساكنة (Ghidra Decompiler) في مشروع `REA-Neural` (الإصدار `v7.4.0+`).
+يقدم هذا التوثيق البنية المعمارية الشاملة لمنظومة **القياس الحي عن بُعد (Runtime Telemetry)** والتحليل الجنائي للانهيارات البرمجية والربط التفاعلي المباشر مع بيئات فك التجميع الساكنة (Ghidra Decompiler) في مشروع `Bintra` (الإصدار `v1.0.0+`).
 
 تتكامل المنظومة عبر 4 مراحل هندسية متعاقبة ومترابطة رياضياً وتطبيقياً:
 1. **المرحلة الأولى (Phase 1):** فحص وتصنيف بنية الذاكرة الافتراضية للعمليات الحية، وقراءة القيم سلبياً (`PROCESS_VM_READ`)، والبحث الأولي/اللاحق، ومسح سلاسل المؤشرات، واستنتاج بنى البيانات (`VirtualMemoryInspector`, `ProcessMemoryScanner`).
 2. **المرحلة الثانية (Phase 2):** محرك التحليل الجنائي المؤتمت للانهيارات مع ربط فحص VAD وتطبيع حقول `MiniDump` (`CrashRootCauseAnalyzer`).
 3. **المرحلة الثالثة (Phase 3):** الالتقاط الهجين لأحداث ويندوز عبر ETW الأصلي (`OpenTraceW`/`ProcessTrace`) أو مسارات البديل غير المرفوع (`WEVTAPI`/`CreateToolhelp32Snapshot`)، وتحليل التسلسل الزمني والسببي (`EtwLiveCaptureSession`, `EtwTimelineCorrelator`).
-4. **المرحلة الرابعة (Phase 4):** جسر الاتصال المحلي الموثق القائم على الطابور والاستطلاع الدوري (`Queued-Poll JSON-RPC 2.0`) مع Ghidra (`GhidraLiveBridgeServer`, `ReaLiveBridgeService.py`).
+4. **المرحلة الرابعة (Phase 4):** جسر الاتصال المحلي الموثق القائم على الطابور والاستطلاع الدوري (`Queued-Poll JSON-RPC 2.0`) مع Ghidra (`GhidraLiveBridgeServer`, `BintraLiveBridgeService.py`).
 
 ```mermaid
 flowchart TD
@@ -40,7 +40,7 @@ flowchart TD
         PROOF -->|inject_crash_rca| BRIDGE
         MAP -->|inject_vad_snapshot| BRIDGE
         VERDICT -->|inject_etw_timeline| BRIDGE
-        BRIDGE -->|Authenticated JSON-RPC| SCRIPT["ReaLiveBridgeService.py (Ghidra Client)"]
+        BRIDGE -->|Authenticated JSON-RPC| SCRIPT["BintraLiveBridgeService.py (Ghidra Client)"]
         SCRIPT -->|currentProgram.startTransaction| GHIDRA_DB["Ghidra Program Database (Plate Comments & Bookmarks)"]
     end
 ```
@@ -98,16 +98,16 @@ flowchart TD
 
 ---
 
-### المرحلة الرابعة: جسر الاتصال المحلي القائم على الطابور مع Ghidra (`GhidraLiveBridgeServer`, `ReaLiveBridgeService.py`)
+### المرحلة الرابعة: جسر الاتصال المحلي القائم على الطابور مع Ghidra (`GhidraLiveBridgeServer`, `BintraLiveBridgeService.py`)
 
-- **المسار البرمجي:** [`src/ghidra_live_bridge.py`](../src/ghidra_live_bridge.py) و [`ghidra_scripts/ReaLiveBridgeService.py`](../ghidra_scripts/ReaLiveBridgeService.py)
+- **المسار البرمجي:** [`src/ghidra_live_bridge.py`](../src/ghidra_live_bridge.py) و [`ghidra_scripts/BintraLiveBridgeService.py`](../ghidra_scripts/BintraLiveBridgeService.py)
 - **معمارية الطابور والاستطلاع المؤقت (`Queued-Poll JSON-RPC 2.0`):**
   - خادم HTTP متعدد الخيوط (`ThreadingMixIn`) يستمع حصراً على عنوان الحلقة المحلية `127.0.0.1:41718`.
-  - يضع المحلل طلبات التحليل في طابور آمن خيطياً، بينما يقوم السكربت داخل غيدرا (`ReaLiveBridgeService.py`, متوافق مع Jython 2.7 و PyGhidra 3.x) بالاستطلاع كل **`1.0s`** وتطبيق المعاملات على `currentProgram` داخل خيط غيدرا.
+  - يضع المحلل طلبات التحليل في طابور آمن خيطياً، بينما يقوم السكربت داخل غيدرا (`BintraLiveBridgeService.py`, متوافق مع Jython 2.7 و PyGhidra 3.x) بالاستطلاع كل **`1.0s`** وتطبيق المعاملات على `currentProgram` داخل خيط غيدرا.
   - فرض توثيق الرمز السري على كافة مسارات التعديل (`AUTH_REQUIRED` / `-32001`)، وإدارة ملف علامة الاكتشاف المؤقت ضمن صلاحية **`cap.tempdir.marker.write`** (مع إمكانية تعطيله كلياً عبر `--no-temp-marker` أو `publish_temp_marker=false`).
   - تطبيع صريح بين الإزاحة النسبية `rva` والعنوان الافتراضي المطلق `va` وفق `Image Base` المفتوحة في غيدرا لمنع إزاحة التعليقات والعلامات عند إعادة تمركز ASLR.
 - **تطبيق التعديلات داخل معاملات قاعدة البيانات (`Database Transactions`):**
-  - تنفيذ الإضافات (Plate Comments، وعلامات `REA_CRASH_FAULT`، وملاحظات VAD/ETW، وهياكل C في `DataTypeManager`، وإعادة التسمية) عبر `currentProgram.startTransaction(...)` ككتابات صريحة في قاعدة بيانات غيدرا دون المساس بالملف التنفيذي الأصلي.
+  - تنفيذ الإضافات (Plate Comments، وعلامات `BINTRA_CRASH_FAULT`، وملاحظات VAD/ETW، وهياكل C في `DataTypeManager`، وإعادة التسمية) عبر `currentProgram.startTransaction(...)` ككتابات صريحة في قاعدة بيانات غيدرا دون المساس بالملف التنفيذي الأصلي.
 
 ---
 
@@ -115,13 +115,13 @@ flowchart TD
 
 | الأداة في واجهة CLI | اسم أداة خادم MCP | رقم الأداة | المرحلة | الوظيفة الأساسية |
 |---|---|---|---|---|
-| `rea-neural vad-inspect` | `rea_vad_inspect` | **23** | Phase 1 | مسح الذاكرة الافتراضية، تصنيف أقسام PE والـ STACK/HEAP، تدقيق $W \oplus X$، والفارق الحيزي. |
-| `rea-neural mem-scan` | `rea_memory_scan` | **24** | Phase 1.5 | قراءة الذاكرة الحية عبر `PROCESS_VM_READ`، والبحث الأولي واللاحق (`first`/`next`) داخل جلسات معزولة. |
-| `rea-neural ptr-scan` | `rea_pointer_scan` | **25** | Phase 1.5 | استكشاف سلاسل المؤشرات متعددة المستويات حتى العناوين الثابتة للوحدات (`Base+Offsets`). |
-| `rea-neural struct-dissect` | `rea_struct_dissect` | **26** | Phase 1.5 | تشريح كتل الذاكرة الحية تلقائياً وتوليد تعريفات هياكل C قابلة للحقن في غيدرا. |
-| `rea-neural crash-rca` | `rea_crash_rca` | **27** | Phase 2 | تحليل ملفات MiniDump، ربط فحص VAD، تفكيك نافذة الانهيار، وإرجاع فرضيات السبب الجذري. |
-| `rea-neural etw-capture` | `rea_etw_capture` | **28** | Phase 3 | تشغيل التقاط ETW الهجين (`OpenTraceW` + بديل `WEVTAPI`/Toolhelp32) والارتباط الزمني السببي. |
-| `rea-neural ghidra-bridge` | `rea_ghidra_live_bridge` | **29** | Phase 4 | تشغيل خادم JSON-RPC الموثق على الحلقة المحلية مع دعم `--daemon` و `--no-temp-marker`. |
+| `bintra vad-inspect` | `bintra_vad_inspect` | **23** | Phase 1 | مسح الذاكرة الافتراضية، تصنيف أقسام PE والـ STACK/HEAP، تدقيق $W \oplus X$، والفارق الحيزي. |
+| `bintra mem-scan` | `bintra_memory_scan` | **24** | Phase 1.5 | قراءة الذاكرة الحية عبر `PROCESS_VM_READ`، والبحث الأولي واللاحق (`first`/`next`) داخل جلسات معزولة. |
+| `bintra ptr-scan` | `bintra_pointer_scan` | **25** | Phase 1.5 | استكشاف سلاسل المؤشرات متعددة المستويات حتى العناوين الثابتة للوحدات (`Base+Offsets`). |
+| `bintra struct-dissect` | `bintra_struct_dissect` | **26** | Phase 1.5 | تشريح كتل الذاكرة الحية تلقائياً وتوليد تعريفات هياكل C قابلة للحقن في غيدرا. |
+| `bintra crash-rca` | `bintra_crash_rca` | **27** | Phase 2 | تحليل ملفات MiniDump، ربط فحص VAD، تفكيك نافذة الانهيار، وإرجاع فرضيات السبب الجذري. |
+| `bintra etw-capture` | `bintra_etw_capture` | **28** | Phase 3 | تشغيل التقاط ETW الهجين (`OpenTraceW` + بديل `WEVTAPI`/Toolhelp32) والارتباط الزمني السببي. |
+| `bintra ghidra-bridge` | `bintra_ghidra_live_bridge` | **29** | Phase 4 | تشغيل خادم JSON-RPC الموثق على الحلقة المحلية مع دعم `--daemon` و `--no-temp-marker`. |
 
 > [!NOTE]
 > يبلغ إجمالي عدد أدوات خادم MCP الآن **34 أداة متخصصة**، جميعها تخضع لوساطة مرجع الأمان `ExecutionGuard` والتحقق الصارم من المخطط (`_validate_tool_arguments`) بنموذج الفشل المغلق (Fail-Closed).
@@ -134,7 +134,7 @@ flowchart TD
 
 ```text
 ======================================================================
-REA-Neural Test Suites Verification Summary:
+Bintra Test Suites Verification Summary:
 - test_suite.py (Core Binary & Neural Engines):         123 Tests  [PASS]
 - test_security_remediation.py (MCP Guard & Schema):     16 Tests  [PASS]
 - test_audit_remediations.py (Audit, CLI, Bridge & Docs): 10 Tests [PASS]
@@ -163,5 +163,5 @@ TOTAL VERIFIED TESTS:                                    195 Tests [PASS]
 
 - **صلاحيات ETW الحية على ويندوز:** يتطلب استهلاك مزودات النواة الفعلي عبر `OpenTraceW` و `ProcessTrace` صلاحيات إدارية (Administrator أو Performance Log Users)؛ في الجلسات غير المرفوعة، يتحول المحرك تلقائياً إلى `WEVTAPI` و `CreateToolhelp32Snapshot` ويوثق ذلك صراحة عبر `has_native_etw_events: false` و `event_sources` بدلاً من الادعاء بالتقاط نواة حي.
 - **محدودية تفكيك التعليمات في Crash RCA:** تفكيك نافذة `-32/+48` بايت حول تعليمة العطل يدعم حالياً معمارية `x86`/`x64` عبر Capstone، وقد لا يصادف بداية التعليمة المثلى قبل العطل إذا سبقته تعليمات متغيرة الطول غير محاذاة، لذا تُعرض النتائج كتشخيص مدعوم بالأدلة لا كبرهان حتمي مطلق.
-- **عزل مسارات المسح الذاكري:** تتطلب عمليات مسح القيم (`mem-scan`, `rea_memory_scan`) حفظ الجلسات حصراً داخل مساحة العمل عبر `ExecutionGuard`؛ أي مسار جلسة خارج النطاق يُرفض تلقائياً برمز `OutOfScopeError`.
+- **عزل مسارات المسح الذاكري:** تتطلب عمليات مسح القيم (`mem-scan`, `bintra_memory_scan`) حفظ الجلسات حصراً داخل مساحة العمل عبر `ExecutionGuard`؛ أي مسار جلسة خارج النطاق يُرفض تلقائياً برمز `OutOfScopeError`.
 - **طبيعة جسر Ghidra غير المتزامنة:** يستخدم الجسر آلية وضع الطلبات في طابور مع استطلاع دوري من داخل غيدرا كل `1.0s`؛ قد يلاحظ استغراقاً بحدود ثانية واحدة قبل ظهور التعليقات أو الهياكل داخل `CodeBrowser`.

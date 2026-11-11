@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-    REA-Neural Automated Windows PowerShell Installer & Environment Configurator.
+    Bintra Automated Windows PowerShell Installer & Environment Configurator.
 .DESCRIPTION
-    Installs REA-Neural in editable mode, resolves Python dependencies, automatically
+    Installs Bintra in editable mode, resolves Python dependencies, automatically
     configures user/machine PATH environment variables for instant CLI availability,
     and runs self-verification diagnostics.
 .PARAMETER RunTests
@@ -16,7 +16,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host "=====================================================================" -ForegroundColor Cyan
-Write-Host "  REA-Neural Automated Windows PowerShell Installer" -ForegroundColor Cyan
+Write-Host "  Bintra Automated Windows PowerShell Installer" -ForegroundColor Cyan
 Write-Host "  Continuous Semantic Reverse Engineering & Binary Analysis" -ForegroundColor Cyan
 Write-Host "=====================================================================" -ForegroundColor Cyan
 Write-Host ""
@@ -45,7 +45,7 @@ $scriptsDir = & ($pythonCmd -split ' ')[0] ($pythonCmd -split ' ')[1..10] -c "im
 Write-Host "[+] Python Scripts directory: $scriptsDir" -ForegroundColor Gray
 
 # 4. Install / Update Dependencies and Package
-Write-Host "[*] Installing REA-Neural package in editable development mode..." -ForegroundColor Yellow
+Write-Host "[*] Installing Bintra package in editable development mode..." -ForegroundColor Yellow
 $pkgRoot = $PSScriptRoot
 if (-not $pkgRoot) { $pkgRoot = (Get-Item .).FullName }
 
@@ -54,7 +54,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Error "pip install failed. Please check network connectivity or disk permissions."
     return
 }
-Write-Host "[+] REA-Neural package installed successfully!" -ForegroundColor Green
+Write-Host "[+] Bintra package installed successfully!" -ForegroundColor Green
 
 # 5. Automatically Ensure PATH Environment Configuration
 $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
@@ -83,7 +83,7 @@ if (-not $inPath) {
 # 6. Verification and Smoke Test
 Write-Host "[*] Running verification smoke test..." -ForegroundColor Yellow
 $smokeJson = & ($pythonCmd -split ' ')[0] ($pythonCmd -split ' ')[1..10] -m cli sense --hex "55 48 89 e5 90 5d c3"
-if ($LASTEXITCODE -eq 0 -and $smokeJson -match "REA-Neural Sensory Cortex") {
+if ($LASTEXITCODE -eq 0 -and $smokeJson -match "Bintra Sensory Cortex") {
     Write-Host "[+] Smoke test passed: 10 Metaphorical Senses and Security Kernel are operational!" -ForegroundColor Green
 } else {
     Write-Warning "Smoke test encountered an issue. Output:`n$smokeJson"
@@ -91,7 +91,7 @@ if ($LASTEXITCODE -eq 0 -and $smokeJson -match "REA-Neural Sensory Cortex") {
 
 # 7. Optional Unit Test Suite Execution
 if ($RunTests) {
-    Write-Host "[*] Executing test suite (122 unit & regression tests)..." -ForegroundColor Yellow
+    Write-Host "[*] Executing test suite (195 unit & regression tests)..." -ForegroundColor Yellow
     & ($pythonCmd -split ' ')[0] ($pythonCmd -split ' ')[1..10] -m unittest discover -s "$pkgRoot\tests" -p "test_*.py"
     if ($LASTEXITCODE -eq 0) {
         Write-Host "[+] All test suites passed with 100% success rate!" -ForegroundColor Green
@@ -105,15 +105,15 @@ Write-Host "====================================================================
 Write-Host "  Installation and Verification Complete!" -ForegroundColor Green
 Write-Host "=====================================================================" -ForegroundColor Cyan
 Write-Host "  Global CLI Commands Available:" -ForegroundColor White
-Write-Host "    rea-neural --help          (Main unified CLI)" -ForegroundColor Gray
-Write-Host "    rea-mcp                    (JSON-RPC 2.0 stdio MCP Server for AI)" -ForegroundColor Gray
+Write-Host "    bintra --help          (Main unified CLI)" -ForegroundColor Gray
+Write-Host "    bintra-mcp                    (JSON-RPC 2.0 stdio MCP Server for AI)" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  To configure Claude Desktop or Cursor for AI Agent integration:" -ForegroundColor White
 Write-Host '    Add the following to your claude_desktop_config.json:' -ForegroundColor Gray
 Write-Host '    {' -ForegroundColor Gray
 Write-Host '      "mcpServers": {' -ForegroundColor Gray
-Write-Host '        "rea": {' -ForegroundColor Gray
-Write-Host '          "command": "rea-mcp",' -ForegroundColor Gray
+Write-Host '        "bintra": {' -ForegroundColor Gray
+Write-Host '          "command": "bintra-mcp",' -ForegroundColor Gray
 Write-Host '          "args": []' -ForegroundColor Gray
 Write-Host '        }' -ForegroundColor Gray
 Write-Host '      }' -ForegroundColor Gray

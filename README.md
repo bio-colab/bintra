@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="assets/banner.jpg" alt="REA-Neural Continuous Semantic Reverse Engineering" width="100%">
+  <img src="assets/banner.jpg" alt="Bintra Continuous Semantic Reverse Engineering" width="100%">
 </p>
 
 <p align="center">
-  <a href="#quick-start"><img src="assets/icon.png" alt="REA-Neural Icon" width="110" height="110"></a>
+  <a href="#quick-start"><img src="assets/icon.png" alt="Bintra Icon" width="110" height="110"></a>
 </p>
 
-<h1 align="center">REA-Neural</h1>
+<h1 align="center">Bintra</h1>
 
 <p align="center">
   <strong>Autonomous Continuous Semantic Reverse Engineering & Binary Analysis Framework</strong><br>
@@ -14,8 +14,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/bio-colab/rea-neural/actions/workflows/windows-ci.yml"><img src="https://github.com/bio-colab/rea-neural/actions/workflows/windows-ci.yml/badge.svg" alt="Windows Native CI"></a>
-  <a href="https://github.com/bio-colab/rea-neural/releases/tag/v7.4.0"><img src="https://img.shields.io/badge/Release-v7.4.0-purple.svg" alt="Latest Release"></a>
+  <a href="https://github.com/bio-colab/bintra/actions/workflows/windows-ci.yml"><img src="https://github.com/bio-colab/bintra/actions/workflows/windows-ci.yml/badge.svg" alt="Windows Native CI"></a>
+  <a href="https://github.com/bio-colab/bintra/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/Release-v1.0.0-purple.svg" alt="Latest Release"></a>
   <a href="https://www.microsoft.com/windows"><img src="https://img.shields.io/badge/Platform-Windows_10_%2F_11_%2F_Server-blue.svg?logo=windows" alt="Platform"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg?logo=python" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-green.svg" alt="License"></a>
@@ -23,36 +23,36 @@
 </p>
 
 
-`REA-Neural` is an agent-native, next-generation reverse engineering framework tailored for **Windows compiled software executables and libraries** (`.exe`, `.dll`, PE32, PE32+). 
+`Bintra` is an agent-native, next-generation reverse engineering framework tailored for **Windows compiled software executables and libraries** (`.exe`, `.dll`, PE32, PE32+). 
 
-Built as a standalone framework grounded in continuous representation theory from recent MIT CSAIL research (*"Sparks of Weight-Space Programming"*, Takehi, Teoh, Zhang, Khattab, 2026), `REA-Neural` overcomes the core vulnerabilities of traditional symbolic reverse engineering engines (Ghidra, Hopper, IDA Pro) when analyzing obfuscated native code on Windows.
+Built as a standalone framework grounded in continuous representation theory from recent MIT CSAIL research (*"Sparks of Weight-Space Programming"*, Takehi, Teoh, Zhang, Khattab, 2026), `Bintra` overcomes the core vulnerabilities of traditional symbolic reverse engineering engines (Ghidra, Hopper, IDA Pro) when analyzing obfuscated native code on Windows.
 
 ---
 
 ## Key Breakthroughs for Windows Binaries
 
 ### 1. Continuous Semantic Deobfuscation
-Complex code protection techniques—such as Control Flow Flattening, Opaque Predicates, and instruction virtualization—artificially multiply basic blocks and obfuscate control graphs. `REA-Neural` models state transitions as continuous vector trajectories, allowing it to:
+Complex code protection techniques—such as Control Flow Flattening, Opaque Predicates, and instruction virtualization—artificially multiply basic blocks and obfuscate control graphs. `Bintra` models state transitions as continuous vector trajectories, allowing it to:
 - Instantly identify algebraic opaque predicates (e.g. dead conditional jumps following register zeroing) with flag-preserving lookahead (`mov`, `nop`, `lea`).
 - Prune dummy dispatcher loops using localized window cadence analysis ($\le 1024$ bytes, regularity $\ge 0.35$) and recover canonical linear control flow graphs without false-positive alarms on standard compiler outputs.
 
 ### 2. Cross-Architecture & Cross-Compiler Semantic Matching
-Traditional function matching algorithms rely on exact opcode hashes or structural CFG graphs, which fail when binaries are recompiled across architectures (x86-64 vs. ARM64) or optimization levels (`-O0` vs. `-O3`). `REA-Neural` bridges this gap via two complementary mechanisms:
+Traditional function matching algorithms rely on exact opcode hashes or structural CFG graphs, which fail when binaries are recompiled across architectures (x86-64 vs. ARM64) or optimization levels (`-O0` vs. `-O3`). `Bintra` bridges this gap via two complementary mechanisms:
 - **16-D Behavioral Feature Vectorizer (`SemanticFunctionMatcher`):** In standalone mode, extracts an engineered 16-dimensional behavioral histogram and state transition profile with scale-congruence guards (`scale_ratio >= 0.60`) and 100% disassembly completeness. Provides fast, zero-dependency cosine matching across structurally similar routines without requiring a heavy deep learning runtime.
 - **High P-Code SSA IR Vectorizer (`ghidra_pcode_vectorizer.py`):** When paired with Ghidra decompilation, High P-Code SSA operations are lifted into complete 64-dimensional semantic vectors encoding transition topology, def-use edge density, cyclomatic loop complexity, and memory intensity (cosine match threshold `MATCH_THRESHOLD = 0.90`; empirical accuracy is tracked via repeatable evaluation benchmarks rather than fixed source claims).
 
 ### 3. Goal-Driven Surgical Binary Patching
-Manual byte patching is notoriously error-prone, frequently resulting in stack imbalance (`RSP`/`RBP` misalignment) or PE checksum violations. `REA-Neural` computes minimal perturbation vectors ($\Delta \text{State} \le \epsilon$), automatically recalculates PE integrity checksums, and enforces a heuristic nociception guard against stack frame balance violations (`RET`/frame-altering opcode checks).
+Manual byte patching is notoriously error-prone, frequently resulting in stack imbalance (`RSP`/`RBP` misalignment) or PE checksum violations. `Bintra` computes minimal perturbation vectors ($\Delta \text{State} \le \epsilon$), automatically recalculates PE integrity checksums, and enforces a heuristic nociception guard against stack frame balance violations (`RET`/frame-altering opcode checks).
 
 ### 4. Hybrid Native-Neural Application Dissection & Weight Security Auditing
-Modern Windows applications (desktop suites, simulation runtimes, endpoint security clients, media tools) embed neural inference logic (ONNX, TFLite, GGUF, DirectML, WinML, Safetensors) directly into PE sections (`.rsrc`, `.rodata`). `REA-Neural` scans native binaries to expose these embedded logic cores and decompile the boundary between native Win32 API calls and embedded decision matrices.
+Modern Windows applications (desktop suites, simulation runtimes, endpoint security clients, media tools) embed neural inference logic (ONNX, TFLite, GGUF, DirectML, WinML, Safetensors) directly into PE sections (`.rsrc`, `.rodata`). `Bintra` scans native binaries to expose these embedded logic cores and decompile the boundary between native Win32 API calls and embedded decision matrices.
 - **Zero-Execution Security Auditing:** Scans raw embedded weights for dormant Trojan/backdoor trigger neurons and anomalous rank-1 spikes before host execution.
 - **Selective Column Surgery:** Intervenes in linear projection matrices (`column_direction_subtract`) at extreme sparsity (editing top-$K$ columns, e.g. 1.56% of weights for 64 of 4096 columns) to eliminate pathological looping or bypass deadlocks without retraining.
 - **Cross-Layer Induction & Effective Rank:** Evaluates cross-layer composition ($W_{QK}^{(l_2)} W_{OV}^{(l_1)}$) and spectral effective rank to infer alphabet and structural data complexity without running model text.
 
 ### 5. Symbiotic Ghidra Integration (High P-Code Vectorization & Live Queued-Poll Bridge)
-Rather than treating Ghidra as a detached external decompiler, `REA-Neural` directly feeds and complements Ghidra through an authenticated localhost HTTP JSON-RPC 2.0 queued-poll bridge (`ghidra_live_bridge.py` & `ReaLiveBridgeService.py`):
-- **Queued-Poll Localhost IPC Bridge:** Multi-threaded `ThreadingMixIn` HTTP server on `127.0.0.1:41718` (with per-session auth token verification and bounded discovery markers under `cap.tempdir.marker.write`, optionally disabled via `--no-temp-marker` / `publish_temp_marker=false`). `ReaLiveBridgeService.py` polls queued mutations on a `1.0s` interval inside Ghidra's background thread for thread-safe Program DB updates.
+Rather than treating Ghidra as a detached external decompiler, `Bintra` directly feeds and complements Ghidra through an authenticated localhost HTTP JSON-RPC 2.0 queued-poll bridge (`ghidra_live_bridge.py` & `BintraLiveBridgeService.py`):
+- **Queued-Poll Localhost IPC Bridge:** Multi-threaded `ThreadingMixIn` HTTP server on `127.0.0.1:41718` (with per-session auth token verification and bounded discovery markers under `cap.tempdir.marker.write`, optionally disabled via `--no-temp-marker` / `publish_temp_marker=false`). `BintraLiveBridgeService.py` polls queued mutations on a `1.0s` interval inside Ghidra's background thread for thread-safe Program DB updates.
 - **Dynamic Diagnostic Injection:** Streams Phase 1 VAD memory layout notes, Phase 1.5 runtime structure dissections (auto-synthesized C composite structs registered in Ghidra's `DataTypeManager`) and pointer scan paths, Phase 2 Crash RCA root-cause bookmarks and function renames (preserving explicit `rva` vs. `va` image-base relocation), and Phase 3 ETW temporal causality timelines directly into the active Ghidra Program Database.
 - **High P-Code IR Vectorization:** Translates Ghidra's SSA P-code operations into 64-dimensional continuous behavioral vectors, matching routines deterministically above `MATCH_THRESHOLD = 0.90` cosine similarity across compiler optimizations and architectures.
 - **Pre-Decompiler Opaque Predicate Pruning:** Simplifies algebraic dead-end branches before AST construction, eliminating decompiler timeouts and sprawling control-flow flattening dispatcher cascades.
@@ -60,16 +60,16 @@ Rather than treating Ghidra as a detached external decompiler, `REA-Neural` dire
 ---
 
 <p align="center">
-  <img src="assets/hero.jpg" alt="REA-Neural Continuous Binary Perception and Deobfuscation Flow" width="95%">
+  <img src="assets/hero.jpg" alt="Bintra Continuous Binary Perception and Deobfuscation Flow" width="95%">
   <br>
   <em>Figure 1: Continuous Program Perception — Machine code basic blocks flow through the cybernetic sensory core into continuous vector trajectories, deobfuscating control flow and enabling cross-architecture equivalence matching.</em>
 </p>
 
 ## The 10 Metaphorical Senses Framework (Cybernetic Program Perception)
 
-To unify diverse binary and neural analysis modalities into a cohesive cognitive architecture, `REA-Neural` introduces the **10 Metaphorical Senses (`SensoryCortex`)**. Inspired by biological sensorimotor systems, these senses map complex reverse engineering tasks into continuous perceptual channels:
+To unify diverse binary and neural analysis modalities into a cohesive cognitive architecture, `Bintra` introduces the **10 Metaphorical Senses (`SensoryCortex`)**. Inspired by biological sensorimotor systems, these senses map complex reverse engineering tasks into continuous perceptual channels:
 
-| # | Sense (Arabic / English) | Cybernetic Biological Metaphor | Technical Realization in REA-Neural | Telemetry & Measurement |
+| # | Sense (Arabic / English) | Cybernetic Biological Metaphor | Technical Realization in Bintra | Telemetry & Measurement |
 |:---:|:---|:---|:---|:---|
 | **1** | **البصر التحليلي**<br>`Analytical Vision` | Static spatial perception of anatomy and structural form. | Deep inspection of PE32/PE32+ headers, section geometry, mitigations (ASLR, DEP, CFG), and singular value spectral decay. | Sections discovered, mitigation vector, SVD spectral energy decay. |
 | **2** | **السمع الزمني**<br>`Temporal Hearing` | Sequential listening to acoustic cadences and rhythms over time. | Tracing instruction transition sequences, activation progression over execution steps, and control transition density. | Decoded instruction steps, temporal transition count, transition density $\Delta t$. |
@@ -86,7 +86,7 @@ To unify diverse binary and neural analysis modalities into a cohesive cognitive
 
 ## MIT CSAIL Research Lineage & Latent Experimental Capabilities
 
-`REA-Neural` directly incorporates and adapts the foundational experiments from MIT CSAIL's research:  
+`Bintra` directly incorporates and adapts the foundational experiments from MIT CSAIL's research:  
 *"Sparks of Weight-Space Programming: LLMs can natively read & write neural network weights"*, by Rikiya Takehi, Jayden Teoh, Alex Zhang, and Omar Khattab (November 2, 2026).
 
 Beyond the declared binary reverse engineering workflows, the codebase preserves **the complete suite of experimental capabilities** as an active research platform:
@@ -123,7 +123,7 @@ For detailed strategic priorities, technological evaluations (ETW, Event Log, ph
 The preservation of these capabilities serves three vital engineering purposes:
 
 * **1. Active Frontier for Ongoing Development:**  
-  These mechanisms form the concrete development backlog for upcoming `REA-Neural` milestones, including live ETW process-targeted tracing, automated Ghidra P-code symbolic-to-neural lifting, and deep NTAPI inspection.
+  These mechanisms form the concrete development backlog for upcoming `Bintra` milestones, including live ETW process-targeted tracing, automated Ghidra P-code symbolic-to-neural lifting, and deep NTAPI inspection.
 * **2. Open Platform for Future Collaborators:**  
   By documenting both the operational CLI tools and the latent experimental algorithms, external researchers and open-source contributors can immediately access, benchmark, and extend these continuous semantic techniques.
 * **3. Historical Lineage & Design Provenance:**  
@@ -134,7 +134,7 @@ The preservation of these capabilities serves three vital engineering purposes:
 ## Repository Structure
 
 ```
-rea-neural/
+bintra/
 ├── .github/
 │   ├── workflows/
 │   │   └── windows-ci.yml         # Automated Windows-only CI/CD pipeline
@@ -148,16 +148,16 @@ rea-neural/
 ├── requirements.txt               # Lightweight runtime dependencies (numpy, capstone)
 ├── README.md                      # Comprehensive guide
 ├── src/
-│   ├── cli.py                     # Unified CLI entry point (`rea-neural`) with self-update
-│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`rea-mcp`, 34 tools)
+│   ├── cli.py                     # Unified CLI entry point (`bintra`) with self-update
+│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`bintra-mcp`, 34 tools)
 │   ├── binary_neural_engine.py    # PE binary analysis, deobfuscator & patcher
-│   ├── rea_neural_engine.py       # Weight-space SVD & circuit decompiler
+│   ├── bintra_engine.py       # Weight-space SVD & circuit decompiler
 │   ├── sensory_cortex.py          # 10 Metaphorical Senses evaluation cortex
 │   ├── ghidra_pcode_vectorizer.py # Ghidra P-Code IR continuous vectorizer
 │   ├── security/                  # ExecutionGuard, AuditLogger & Reference Monitor
 │   └── windows_intelligence/      # Process, Device, Registry & Crash Diagnostics
 ├── skills/
-│   └── reverse-engineer-anything/ # Agent-native skill specification
+│   └── bintra/ # Agent-native skill specification
 ├── schemas/                       # Agent MCP tool definitions
 ├── tests/                         # 195 automated unit, sensory, telemetry & security tests
 └── docs/                          # Architecture, Roadmap & mathematical foundations
@@ -178,8 +178,8 @@ rea-neural/
 ### Option 1: Automated 1-Click Installation (Recommended)
 Clone the repository and run the automated PowerShell installer:
 ```powershell
-git clone https://github.com/bio-colab/rea-neural.git
-cd rea-neural
+git clone https://github.com/bio-colab/bintra.git
+cd bintra
 
 # Run the PowerShell installer (automatically configures PATH, installs package, runs smoke test)
 powershell -ExecutionPolicy Bypass -File .\install.ps1
@@ -192,8 +192,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 ### Option 2: Standard Developer Installation (`pip`)
 ```powershell
 # Clone the repository
-git clone https://github.com/bio-colab/rea-neural.git
-cd rea-neural
+git clone https://github.com/bio-colab/bintra.git
+cd bintra
 
 # Install in editable mode
 pip install -e .
@@ -202,9 +202,9 @@ pip install -e .
 ---
 
 ### Option 3: Direct Installation via Git (Zero-Clone)
-Install REA-Neural directly into your active Python environment without manually downloading the repository:
+Install Bintra directly into your active Python environment without manually downloading the repository:
 ```bash
-pip install git+https://github.com/bio-colab/rea-neural.git
+pip install git+https://github.com/bio-colab/bintra.git
 ```
 
 ---
@@ -213,7 +213,7 @@ pip install git+https://github.com/bio-colab/rea-neural.git
 If you use Astral's [`uv`](https://github.com/astral-sh/uv):
 ```powershell
 # Install as a persistent global tool
-uv tool install git+https://github.com/bio-colab/rea-neural.git
+uv tool install git+https://github.com/bio-colab/bintra.git
 
 # Or in an active project virtual environment
 uv pip install -e .
@@ -225,39 +225,39 @@ uv pip install -e .
 Run the unified CLI from any directory or terminal:
 ```powershell
 # Verify CLI presence and version
-rea-neural --help
+bintra --help
 
 # Run a quick 10-Sense Sensory Cortex smoke test on a sample hex stream
-rea-neural sense --hex "55 48 89 e5 90 5d c3"
+bintra sense --hex "55 48 89 e5 90 5d c3"
 ```
 
 ---
 
 ## Agent-Native MCP (Model Context Protocol) Integration
 
-`REA-Neural` ships with a production-ready **JSON-RPC 2.0 stdio MCP server** (`rea-mcp`) offering **34 mediated reverse engineering and Windows intelligence tools** to AI agents (Claude Desktop, Cursor, Antigravity, Windsurf).
+`Bintra` ships with a production-ready **JSON-RPC 2.0 stdio MCP server** (`bintra-mcp`) offering **34 mediated reverse engineering and Windows intelligence tools** to AI agents (Claude Desktop, Cursor, Antigravity, Windsurf).
 
 ### 1. Claude Desktop Configuration
-Add the `rea` server to your `%APPDATA%\Claude\claude_desktop_config.json`:
+Add the `bintra` server to your `%APPDATA%\Claude\claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "rea": {
-      "command": "rea-mcp",
+    "bintra": {
+      "command": "bintra-mcp",
       "args": []
     }
   }
 }
 ```
-*(If `rea-mcp` is not yet in your system PATH, replace `"rea-mcp"` with the absolute path to your Python Scripts executable, e.g. `"C:\\Users\\<YourUser>\\AppData\\Local\\Programs\\Python\\Python312\\Scripts\\rea-mcp.exe"` or `["python", "-m", "mcp_server"]`)*.
+*(If `bintra-mcp` is not yet in your system PATH, replace `"bintra-mcp"` with the absolute path to your Python Scripts executable, e.g. `"C:\\Users\\<YourUser>\\AppData\\Local\\Programs\\Python\\Python312\\Scripts\\bintra-mcp.exe"` or `["python", "-m", "mcp_server"]`)*.
 
 ### 2. Cursor / VS Code MCP Configuration
 In your Cursor or VS Code `.cursor/mcp.json`:
 ```json
 {
   "mcpServers": {
-    "rea-neural": {
-      "command": "rea-mcp",
+    "bintra": {
+      "command": "bintra-mcp",
       "args": []
     }
   }
@@ -267,11 +267,11 @@ In your Cursor or VS Code `.cursor/mcp.json`:
 ### 3. Verification of MCP Server
 Test the stdio JSON-RPC handshake directly:
 ```powershell
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | rea-mcp
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | bintra-mcp
 ```
 Output:
 ```json
-{"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2024-11-05", "serverInfo": {"name": "rea-neural", "version": "7.4.0"}}}
+{"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2024-11-05", "serverInfo": {"name": "bintra", "version": "1.0.0"}}}
 ```
 
 ---
@@ -281,56 +281,56 @@ Output:
 ### Binary / Windows Executable Commands
 ```powershell
 # Inspect PE executable headers, ASLR/DEP/CFG mitigations, and sections
-rea-neural inspect --file "C:\Windows\System32\notepad.exe"
+bintra inspect --file "C:\Windows\System32\notepad.exe"
 
 # Deobfuscate machine code bytes and isolate dead opaque predicates
-rea-neural deobfuscate --hex "55 48 89 e5 31 c0 74 05 e8 11 22 33 44 90 c3"
+bintra deobfuscate --hex "55 48 89 e5 31 c0 74 05 e8 11 22 33 44 90 c3"
 
 # Match functions across compilers or architectures semantically
-rea-neural match `
+bintra match `
   --func1 "55 48 89 e5 89 7d fc 8b 45 fc 83 c0 01 5d c3" `
   --func2 "55 48 89 e5 8d 47 01 5d c3"
 
 # Surgically patch an executable file on disk with stack preservation & PE checksum sync
 # Note: Output file must be outside the target source directory (Complete Mediation guarantee)
-rea-neural patch-binary `
+bintra patch-binary `
   --file target.exe `
   --output workspace/target_patched.exe `
   --offset 0x1A40 `
   --patch-hex "90 90"
 
 # Scan a native Windows binary for embedded neural logic (DirectML, ONNX, GGUF)
-rea-neural scan-hybrid --file application.exe
+bintra scan-hybrid --file application.exe
 
 # Holistic multi-modal binary inspection & 10 Metaphorical Senses evaluation
-rea-neural sense --file application.exe --hex "55 48 89 e5 5d c3"
+bintra sense --file application.exe --hex "55 48 89 e5 5d c3"
 ```
 
 ### Windows System & Diagnostic Intelligence Commands
 ```powershell
 # Profile host Windows OS build, WOW64 emulation, and AppCompatFlags layers
-rea-neural win-audit --file target.exe
+bintra win-audit --file target.exe
 
 # Audit DLL search order, API-Sets, and verify required exported symbols
-rea-neural resolve-deps --file target.exe
+bintra resolve-deps --file target.exe
 
 # Detect processes holding active locks on a target file (via Windows Restart Manager)
-rea-neural file-locks --file target.dll
+bintra file-locks --file target.dll
 
 # Find processes currently hosting a loaded DLL
-rea-neural proc-modules --module kernel32.dll
+bintra proc-modules --module kernel32.dll
 
 # Match PnP devices against Driver Store packages and evaluate driver ranks
-rea-neural dev-match --query "PCI" --problems-only
+bintra dev-match --query "PCI" --problems-only
 ```
 
 ### Weight-Space & Safetensors Neural Commands
 ```powershell
 # Audit embedded Safetensors neural model (Effective Rank, Induction Heads, Backdoors, Amenability)
-rea-neural wsp-audit --model model.safetensors
+bintra wsp-audit --model model.safetensors
 
 # Perform surgical low-rank column direction subtraction on embedded linear layers
-rea-neural patch-weights `
+bintra patch-weights `
   --source model.safetensors `
   --output workspace/patched.safetensors `
   --tensor mlp.down_proj `
@@ -341,10 +341,10 @@ rea-neural patch-weights `
 ### Self-Update & Continuous Deployment
 ```powershell
 # Check whether an upstream update is available from GitHub
-rea-neural update --check
+bintra update --check
 
 # Pull verified commits with explicit confirmation (--yes), sync dependencies, or pin --ref <tag-or-sha>
-rea-neural update --yes
+bintra update --yes
 ```
 
 ### Running the Test Suite
@@ -357,12 +357,12 @@ python -m unittest discover -s tests -p "test_*.py"
 
 ## Windows Troubleshooting & FAQ
 
-### 1. Error: `'rea-neural' is not recognized as an internal or external command`
+### 1. Error: `'bintra' is not recognized as an internal or external command`
 **Cause:** The Python `Scripts` directory is not in your user environment `PATH`.  
 **Solution:**
 1. Run `install.ps1`, which automatically detects your Python `Scripts` directory and appends it to your User `PATH`.
 2. Or manually add `%LOCALAPPDATA%\Programs\Python\Python3xx\Scripts` (or `%APPDATA%\Python\Python3xx\Scripts`) to your User Environment Variables, then restart your terminal.
-3. Alternatively, invoke REA-Neural directly via Python from any location:
+3. Alternatively, invoke Bintra directly via Python from any location:
    ```powershell
    python -m cli --help
    python -m mcp_server
@@ -388,14 +388,14 @@ We warmly welcome contributions from the binary analysis, systems research, and 
   - [alphaXiv Preprint Discussion](https://www.alphaxiv.org/abs/2611.weight-space-programming)
   - [Official MIT CSAIL Replication Logs & Prompts Repository](https://github.com/RikiyaT/lm_understand-logs)
   - [Weights Editing Replications (Jasper Zhao)](https://github.com/jasperzhao05/weights_editing)
-- **Scope & Methodological Verification:** While WSP research explores direct LLM reasoning over neural network parameters in small models, `REA-Neural` extends this conceptual foundation into continuous state-transition analysis, deterministic deobfuscation, and surgical PE patching for compiled native software.
+- **Scope & Methodological Verification:** While WSP research explores direct LLM reasoning over neural network parameters in small models, `Bintra` extends this conceptual foundation into continuous state-transition analysis, deterministic deobfuscation, and surgical PE patching for compiled native software.
 - Maintained by [bio-colab](https://github.com/bio-colab).
 
 ---
 
 ## Known Limitations & Heuristic Boundaries
 
-`REA-Neural` maintains a strict, transparent distinction between deterministic mathematical verification and heuristic statistical pattern matching:
+`Bintra` maintains a strict, transparent distinction between deterministic mathematical verification and heuristic statistical pattern matching:
 
 1. **Standalone 16-D Behavioral Vectors vs. Deep Learned Neural Embeddings:**
    - The standalone `vectorize_function` in `binary_neural_engine.py` is an engineered 16-dimensional behavioral histogram and state transition profile (frequency of instruction classes, branch topology, memory operations, and stack frame deltas), **not** a deep learned neural network embedding (such as jTrans or PalmTree). The term "continuous semantic vector" refers to continuous state-transition modeling rather than a trained deep representation.
@@ -415,7 +415,7 @@ We warmly welcome contributions from the binary analysis, systems research, and 
    - Windows Intelligence subsystems (`WindowsRegistryAnalyzer`, `CommandExecutor`, `WindowsOSProfiler`) fail-closed gracefully on non-Windows host environments (such as Linux CI or sandboxes), returning structured `status: "not_applicable"` diagnostics rather than failing with platform attribute errors.
 
 5. **Runtime Telemetry, Memory Integrity & Audit Persistence Contracts:**
-   - **Strict Read-Only Process Introspection:** Live memory scanning (`rea_memory_scan`, `rea_pointer_scan`, `rea_struct_dissect`) uses `PROCESS_VM_READ | PROCESS_QUERY_INFORMATION` only and requires an explicit workspace-scoped `--session-file` / `session_id` without altering target process memory.
+   - **Strict Read-Only Process Introspection:** Live memory scanning (`bintra_memory_scan`, `bintra_pointer_scan`, `bintra_struct_dissect`) uses `PROCESS_VM_READ | PROCESS_QUERY_INFORMATION` only and requires an explicit workspace-scoped `--session-file` / `session_id` without altering target process memory.
    - **Hybrid Native ETW + Non-Elevated Fallbacks:** `EtwCaptureEngine` attempts real-time native `OpenTraceW` / `ProcessTrace` trace consumption (requiring Administrator or Performance Log Users privileges) and falls back cleanly on standard non-elevated Windows sessions to Toolhelp32 module snapshots (`CreateToolhelp32Snapshot`) and `WEVTAPI` Windows Event Log channels, explicitly reporting `event_sources` and `has_native_etw_events`.
    - **Audit Persistence & Fail-Closed CLI:** Mutating CLI actions (`patch`, `patch-binary`, `patch-weights`, and `update --yes`/`--confirm`) require strict fail-closed `AuditLogger` initialization (`AUDIT_INIT_FAILED`), while read-only CLI inspections signal degraded logging transparently via `"audit_degraded": true` and `"audit_degraded_reason"`.
 

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Path Identity & Jail Boundary Enforcer.
+Bintra Path Identity & Jail Boundary Enforcer.
 Provides deterministic canonical path resolution, anti-traversal defense,
 and protection against NTFS Junctions, Symbolic Links, and Alternate Data Streams (ADS).
 """

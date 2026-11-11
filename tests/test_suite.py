@@ -22,7 +22,7 @@ from binary_neural_engine import (
     SurgicalBinaryPatcher,
     HybridBinaryDissector
 )
-from rea_neural_engine import (
+from bintra_engine import (
     SafetensorsHandler,
     SubspaceAnalyzer,
     CircuitDecompiler,
@@ -223,7 +223,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
             # Out-of-place write succeeds to separate workspace and preserves original file
             from security import ExecutionGuard
-            work_dir = tempfile.mkdtemp(prefix="rea_ws_")
+            work_dir = tempfile.mkdtemp(prefix="bintra_ws_")
             try:
                 out_st_path = os.path.join(work_dir, "patched_model.safetensors")
                 with ExecutionGuard.scoped_session(target_binary_path=st_path, workspace_dir=work_dir):
@@ -374,7 +374,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
                     f.write(raw)
 
             from security import ExecutionGuard
-            work_dir = tempfile.mkdtemp(prefix="rea_ws_")
+            work_dir = tempfile.mkdtemp(prefix="bintra_ws_")
             try:
                 out_patch_p = os.path.join(work_dir, "patch.safetensors")
                 perturbed = mat.copy()
@@ -496,7 +496,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
     def test_wsp_exp3_effective_rank_romaji_vs_code_discrimination(self):
         """Verifies Exp 3 (Page 8): Effective Rank distinguishes restricted-alphabet (Romaji) from full-rank code."""
-        from rea_neural_engine import CrossLayerCircuitAnalyzer
+        from bintra_engine import CrossLayerCircuitAnalyzer
         rng = np.random.default_rng(123)
         u_low = rng.standard_normal((32, 5)).astype(np.float32)
         v_low = rng.standard_normal((5, 32)).astype(np.float32)
@@ -510,7 +510,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
     def test_wsp_exp3_cross_layer_induction_head_matrix_multiplication(self):
         """Verifies Exp 3 (Page 7-8): Cross-layer W_QK @ W_OV composition detects copying heads without running text."""
-        from rea_neural_engine import CrossLayerCircuitAnalyzer
+        from bintra_engine import CrossLayerCircuitAnalyzer
         early_ov = np.zeros((32, 32), dtype=np.float32)
         late_qk = np.zeros((32, 32), dtype=np.float32)
         early_ov[8:16, 8:16] = np.eye(8, dtype=np.float32) * 5.0
@@ -520,7 +520,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
     def test_wsp_exp7_sycophancy_attention_pattern_auditor(self):
         """Verifies Exp 7 (Page 14-15): AttentionPatternAuditor separates honest vs. sycophantic heads."""
-        from rea_neural_engine import AttentionPatternAuditor
+        from bintra_engine import AttentionPatternAuditor
         d = 16
         q_ans = np.zeros(d, dtype=np.float32)
         q_ans[0] = 1.0  # Answer query probes dimension 0
@@ -545,7 +545,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
     def test_wsp_gemma_vs_qwen_amenability_diagnostic(self):
         """Verifies Page 17 boundary condition: distinguishes amenable loop obstacle from capability deficit."""
-        from rea_neural_engine import AmenabilityDiagnostic
+        from bintra_engine import AmenabilityDiagnostic
         u = np.ones((16, 1), dtype=np.float32)
         v = np.ones((1, 16), dtype=np.float32)
         qwen_mat = (u @ v) * 10.0 + np.eye(16, dtype=np.float32) * 0.2
@@ -559,7 +559,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
     def test_wsp_exp5_zero_shot_breakout_weight_synthesis(self):
         """Verifies Exp 5 (Page 10-11): Compiling Breakout policy weights from scratch without training."""
-        from rea_neural_engine import WeightSpaceCompiler
+        from bintra_engine import WeightSpaceCompiler
         tensors = WeightSpaceCompiler.compile_breakout_policy_network(input_dim=32, hidden_dim=16, action_dim=3)
         self.assertEqual(set(tensors.keys()), {
             "policy.layer1.weight", "policy.layer1.bias",
@@ -571,7 +571,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
     def test_wsp_exp4_conditional_subcircuit_grafting_within_3_5_percent(self):
         """Verifies Exp 4 (Page 9-10): Grafting a conditional bypass sub-circuit modifying <= 3.5% weights."""
-        from rea_neural_engine import CircuitGrafter
+        from bintra_engine import CircuitGrafter
         host = np.random.randn(64, 64).astype(np.float32)
         host[10, :] *= 0.001  # dormant row
         patched, info = CircuitGrafter.graft_conditional_subcircuit(
@@ -583,7 +583,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
     def test_wsp_page19_cross_architecture_circuit_transplantation(self):
         """Verifies Page 19 'True architectural and model merging': grafting modes across different shapes."""
-        from rea_neural_engine import CircuitGrafter
+        from bintra_engine import CircuitGrafter
         host = np.eye(24, 32, dtype=np.float32)
         donor = np.ones((16, 16), dtype=np.float32) * 2.0
         merged, info = CircuitGrafter.transplant_reasoning_subspace(host, donor, rank_k=2, blend=0.2)
@@ -593,7 +593,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
     def test_wsp_exp6_exp8_forward_pass_budgeted_harness_monotonic_gain(self):
         """Verifies Exp 6 & 8 (Page 12-16): ForwardPassHarness keeps edits only when score improves."""
-        from rea_neural_engine import ForwardPassHarness
+        from bintra_engine import ForwardPassHarness
         rng = np.random.default_rng(7)
         w_init = rng.standard_normal((12, 16)).astype(np.float32)
         x_probes = rng.standard_normal((8, 16)).astype(np.float32)
@@ -606,7 +606,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
     def test_wsp_page19_zero_eval_backdoor_and_receptive_field_audit(self):
         """Verifies Exp 1 & Page 19: Static weight auditing detects Trojan spikes and bottom-row paddle weights."""
-        from rea_neural_engine import WeightSecurityAuditor
+        from bintra_engine import WeightSecurityAuditor
         mat = np.random.randn(32, 100).astype(np.float32) * 0.1
         mat[7, :] = 15.0
         res = WeightSecurityAuditor.audit_weights_without_evaluation(mat, spatial_height=10, spatial_width=10)
@@ -699,7 +699,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertEqual(rename_plan["params"]["name"], "DeobfuscatedKeyCheck")
 
         annot_plan = GhidraAnnotationPlanner.build_function_annotation_plan(
-            "0x140001000", "DeobfuscatedKeyCheck", return_type="int", comment="Bypassed by REA"
+            "0x140001000", "DeobfuscatedKeyCheck", return_type="int", comment="Bypassed by Bintra"
         )
         self.assertEqual(annot_plan["method"], "annotate_native_function")
         self.assertEqual(annot_plan["params"]["return_type"], "int")
@@ -768,67 +768,67 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         self.assertEqual(plan["obfuscated_functions"], 1)
         self.assertEqual(plan["opaque_predicates_total"], 1)
         self.assertEqual(len(plan["rename_actions"]), 1)
-        self.assertEqual(plan["rename_actions"][0]["name"], "REA_Deob_FUN_140001000")
+        self.assertEqual(plan["rename_actions"][0]["name"], "Bintra_Deob_FUN_140001000")
         self.assertEqual(len(plan["comment_actions"]), 1)
 
     def test_ghidra_bridge_scripts_exist(self):
         """Verifies that Ghidra bridge scripts exist and are well-formed."""
         from pathlib import Path
         repo_root = Path(__file__).resolve().parent.parent
-        java_script = repo_root / "ghidra_scripts" / "ReaNeuralGhidraBridge.java"
-        py_script = repo_root / "ghidra_scripts" / "rea_extract_pcode.py"
+        java_script = repo_root / "ghidra_scripts" / "BintraGhidraBridge.java"
+        py_script = repo_root / "ghidra_scripts" / "bintra_extract_pcode.py"
         self.assertTrue(java_script.exists())
         self.assertTrue(py_script.exists())
 
         java_content = java_script.read_text(encoding="utf-8")
-        self.assertIn("public class ReaNeuralGhidraBridge extends GhidraScript", java_content)
+        self.assertIn("public class BintraGhidraBridge extends GhidraScript", java_content)
         self.assertIn("startTransaction", java_content)
         self.assertIn("ghidra-analyze", java_content)
 
     def test_mcp_server_initialize_and_tools_list(self):
         """Verifies that native MCP server implements JSON-RPC 2.0 handshake and 27 tools."""
-        from mcp_server import ReaMcpServer, TOOLS_REGISTRY
-        server = ReaMcpServer()
+        from mcp_server import BintraMcpServer, TOOLS_REGISTRY
+        server = BintraMcpServer()
         init_res = server.handle_initialize({})
-        self.assertEqual(init_res["serverInfo"]["name"], "rea-neural")
-        self.assertEqual(init_res["serverInfo"]["version"], "7.4.0")
+        self.assertEqual(init_res["serverInfo"]["name"], "bintra")
+        self.assertEqual(init_res["serverInfo"]["version"], "1.0.0")
 
         tools_res = server.handle_tools_list({})
         self.assertIn("tools", tools_res)
         self.assertEqual(len(tools_res["tools"]), 34)
         tool_names = [t["name"] for t in tools_res["tools"]]
-        self.assertIn("rea_memory_scan", tool_names)
-        self.assertIn("rea_pointer_scan", tool_names)
-        self.assertIn("rea_struct_dissect", tool_names)
-        self.assertIn("rea_ghidra_live_bridge", tool_names)
-        self.assertIn("rea_device_driver_intelligence", tool_names)
-        self.assertIn("rea_process_resource_audit", tool_names)
-        self.assertIn("rea_hardware_audit", tool_names)
-        self.assertIn("rea_driver_audit", tool_names)
-        self.assertIn("rea_service_audit", tool_names)
-        self.assertIn("rea_dmp_inspect", tool_names)
-        self.assertIn("rea_etw_audit", tool_names)
-        self.assertIn("rea_evidence_graph", tool_names)
-        self.assertIn("rea_dump_bytes", tool_names)
-        self.assertIn("rea_inspect_binary", tool_names)
-        self.assertIn("rea_sensory_audit", tool_names)
-        self.assertIn("rea_ghidra_headless", tool_names)
-        self.assertIn("rea_windows_env_audit", tool_names)
-        self.assertIn("rea_resolve_dependencies", tool_names)
-        self.assertIn("rea_inspect_crash_reports", tool_names)
-        self.assertIn("rea_correlate_failure_evidence", tool_names)
-        self.assertIn("rea_win_catalog_cmd", tool_names)
-        self.assertIn("rea_registry_audit", tool_names)
+        self.assertIn("bintra_memory_scan", tool_names)
+        self.assertIn("bintra_pointer_scan", tool_names)
+        self.assertIn("bintra_struct_dissect", tool_names)
+        self.assertIn("bintra_ghidra_live_bridge", tool_names)
+        self.assertIn("bintra_device_driver_intelligence", tool_names)
+        self.assertIn("bintra_process_resource_audit", tool_names)
+        self.assertIn("bintra_hardware_audit", tool_names)
+        self.assertIn("bintra_driver_audit", tool_names)
+        self.assertIn("bintra_service_audit", tool_names)
+        self.assertIn("bintra_dmp_inspect", tool_names)
+        self.assertIn("bintra_etw_audit", tool_names)
+        self.assertIn("bintra_evidence_graph", tool_names)
+        self.assertIn("bintra_dump_bytes", tool_names)
+        self.assertIn("bintra_inspect_binary", tool_names)
+        self.assertIn("bintra_sensory_audit", tool_names)
+        self.assertIn("bintra_ghidra_headless", tool_names)
+        self.assertIn("bintra_windows_env_audit", tool_names)
+        self.assertIn("bintra_resolve_dependencies", tool_names)
+        self.assertIn("bintra_inspect_crash_reports", tool_names)
+        self.assertIn("bintra_correlate_failure_evidence", tool_names)
+        self.assertIn("bintra_win_catalog_cmd", tool_names)
+        self.assertIn("bintra_registry_audit", tool_names)
 
     def test_mcp_server_dispatch_tool_call(self):
         """Verifies dispatching tools directly through MCP server protocol."""
-        from mcp_server import ReaMcpServer
-        server = ReaMcpServer()
-        audit_res = server.dispatch_tool("rea_sensory_audit", {"code_hex": "55 48 89 e5 31 c0 5d c3"})
+        from mcp_server import BintraMcpServer
+        server = BintraMcpServer()
+        audit_res = server.dispatch_tool("bintra_sensory_audit", {"code_hex": "55 48 89 e5 31 c0 5d c3"})
         self.assertEqual(audit_res["active_senses_count"], 10)
         self.assertIn("score_semantics", audit_res)
 
-        deob_res = server.dispatch_tool("rea_deobfuscate_binary", {"code_hex": "31 c0 74 02 90 90 c3"})
+        deob_res = server.dispatch_tool("bintra_deobfuscate_binary", {"code_hex": "31 c0 74 02 90 90 c3"})
         self.assertIn("opaque_predicates_detected", deob_res)
 
 
@@ -1050,26 +1050,26 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
                 os.remove(tmp)
 
     def test_unified_version_consistency_v7_4_0(self):
-        """Verifies that all project manifests, CLI, and MCP servers consistently declare v7.4.0."""
+        """Verifies that all project manifests, CLI, and MCP servers consistently declare v1.0.0."""
         import json
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         # pyproject.toml
         pyproj = os.path.join(repo_root, "pyproject.toml")
         with open(pyproj, "r", encoding="utf-8") as f:
-            self.assertIn('version = "7.4.0"', f.read())
+            self.assertIn('version = "1.0.0"', f.read())
         # package.json
         pkg_json = os.path.join(repo_root, "package.json")
         with open(pkg_json, "r", encoding="utf-8") as f:
-            self.assertEqual(json.load(f)["version"], "7.4.0")
+            self.assertEqual(json.load(f)["version"], "1.0.0")
         # mcp_server.py
         from mcp_server import SERVER_VERSION
-        self.assertEqual(SERVER_VERSION, "7.4.0")
+        self.assertEqual(SERVER_VERSION, "1.0.0")
         # SKILL.md
-        skill_file = os.path.join(repo_root, "skills", "reverse-engineer-anything", "SKILL.md")
+        skill_file = os.path.join(repo_root, "skills", "bintra", "SKILL.md")
         if os.path.exists(skill_file):
             with open(skill_file, "r", encoding="utf-8") as sf:
                 skill_content = sf.read()
-                self.assertIn('version: "7.4.0"', skill_content)
+                self.assertIn('version: "1.0.0"', skill_content)
                 self.assertIn('tool_count: 34', skill_content)
 
 
@@ -1335,7 +1335,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             self.assertEqual(dossier1["binary_mapping"]["ghidra_function_name"], "FUN_00401050")
 
             md1 = DiagnosticEvidenceCorrelator.format_markdown(dossier1)
-            self.assertIn("# REA-Neural Failure Evidence Dossier", md1)
+            self.assertIn("# Bintra Failure Evidence Dossier", md1)
             self.assertIn("0xc0000005", md1)
 
             # Case 2: External runtime fault (e.g. crash in d3d9.dll)
@@ -1367,9 +1367,9 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
     @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_mcp_server_windows_intelligence_dispatch(self):
         """Verifies that native MCP server can dispatch windows intelligence audit tools."""
-        from mcp_server import ReaMcpServer
-        server = ReaMcpServer()
-        audit_res = server.dispatch_tool("rea_windows_env_audit", {})
+        from mcp_server import BintraMcpServer
+        server = BintraMcpServer()
+        audit_res = server.dispatch_tool("bintra_windows_env_audit", {})
         self.assertIn("os", audit_res)
         self.assertIn("devices", audit_res)
         self.assertIn("security", audit_res)
@@ -1498,14 +1498,14 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
     @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_mcp_server_catalog_and_registry_dispatch(self):
         """Verifies MCP server protocol dispatch for win_catalog_cmd and registry_audit."""
-        from mcp_server import ReaMcpServer
-        server = ReaMcpServer()
+        from mcp_server import BintraMcpServer
+        server = BintraMcpServer()
 
-        cmd_res = server.dispatch_tool("rea_win_catalog_cmd", {"command_id": "os_ver"})
+        cmd_res = server.dispatch_tool("bintra_win_catalog_cmd", {"command_id": "os_ver"})
         self.assertEqual(cmd_res["status"], "success")
         self.assertEqual(cmd_res["schema"], "windows.ver.v1")
 
-        reg_res = server.dispatch_tool("rea_registry_audit", {"domain": "OPERATING_SYSTEM"})
+        reg_res = server.dispatch_tool("bintra_registry_audit", {"domain": "OPERATING_SYSTEM"})
         self.assertEqual(reg_res["status"], "success")
         self.assertEqual(reg_res["domain"], "OPERATING_SYSTEM")
 
@@ -1578,19 +1578,19 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
     @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_mcp_server_system_introspection_dispatch(self):
         """Verifies MCP server dispatch for hardware_audit, driver_audit, and service_audit."""
-        from mcp_server import ReaMcpServer
-        server = ReaMcpServer()
+        from mcp_server import BintraMcpServer
+        server = BintraMcpServer()
 
-        hw_res = server.dispatch_tool("rea_hardware_audit", {"problems_only": True})
+        hw_res = server.dispatch_tool("bintra_hardware_audit", {"problems_only": True})
         self.assertIn("is_hardware_healthy", hw_res)
         self.assertIn("problem_devices_count", hw_res)
 
-        drv_res = server.dispatch_tool("rea_driver_audit", {"driver_name_filter": "dxg"})
+        drv_res = server.dispatch_tool("bintra_driver_audit", {"driver_name_filter": "dxg"})
         self.assertEqual(drv_res.get("status"), "success")
         self.assertIn("drivers", drv_res)
         self.assertGreater(drv_res.get("matched_count", 0), 0)
 
-        svc_res = server.dispatch_tool("rea_service_audit", {"active_only": True})
+        svc_res = server.dispatch_tool("bintra_service_audit", {"active_only": True})
         self.assertEqual(svc_res.get("status"), "success")
         self.assertIn("services", svc_res)
         self.assertGreater(len(svc_res["services"]), 0)
@@ -1735,10 +1735,10 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         import tempfile
         import shutil
         from windows_intelligence import EtwController
-        ws_tmp = tempfile.mkdtemp(prefix="rea_etw_ws_")
+        ws_tmp = tempfile.mkdtemp(prefix="bintra_etw_ws_")
         try:
             res = EtwController.capture_bounded_session(
-                session_name="REA_Unit_Test_Trace",
+                session_name="Bintra_Unit_Test_Trace",
                 duration_sec=0.5,
                 workspace_dir=ws_tmp
             )
@@ -1752,17 +1752,17 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_mcp_server_telemetry_dispatch(self):
-        """Verifies MCP server protocol dispatch for rea_dmp_inspect and rea_etw_audit."""
-        from mcp_server import ReaMcpServer
-        server = ReaMcpServer()
+        """Verifies MCP server protocol dispatch for bintra_dmp_inspect and bintra_etw_audit."""
+        from mcp_server import BintraMcpServer
+        server = BintraMcpServer()
 
         # Audit dumps without explicit path
-        dmp_res = server.dispatch_tool("rea_dmp_inspect", {})
+        dmp_res = server.dispatch_tool("bintra_dmp_inspect", {})
         self.assertEqual(dmp_res["status"], "success")
         self.assertIn("total_dumps_discovered", dmp_res)
 
         # ETW audit
-        etw_res = server.dispatch_tool("rea_etw_audit", {})
+        etw_res = server.dispatch_tool("bintra_etw_audit", {})
         self.assertEqual(etw_res["status"], "success")
         self.assertIn("registered_providers_count", etw_res)
         self.assertIn("active_sessions", etw_res)
@@ -1852,12 +1852,12 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_mcp_server_evidence_graph_dispatch(self):
-        """Verifies MCP server protocol dispatch for rea_evidence_graph."""
-        from mcp_server import ReaMcpServer
-        server = ReaMcpServer()
+        """Verifies MCP server protocol dispatch for bintra_evidence_graph."""
+        from mcp_server import BintraMcpServer
+        server = BintraMcpServer()
 
         cmd_path = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "System32", "cmd.exe")
-        res = server.dispatch_tool("rea_evidence_graph", {"binary_path": cmd_path})
+        res = server.dispatch_tool("bintra_evidence_graph", {"binary_path": cmd_path})
         self.assertEqual(res["status"], "success")
         self.assertGreater(res["total_nodes"], 10)
         self.assertGreater(res["total_edges"], 10)
@@ -1978,7 +1978,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
     def test_zero_hardcoded_developer_paths(self):
         """Verifies zero occurrences of developer paths in source code, tests, and ghidra scripts."""
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        disallowed = ["c:" + "\\users\\eylias", "d:" + "\\rea-neural", "/users/eylias", "users/eylias"]
+        disallowed = ["c:" + "\\users\\eylias", "d:" + "\\rea-neural", "d:" + "\\bintra", "/users/eylias", "users/eylias"]
         scanned_exts = (".py", ".java", ".md", ".json")
 
         for root_dir in (os.path.join(repo_root, "src"), os.path.join(repo_root, "ghidra_scripts"), os.path.join(repo_root, "tests")):
@@ -2258,7 +2258,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
         # Create temporary locked file
         with tempfile.NamedTemporaryFile(delete=False) as tf:
-            tf.write(b"lock_test_payload_rea_neural")
+            tf.write(b"lock_test_payload_bintra")
             tf.flush()
             temp_path = tf.name
 
@@ -2351,7 +2351,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         """Verifies TargetScope computes baseline SHA-256 and detects any single-byte mutation."""
         from security import TargetScope
 
-        target_dir = tempfile.mkdtemp(prefix="rea_tgt_")
+        target_dir = tempfile.mkdtemp(prefix="bintra_tgt_")
         target_path = os.path.join(target_dir, "test_binary.exe")
         with open(target_path, "wb") as f:
             f.write(b"immutable_pe_bytes_version_1")
@@ -2386,12 +2386,12 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             SecurityViolationError, OutOfScopeError
         )
 
-        target_dir = tempfile.mkdtemp(prefix="rea_tgt_")
+        target_dir = tempfile.mkdtemp(prefix="bintra_tgt_")
         target_path = os.path.join(target_dir, "protected.exe")
         with open(target_path, "wb") as f:
             f.write(b"protected_pe_content_safe")
 
-        ws_dir = tempfile.mkdtemp(prefix="rea_ws_")
+        ws_dir = tempfile.mkdtemp(prefix="bintra_ws_")
 
         try:
             with ExecutionGuard.scoped_session(target_binary_path=target_path, workspace_dir=ws_dir):
@@ -2457,7 +2457,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             decision = PolicyEngine.evaluate(req, scope)
             self.assertFalse(decision.is_allowed)
             self.assertEqual(decision.verdict, "DENY")
-            self.assertIn("forbidden by REA Safety Policy", decision.reason)
+            self.assertIn("forbidden by Bintra Safety Policy", decision.reason)
 
     def test_safety_kernel_audit_logger_complete_mediation_and_redaction(self):
         """Verifies AuditLogger captures decisions, redacts secrets, and computes summary statistics."""
@@ -2510,7 +2510,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         from security import TargetScope
 
         pe_bytes = _create_synthetic_pe64()
-        target_dir = tempfile.mkdtemp(prefix="rea_audit_")
+        target_dir = tempfile.mkdtemp(prefix="bintra_audit_")
         target_path = os.path.join(target_dir, "clean_target.exe")
         with open(target_path, "wb") as f:
             f.write(pe_bytes)
@@ -2569,21 +2569,21 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             CapabilityRegistry.COMPONENT_CAPABILITIES["cmd_executor"] = orig_caps
 
     def test_safety_kernel_mcp_patch_binary_blocks_in_place_overwrite(self):
-        """Verifies that MCP rea_patch_binary strictly forbids in-place modification of target binaries."""
-        from mcp_server import ReaMcpServer
+        """Verifies that MCP bintra_patch_binary strictly forbids in-place modification of target binaries."""
+        from mcp_server import BintraMcpServer
         from security import TargetMutationError, ExecutionGuard
 
         pe_bytes = _create_synthetic_pe64()
-        target_dir = tempfile.mkdtemp(prefix="rea_target_")
+        target_dir = tempfile.mkdtemp(prefix="bintra_target_")
         target_path = os.path.join(target_dir, "victim_binary.exe")
         with open(target_path, "wb") as f:
             f.write(pe_bytes)
 
-        server = ReaMcpServer()
+        server = BintraMcpServer()
         try:
             # 1. dispatch_tool: Omitting output_path raises TargetMutationError
             with self.assertRaises(TargetMutationError):
-                server.dispatch_tool("rea_patch_binary", {
+                server.dispatch_tool("bintra_patch_binary", {
                     "file_path": target_path,
                     "offset": 0,
                     "patch_hex": "90"
@@ -2591,7 +2591,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
             # 2. dispatch_tool: Same output_path as target_path raises TargetMutationError
             with self.assertRaises(TargetMutationError):
-                server.dispatch_tool("rea_patch_binary", {
+                server.dispatch_tool("bintra_patch_binary", {
                     "file_path": target_path,
                     "output_path": target_path,
                     "offset": 0,
@@ -2600,7 +2600,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
             # 3. handle_tools_call: Same output_path returns isError=True with TARGET_WRITE_FORBIDDEN
             call_res = server.handle_tools_call({
-                "name": "rea_patch_binary",
+                "name": "bintra_patch_binary",
                 "arguments": {
                     "file_path": target_path,
                     "output_path": target_path,
@@ -2619,11 +2619,11 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
                     SurgicalBinaryPatcher.patch_file(target_path, target_path, 0, "90")
 
             # 5. Legitimate out-of-place patch to workspace succeeds and preserves original target intact
-            workspace_dir = tempfile.mkdtemp(prefix="rea_work_")
+            workspace_dir = tempfile.mkdtemp(prefix="bintra_work_")
             out_path = os.path.join(workspace_dir, "patched_target.exe")
             try:
                 with ExecutionGuard.scoped_session(target_binary_path=target_path, workspace_dir=workspace_dir):
-                    patch_res = server.dispatch_tool("rea_patch_binary", {
+                    patch_res = server.dispatch_tool("bintra_patch_binary", {
                         "file_path": target_path,
                         "output_path": out_path,
                         "offset": 0,
@@ -2757,8 +2757,8 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
     def test_hardlink_target_immutability_enforcement(self):
         """Verifies Audit §2.1: Hard-link aliases of registered targets inside workspaces are strictly blocked."""
         from security import ExecutionGuard, SafeFileAccess, TargetMutationError, TargetScope
-        target_dir = tempfile.mkdtemp(prefix="rea_tgt_hl_")
-        ws_dir = tempfile.mkdtemp(prefix="rea_ws_hl_")
+        target_dir = tempfile.mkdtemp(prefix="bintra_tgt_hl_")
+        ws_dir = tempfile.mkdtemp(prefix="bintra_ws_hl_")
         tgt_file = os.path.join(target_dir, "original_target.bin")
         with open(tgt_file, "w") as f:
             f.write("PROTECTED_TARGET_DATA")
@@ -2801,7 +2801,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
     def test_safetensors_validation_schema_and_boundaries(self):
         """Verifies Audit §3.1: SafetensorsHandler strictly validates dtype, offsets, shapes, and overlaps."""
-        from rea_neural_engine import SafetensorsHandler
+        from bintra_engine import SafetensorsHandler
 
         def make_st(header_dict: dict, data_bytes: bytes, target_dir: str = None) -> str:
             hdr_json = json.dumps(header_dict, separators=(",", ":")).encode("utf-8")
@@ -2838,8 +2838,8 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         os.remove(p4)
 
         # Case 5: Missing tensor in write_patched_safetensors
-        tgt_dir = tempfile.mkdtemp(prefix="rea_tgt_dir_")
-        ws_dir = tempfile.mkdtemp(prefix="rea_ws_dir_")
+        tgt_dir = tempfile.mkdtemp(prefix="bintra_tgt_dir_")
+        ws_dir = tempfile.mkdtemp(prefix="bintra_ws_dir_")
         p5 = make_st({"x": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}}, b"\x00\x00\x00\x00", target_dir=tgt_dir)
         out_p = os.path.join(ws_dir, "patched.safetensors")
         from security import ExecutionGuard
@@ -2853,7 +2853,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
     def test_svd_non_finite_resilience(self):
         """Verifies Audit §3.2: SubspaceAnalyzer returns structured error dict on NaN or Inf input."""
-        from rea_neural_engine import SubspaceAnalyzer
+        from bintra_engine import SubspaceAnalyzer
         m_nan = np.array([[np.nan, 1.0], [0.0, 2.0]], dtype=np.float32)
         res_nan = SubspaceAnalyzer.analyze_svd(m_nan)
         self.assertEqual(res_nan["status"], "error")

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Safe Registry Access Gateway.
+Bintra Safe Registry Access Gateway.
 Guarantees strictly read-only Registry inspection (KEY_READ | KEY_WOW64_64KEY).
 Forbids KEY_WRITE, KEY_ALL_ACCESS, and registry mutation APIs.
 """

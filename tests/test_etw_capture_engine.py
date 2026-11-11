@@ -93,7 +93,7 @@ class TestEtwCaptureEngine(unittest.TestCase):
 
         # Check Markdown generation
         md_text = EtwTimelineCorrelator.format_markdown(report)
-        self.assertIn("# REA-Neural ETW Diagnostic Timeline Correlation", md_text)
+        self.assertIn("# Bintra ETW Diagnostic Timeline Correlation", md_text)
         self.assertIn("TEMPORAL_MEMORY_CHURN_DETECTED", md_text)
 
     def test_timeline_correlator_late_module_injection_detection(self):
@@ -107,20 +107,20 @@ class TestEtwCaptureEngine(unittest.TestCase):
         self.assertTrue(any(f["category"] == "DYNAMIC_IMAGE_LOAD" for f in report["causality_findings"]))
 
     def test_mcp_etw_capture_tool_dispatch(self):
-        """Verifies that native MCP server exposes and dispatches rea_etw_capture."""
-        from mcp_server import ReaMcpServer
-        server = ReaMcpServer()
+        """Verifies that native MCP server exposes and dispatches bintra_etw_capture."""
+        from mcp_server import BintraMcpServer
+        server = BintraMcpServer()
 
         tool_names = [t["name"] for t in server.handle_tools_list({})["tools"]]
-        self.assertIn("rea_etw_capture", tool_names)
+        self.assertIn("bintra_etw_capture", tool_names)
 
         # Check security metadata
-        cap, mode, target = server.TOOL_SECURITY_METADATA["rea_etw_capture"]
+        cap, mode, target = server.TOOL_SECURITY_METADATA["bintra_etw_capture"]
         self.assertEqual(cap, "cap.event_log.read")
         self.assertEqual(mode, "READ")
 
         # Execute short capture
-        res = server.dispatch_tool("rea_etw_capture", {"duration_seconds": 0.1})
+        res = server.dispatch_tool("bintra_etw_capture", {"duration_seconds": 0.1})
         self.assertIn("events_count", res)
         self.assertIn("temporal_verdict", res)
         self.assertIn("session_info", res)

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-REA-Neural Safe File Access Gateway.
+Bintra Safe File Access Gateway.
 Mediates all filesystem reads and workspace writes through the ExecutionGuard.
 Employs non-exclusive Win32 sharing flags to avoid starving live processes,
 and validates open file handle physical paths against authorized targets.
@@ -60,7 +60,7 @@ class SafeFileAccess:
         overwrite: bool = True
     ) -> str:
         """
-        Writes content strictly inside the authorized REA workspace.
+        Writes content strictly inside the authorized Bintra workspace.
         Mediated via ExecutionGuard with Capability.WORKSPACE_WRITE.
         Attempts to write into target directory or target binary are unconditionally blocked.
         """
@@ -100,7 +100,7 @@ class SafeFileAccess:
     @classmethod
     def delete_workspace_file(cls, file_path: str) -> bool:
         """
-        Deletes a temporary file created by REA in the current session.
+        Deletes a temporary file created by Bintra in the current session.
         Attempts to delete target binaries or external system files are unconditionally blocked.
         """
         ExecutionGuard.request_access(

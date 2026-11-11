@@ -159,8 +159,10 @@ class TestAuditRemediations(unittest.TestCase):
             with open(pe_path, "wb") as f:
                 f.write(_build_minimal_pe64())
 
-            # F3a: rea_patch_binary with hex offset string "0x200"
-            patch_resp = srv.handle_tools_call({
+            # F3a: Default ReaMcpServer rejects untrusted client workspace_dir override;
+            # host-configured ReaMcpServer(allowed_workspace_roots=[ws_dir]) authorizes ws_dir.
+            srv_ws = ReaMcpServer(allowed_workspace_roots=[ws_dir])
+            patch_resp = srv_ws.handle_tools_call({
                 "name": "rea_patch_binary",
                 "arguments": {
                     "file_path": pe_path,
@@ -315,6 +317,298 @@ class TestAuditRemediations(unittest.TestCase):
             self.assertTrue(deob["is_truncated"])
             self.assertEqual(deob["analysis_window_size"], 64)
             self.assertEqual(deob["total_file_size"], 512)
+
+    def test_second_audit_security_and_math_remediations(self):
+        """Second Audit S-1/S-2 & F-1..F-5: Workspace override block, rea_patch_weights, fail-closed imports, small-layer backdoors."""
+        import builtins
+        import unittest.mock as mock
+        import numpy as np
+        from mcp_server import ReaMcpServer
+        from security import ExecutionGuard, TargetScope, AuditLogger, SafeFileAccess, TargetMutationError
+        from binary_neural_engine import SurgicalBinaryPatcher
+        from rea_neural_engine import SafetensorsHandler, WeightSecurityAuditor
+
+        # S-1 / F-1a: TargetScope rejects filesystem root & user home root
+        root_dir = os.path.abspath(os.sep)
+        with self.assertRaises(PermissionError):
+            TargetScope(workspace_dir=root_dir)
+        with self.assertRaises(PermissionError):
+            TargetScope(workspace_dir=os.path.expanduser("~"))
+
+        # S-1 / F-1b: Default ReaMcpServer rejects untrusted client workspace_dir overrides fail-closed
+        default_srv = ReaMcpServer()
+        with tempfile.TemporaryDirectory() as tgt_dir, tempfile.TemporaryDirectory() as ws_dir:
+            pe_path = os.path.join(tgt_dir, "victim.exe")
+            with open(pe_path, "wb") as f:
+                f.write(_build_minimal_pe64())
+            evil_out = os.path.join(ws_dir, "pwn.exe")
+            for evil_ws in (root_dir, ws_dir):
+                resp = default_srv.handle_tools_call({
+                    "name": "rea_patch_binary",
+                    "arguments": {
+                        "file_path": pe_path,
+                        "output_path": evil_out,
+                        "offset": "0x200",
+                        "patch_hex": "90",
+                        "workspace_dir": evil_ws,
+                    },
+                })
+                self.assertTrue(resp["isError"])
+                self.assertIn("UNTRUSTED_WORKSPACE_OVERRIDE", resp["content"][0]["text"])
+                self.assertFalse(os.path.exists(evil_out))
+
+            # SafeFileAccess.write_workspace_file raises TargetMutationError (fixed broken .policy_engine import)
+            with ExecutionGuard.scoped_session(target_binary_path=pe_path, workspace_dir=ws_dir):
+                with self.assertRaises(TargetMutationError):
+                    SafeFileAccess.write_workspace_file(pe_path, b"overwrite")
+
+        # F-2: rea_patch_weights works end-to-end inside authorized workspace
+        with tempfile.TemporaryDirectory() as src_dir, tempfile.TemporaryDirectory() as ws_dir:
+            src_st = os.path.join(src_dir, "model.safetensors")
+            out_st = os.path.join(ws_dir, "patched_model.safetensors")
+            _save_safetensors(src_st, "attn.o_proj.weight", np.ones((16, 16), dtype=np.float32))
+            auth_srv = ReaMcpServer(allowed_workspace_roots=[ws_dir])
+            pw_resp = auth_srv.handle_tools_call({
+                "name": "rea_patch_weights",
+                "arguments": {
+                    "source_path": src_st,
+                    "output_path": out_st,
+                    "tensor_name": "attn.o_proj.weight",
+                    "num_columns": 4,
+                    "workspace_dir": ws_dir,
+                },
+            })
+            self.assertFalse(pw_resp["isError"], f"rea_patch_weights failed: {pw_resp}")
+            pw_data = json.loads(pw_resp["content"][0]["text"])
+            self.assertEqual(pw_data["status"], "success")
+            self.assertTrue(os.path.isfile(out_st))
+
+        # Every MCP tool metadata target parameter must exist in its inputSchema (or be None)
+        for t in auth_srv.handle_tools_list({})["tools"]:
+            t_name = t["name"]
+            _, _, param = auth_srv.TOOL_SECURITY_METADATA[t_name]
+            if param is not None:
+                props = t.get("inputSchema", {}).get("properties", {})
+                self.assertIn(param, props, f"TOOL_SECURITY_METADATA target '{param}' absent from {t_name} schema")
+
+        # S-2 / F-4: SurgicalBinaryPatcher & SafetensorsHandler fail closed when security cannot be imported
+        real_import = builtins.__import__
+
+        def blocking_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "security" or name.startswith("security."):
+                raise ImportError("Simulated missing security kernel")
+            return real_import(name, globals, locals, fromlist, level)
+
+        with tempfile.TemporaryDirectory() as tmp_d:
+            pe_src = os.path.join(tmp_d, "a.exe")
+            pe_out = os.path.join(tmp_d, "b.exe")
+            with open(pe_src, "wb") as f:
+                f.write(_build_minimal_pe64())
+            st_src = os.path.join(tmp_d, "m.safetensors")
+            st_out = os.path.join(tmp_d, "m2.safetensors")
+            _save_safetensors(st_src, "w", np.ones((4, 4), dtype=np.float32))
+
+            with mock.patch("builtins.__import__", side_effect=blocking_import):
+                with self.assertRaises(RuntimeError) as cm1:
+                    SurgicalBinaryPatcher.patch_file(pe_src, pe_out, 0x200, "90")
+                self.assertIn("SECURITY_KERNEL_UNAVAILABLE", str(cm1.exception))
+                self.assertFalse(os.path.exists(pe_out))
+
+                with self.assertRaises(RuntimeError) as cm2:
+                    SafetensorsHandler.write_patched_safetensors(st_src, st_out, {"w": np.zeros((4, 4), dtype=np.float32)})
+                self.assertIn("SECURITY_KERNEL_UNAVAILABLE", str(cm2.exception))
+                self.assertFalse(os.path.exists(st_out))
+
+        # F-5: Small-layer 16x128 backdoor detection (1 or 2 spikes detected, normal noise not flagged)
+        rng = np.random.default_rng(1234)
+        clean_small = (rng.standard_normal((16, 128)) * 0.1).astype(np.float32)
+        clean_res = WeightSecurityAuditor.audit_weights_without_evaluation(clean_small)
+        self.assertFalse(clean_res["potential_backdoor_detected"])
+
+        one_spike = clean_small.copy()
+        one_spike[3, :] *= 80.0
+        one_res = WeightSecurityAuditor.audit_weights_without_evaluation(one_spike)
+        self.assertTrue(one_res["potential_backdoor_detected"])
+        self.assertIn(3, one_res["suspect_trigger_neurons"])
+
+        two_spikes = clean_small.copy()
+        two_spikes[3, :] *= 80.0
+        two_spikes[4, :] *= 80.0
+        two_res = WeightSecurityAuditor.audit_weights_without_evaluation(two_spikes)
+        self.assertTrue(two_res["potential_backdoor_detected"])
+        self.assertIn(3, two_res["suspect_trigger_neurons"])
+        self.assertIn(4, two_res["suspect_trigger_neurons"])
+
+    def test_second_audit_telemetry_cli_and_bridge_remediations(self):
+        """Second Audit F-3, F-8, F-10, F-11, F-13, F-14, F-18, F-20: x86 CONTEXT, RCA bounds, wevtutil, CLI & bridge hygiene."""
+        import struct
+        import subprocess
+        import unittest.mock as mock
+        import cli as cli_mod
+        from security import AuditLogger, ExecutionGuard, SecurityViolationError, OutOfScopeError
+        from windows_intelligence.runtime_telemetry import (
+            MiniDumpParser,
+            CrashRootCauseAnalyzer,
+            EventLogCollector,
+            EtwLiveCaptureSession,
+        )
+        import ghidra_live_bridge as glb
+
+        # F-11: Verify WinNT x86 CONTEXT offsets (Edi=156, Esi=160, Ebx=164, Edx=168, Ecx=172, Eax=176, Ebp=180, Eip=184, Esp=196)
+        ctx = bytearray(716)
+        struct.pack_into("<I", ctx, 156, 0x77777777)  # EDI
+        struct.pack_into("<I", ctx, 160, 0x55555555)  # ESI
+        struct.pack_into("<I", ctx, 164, 0xBBBBBBBB)  # EBX
+        struct.pack_into("<I", ctx, 168, 0xDDDDDDDD)  # EDX
+        struct.pack_into("<I", ctx, 172, 0xCCCCCCCC)  # ECX
+        struct.pack_into("<I", ctx, 176, 0xAAAAAAAA)  # EAX
+        struct.pack_into("<I", ctx, 180, 0x0012FF50)  # EBP
+        struct.pack_into("<I", ctx, 184, 0x00401050)  # EIP
+        struct.pack_into("<I", ctx, 196, 0x0012FF00)  # ESP
+
+        exc_rva = 32 + 12  # Header(32) + 1 directory entry(12)
+        ctx_rva = exc_rva + 168
+        exc_data = struct.pack(
+            "<IIIIQQII15QII",
+            1001, 0, 0xC0000005, 0, 0, 0x401050, 2, 0,
+            *([0, 0x10] + [0] * 13), len(ctx), ctx_rva
+        )
+        dir_entry = struct.pack("<III", 6, len(exc_data), exc_rva)
+        hdr = struct.pack("<IIIIII", 0x504D444D, 0xA793, 1, 32, 0, 0) + b"\x00" * 8
+        with tempfile.NamedTemporaryFile(suffix=".dmp", delete=False) as tf:
+            tf.write(hdr + dir_entry + exc_data + bytes(ctx))
+            dmp_path = tf.name
+        try:
+            with ExecutionGuard.scoped_session(target_binary_path=dmp_path):
+                parsed = MiniDumpParser.parse_minidump(dmp_path)
+            regs = parsed["exception_info"]["thread_registers"]
+            self.assertEqual(regs["arch"], "x86")
+            self.assertEqual(regs["ecx"], hex(0xCCCCCCCC))
+            self.assertEqual(regs["edx"], hex(0xDDDDDDDD))
+            self.assertEqual(regs["ebx"], hex(0xBBBBBBBB))
+            self.assertEqual(regs["esi"], hex(0x55555555))
+            self.assertEqual(regs["edi"], hex(0x77777777))
+        finally:
+            if os.path.exists(dmp_path):
+                os.remove(dmp_path)
+
+        # F-13: Missing target_virtual_address -> UNKNOWN_TARGET_ADDRESS (not NULL_PAGE_TRAP)
+        no_av_dump = {
+            "status": "success",
+            "exception_info": {"exception_code": "0xc0000094", "exception_name": "INTEGER_DIVIDE_BY_ZERO"},
+            "threads": [{"thread_id": 1, "stack_base": "0x00100000", "stack_size_bytes": 0x1000}],
+            "modules": [],
+        }
+        no_av_rca = CrashRootCauseAnalyzer.analyze_crash(no_av_dump)
+        self.assertEqual(no_av_rca["root_cause_classification"], "UNKNOWN_TARGET_ADDRESS")
+        self.assertEqual(no_av_rca["target_address"], "UNAVAILABLE")
+
+        # F-13: Thread stack bounds [st_base, st_base + st_size_bytes) must NOT include st_base - 0x100
+        below_stack = CrashRootCauseAnalyzer._classify_target_memory(0x00100000 - 0x100, no_av_dump)
+        self.assertNotEqual(below_stack.get("category"), "THREAD_STACK")
+        inside_stack = CrashRootCauseAnalyzer._classify_target_memory(0x00100000 + 0x100, no_av_dump)
+        self.assertEqual(inside_stack.get("category"), "THREAD_STACK")
+
+        # F-18: EventLogCollector._execute_wevtutil_fallback must propagate SecurityViolationError (no raw subprocess bypass)
+        with mock.patch("security.safe_subprocess.SafeSubprocessBroker.execute_catalog_command", side_effect=SecurityViolationError("BROKER_DENY")):
+            with mock.patch("subprocess.run") as raw_run:
+                with self.assertRaises(SecurityViolationError):
+                    EventLogCollector._execute_wevtutil_fallback("Application", "*", 5)
+                raw_run.assert_not_called()
+
+        # F-3: Non-NT ETW capture discloses synthetic simulation honestly
+        with mock.patch.object(os, "name", "posix"):
+            sess = EtwLiveCaptureSession(session_name="TestEtwHonesty")
+            res = sess.start_session()
+            self.assertTrue(res["is_simulated"])
+            self.assertFalse(res["etw_native_consumer_active"])
+            self.assertEqual(res["source"], "synthetic")
+
+        # F-10: AuditLogger multi-process continuity via ensure_chain_continuity
+        with tempfile.TemporaryDirectory() as log_dir:
+            log_path = os.path.join(log_dir, "multi_proc_audit.jsonl")
+            AuditLogger.clear()
+            AuditLogger.set_log_file(log_path)
+            AuditLogger.log_decision("cli", "op1", "tgt1", "ALLOW", "first")
+            AuditLogger.clear()
+            AuditLogger.set_log_file(log_path)
+            rec = AuditLogger.ensure_chain_continuity(log_path)
+            self.assertTrue(rec["recovered"])
+            self.assertEqual(rec["records_count"], 1)
+            AuditLogger.log_decision("cli", "op2", "tgt2", "ALLOW", "second")
+            v = AuditLogger.verify_audit_chain(log_path)
+            self.assertTrue(v["is_valid"])
+            self.assertEqual(v["records_verified"], 2)
+            AuditLogger.clear()
+
+        # F-17: resolve_bridge_marker ignores untrusted CWD marker outside workspace
+        with tempfile.TemporaryDirectory() as rogue_cwd, tempfile.TemporaryDirectory() as real_ws:
+            cwd_marker = os.path.join(rogue_cwd, ".rea_bridge.json")
+            with open(cwd_marker, "w", encoding="utf-8") as f:
+                json.dump({"port": 59999, "auth_token": "rogue"}, f)
+            tmp_marker = os.path.join(tempfile.gettempdir(), ".rea_bridge.json")
+            if not os.path.exists(tmp_marker):
+                with ExecutionGuard.scoped_session(workspace_dir=real_ws):
+                    with mock.patch("os.getcwd", return_value=rogue_cwd):
+                        resolved = glb.resolve_bridge_marker()
+                self.assertNotEqual((resolved or {}).get("port"), 59999)
+
+        # F-20 / F-16 / F-14: CLI --version, guarded ghidra-analyze --output, non-NT md formatters
+        ver_proc = subprocess.run(
+            [sys.executable, os.path.join(SRC_DIR, "cli.py"), "--version"],
+            capture_output=True, text=True
+        )
+        self.assertEqual(ver_proc.returncode, 0)
+        self.assertIn("7.4.0", ver_proc.stdout)
+
+        # ghidra-analyze --output outside workspace is rejected fail-closed
+        with tempfile.TemporaryDirectory() as in_dir, tempfile.TemporaryDirectory() as ws_dir, tempfile.TemporaryDirectory() as foreign_dir:
+            pcode_in = os.path.join(in_dir, "export.json")
+            foreign_out = os.path.join(foreign_dir, "escaped_plan.json")
+            with open(pcode_in, "w", encoding="utf-8") as f:
+                json.dump({"program": "test.exe", "functions": []}, f)
+            with ExecutionGuard.scoped_session(target_binary_path=pcode_in, workspace_dir=ws_dir):
+                with mock.patch.object(sys, "argv", ["cli.py", "ghidra-analyze", "--input", pcode_in, "--output", foreign_out]):
+                    with self.assertRaises(OutOfScopeError):
+                        cli_mod._dispatch_cli()
+            self.assertFalse(os.path.exists(foreign_out))
+
+        # Non-NT --format md outputs for win-audit, hw-audit, driver-audit, service-audit must not raise KeyError
+        for subcmd in ("win-audit", "hw-audit", "driver-audit", "service-audit"):
+            with mock.patch.object(sys, "platform", "linux"), mock.patch.object(os, "name", "posix"):
+                with mock.patch.object(sys, "argv", ["cli.py", subcmd, "--format", "md"]):
+                    cli_mod._dispatch_cli()
+
+        # F-14: binary_neural_engine.py standalone CLI defaults --enforce-nociception to True
+        bne_help = subprocess.run(
+            [sys.executable, os.path.join(SRC_DIR, "binary_neural_engine.py"), "patch", "-h"],
+            capture_output=True, text=True
+        )
+        self.assertEqual(bne_help.returncode, 0)
+        bne_norm = " ".join(bne_help.stdout.split())
+        self.assertIn("--force", bne_norm)
+        self.assertIn("enabled by default", bne_norm)
+
+        # F-8: update CLI exposes --yes confirmation and --ref flags
+        upd_help = subprocess.run(
+            [sys.executable, os.path.join(SRC_DIR, "cli.py"), "update", "-h"],
+            capture_output=True, text=True
+        )
+        self.assertEqual(upd_help.returncode, 0)
+        self.assertIn("--yes", upd_help.stdout)
+        self.assertIn("--ref", upd_help.stdout)
+
+        # F-16: mem-scan --session-file outside workspace is blocked fail-closed
+        with tempfile.TemporaryDirectory() as ws_dir, tempfile.TemporaryDirectory() as foreign_dir:
+            foreign_sess = os.path.join(foreign_dir, "sess.json")
+            with ExecutionGuard.scoped_session(workspace_dir=ws_dir):
+                with mock.patch.object(
+                    sys, "argv",
+                    ["cli.py", "mem-scan", "--pid", str(os.getpid()), "--value", "123456", "--session-file", foreign_sess]
+                ):
+                    with self.assertRaises(OutOfScopeError):
+                        cli_mod._dispatch_cli()
+            self.assertFalse(os.path.exists(foreign_sess))
 
 
 if __name__ == "__main__":

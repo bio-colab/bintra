@@ -120,6 +120,15 @@ def main():
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
         print_help()
         sys.exit(0)
+    if sys.argv[1] in ("-v", "-V", "--version", "version"):
+        print("REA-Neural v7.4.0")
+        sys.exit(0)
+
+    try:
+        from security import AuditLogger
+        AuditLogger.ensure_chain_continuity(rotate_on_corrupt=True)
+    except Exception:
+        pass
 
     # Establish isolated target scope and authorized workspace for CLI execution
     target_arg = None
@@ -203,14 +212,26 @@ def _dispatch_cli():
                 "security": WindowsSecurityInspector.audit(args.binary)
             }
             if args.format == "md":
-                lines = [
-                    "# Windows System Intelligence Profile",
-                    f"- **OS:** {report['os']['kernel'].get('friendly_name')} (Build {report['os']['kernel'].get('build_number')})",
-                    f"- **Native Architecture:** {report['os']['architecture'].get('native_architecture')}",
-                    f"- **Elevation:** Admin={report['security'].get('is_elevated_admin')}",
-                    f"- **Token Integrity:** {report['security'].get('token_integrity', {}).get('integrity_level')}",
-                    f"- **Active Graphics Adapters:** {len(report['devices'].get('graphics_adapters', []))}"
-                ]
+                os_rep = report.get("os", {})
+                sec_rep = report.get("security", {})
+                dev_rep = report.get("devices", {})
+                if os_rep.get("status") == "not_applicable" or "kernel" not in os_rep:
+                    lines = [
+                        "# Windows System Intelligence Profile",
+                        f"- **Status:** `{os_rep.get('status', 'unavailable')}`",
+                        f"- **Note:** {os_rep.get('message', 'Windows OS profiling is only available on Windows NT hosts.')}",
+                    ]
+                else:
+                    kernel = os_rep.get("kernel", {})
+                    arch = os_rep.get("architecture", {})
+                    lines = [
+                        "# Windows System Intelligence Profile",
+                        f"- **OS:** {kernel.get('friendly_name', 'Unknown')} (Build {kernel.get('build_number', 'Unknown')})",
+                        f"- **Native Architecture:** {arch.get('native_architecture', 'Unknown')}",
+                        f"- **Elevation:** Admin={sec_rep.get('is_elevated_admin')}",
+                        f"- **Token Integrity:** {sec_rep.get('token_integrity', {}).get('integrity_level')}",
+                        f"- **Active Graphics Adapters:** {len(dev_rep.get('graphics_adapters', []))}",
+                    ]
                 print("\n".join(lines))
             else:
                 print(json.dumps(report, indent=2, ensure_ascii=False))
@@ -380,18 +401,25 @@ def _dispatch_cli():
 
             report = NativeDeviceInspector.audit_hardware_health()
             if args.format == "md":
-                lines = [
-                    "# Native Hardware Subsystem Audit (SetupAPI / CfgMgr32)",
-                    f"- **Hardware Status:** {'HEALTHY' if report['is_hardware_healthy'] else 'DEGRADED_OR_PROBLEMS'}",
-                    f"- **Live PnP Devices:** {report['total_pnp_devices_enumerated']}",
-                    f"- **Display Adapters:** {report['display_adapters_count']}",
-                    f"- **Audio Devices:** {report['audio_devices_count']}",
-                    f"- **Problem Devices:** {report['problem_devices_count']}"
-                ]
-                if report['problem_devices']:
-                    lines.append("\n## Faulting Devices (CM_PROB_*):")
-                    for p in report['problem_devices']:
-                        lines.append(f"- **{p['name']}**: `{p['problem_name']}` (Service: `{p.get('service')}`)")
+                if report.get("status") == "not_applicable" or "is_hardware_healthy" not in report:
+                    lines = [
+                        "# Native Hardware Subsystem Audit (SetupAPI / CfgMgr32)",
+                        f"- **Status:** `{report.get('status', 'unavailable')}`",
+                        f"- **Note:** {report.get('message', 'Hardware audit requires a Windows NT host.')}",
+                    ]
+                else:
+                    lines = [
+                        "# Native Hardware Subsystem Audit (SetupAPI / CfgMgr32)",
+                        f"- **Hardware Status:** {'HEALTHY' if report.get('is_hardware_healthy') else 'DEGRADED_OR_PROBLEMS'}",
+                        f"- **Live PnP Devices:** {report.get('total_pnp_devices_enumerated', 0)}",
+                        f"- **Display Adapters:** {report.get('display_adapters_count', 0)}",
+                        f"- **Audio Devices:** {report.get('audio_devices_count', 0)}",
+                        f"- **Problem Devices:** {report.get('problem_devices_count', 0)}"
+                    ]
+                    if report.get("problem_devices"):
+                        lines.append("\n## Faulting Devices (CM_PROB_*):")
+                        for p in report["problem_devices"]:
+                            lines.append(f"- **{p.get('name', 'Unknown')}**: `{p.get('problem_name', 'Unknown')}` (Service: `{p.get('service')}`)")
                 print("\n".join(lines))
             else:
                 print(json.dumps(report, indent=2, ensure_ascii=False))
@@ -405,16 +433,23 @@ def _dispatch_cli():
 
             report = KernelDriverInspector.audit_drivers()
             if args.format == "md":
-                lines = [
-                    "# Kernel Drivers Introspection (PSAPI)",
-                    f"- **Total Drivers Loaded:** {report['total_drivers_loaded']}",
-                    f"- **Graphics Drivers:** {len(report['graphics_drivers'])}",
-                    f"- **Audio Drivers:** {len(report['audio_drivers'])}",
-                    "",
-                    "## Critical Graphics & Display Driver Bases:"
-                ]
-                for g in report['graphics_drivers']:
-                    lines.append(f"- **`{g['driver_name']}`**: Base `{g['kernel_image_base']}` (Path: `{g['file_path']}`)")
+                if report.get("status") == "not_applicable" or "total_drivers_loaded" not in report:
+                    lines = [
+                        "# Kernel Drivers Introspection (PSAPI)",
+                        f"- **Status:** `{report.get('status', 'unavailable')}`",
+                        f"- **Note:** {report.get('message', 'Kernel driver audit requires a Windows NT host.')}",
+                    ]
+                else:
+                    lines = [
+                        "# Kernel Drivers Introspection (PSAPI)",
+                        f"- **Total Drivers Loaded:** {report.get('total_drivers_loaded', 0)}",
+                        f"- **Graphics Drivers:** {len(report.get('graphics_drivers', []))}",
+                        f"- **Audio Drivers:** {len(report.get('audio_drivers', []))}",
+                        "",
+                        "## Critical Graphics & Display Driver Bases:"
+                    ]
+                    for g in report.get("graphics_drivers", []):
+                        lines.append(f"- **`{g.get('driver_name')}`**: Base `{g.get('kernel_image_base')}` (Path: `{g.get('file_path')}`)")
                 print("\n".join(lines))
             else:
                 print(json.dumps(report, indent=2, ensure_ascii=False))
@@ -428,12 +463,19 @@ def _dispatch_cli():
 
             report = ServiceManagerInspector.audit_services()
             if args.format == "md":
-                lines = [
-                    "# Service Control Manager Audit (Advapi32)",
-                    f"- **Total Services Enumerated:** {report['total_services_enumerated']}",
-                    f"- **Running Services:** {report['running_services_count']}",
-                    f"- **Stopped Services:** {report['stopped_services_count']}"
-                ]
+                if report.get("status") == "not_applicable" or "total_services_enumerated" not in report:
+                    lines = [
+                        "# Service Control Manager Audit (Advapi32)",
+                        f"- **Status:** `{report.get('status', 'unavailable')}`",
+                        f"- **Note:** {report.get('message', 'Service control manager audit requires a Windows NT host.')}",
+                    ]
+                else:
+                    lines = [
+                        "# Service Control Manager Audit (Advapi32)",
+                        f"- **Total Services Enumerated:** {report.get('total_services_enumerated', 0)}",
+                        f"- **Running Services:** {report.get('running_services_count', 0)}",
+                        f"- **Stopped Services:** {report.get('stopped_services_count', 0)}"
+                    ]
                 print("\n".join(lines))
             else:
                 print(json.dumps(report, indent=2, ensure_ascii=False))
@@ -622,7 +664,7 @@ def _dispatch_cli():
             parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
             args = parser.parse_args(sys.argv[2:])
 
-            from security import ExecutionGuard, Capability
+            from security import ExecutionGuard, Capability, SafeFileAccess, SecurityViolationError
             ExecutionGuard.request_access(
                 component="cli",
                 operation="mem-scan",
@@ -630,6 +672,14 @@ def _dispatch_cli():
                 capability=Capability.PROCESS_QUERY,
                 access_mode="READ"
             )
+            if args.session_file:
+                ExecutionGuard.request_access(
+                    component="cli",
+                    operation="mem-scan-session-write",
+                    target=args.session_file,
+                    capability=Capability.WORKSPACE_WRITE,
+                    access_mode="WRITE"
+                )
 
             val = args.value
             high_val = args.high_value
@@ -657,12 +707,15 @@ def _dispatch_cli():
             }
             scan_mode = mode_map.get(args.mode, "EXACT_VALUE")
 
+            from security import SafeFileAccess, SecurityViolationError
             sid = None
             if args.session_file and os.path.exists(args.session_file):
                 try:
-                    with open(args.session_file, "r", encoding="utf-8") as f:
-                        session_data = json.load(f)
+                    raw_session = SafeFileAccess.read_text(args.session_file)
+                    session_data = json.loads(raw_session)
                     sid = session_data.get("session_id")
+                except SecurityViolationError:
+                    raise
                 except Exception:
                     pass
 
@@ -685,11 +738,7 @@ def _dispatch_cli():
                 )
 
             if args.session_file and res.get("session_id"):
-                try:
-                    with open(args.session_file, "w", encoding="utf-8") as f:
-                        json.dump(res, f, indent=2)
-                except Exception:
-                    pass
+                SafeFileAccess.write_workspace_file(args.session_file, json.dumps(res, indent=2))
 
             if args.format == "md":
                 is_next = "surviving_count" in res
@@ -826,14 +875,26 @@ def _dispatch_cli():
             parser = argparse.ArgumentParser(prog="rea etw-capture", description="Start real-time ETW capture session and inspect timeline")
             parser.add_argument("--session-name", default="REA_Diagnostic_Trace", help="Name for real-time ETW trace session")
             parser.add_argument("--pid", type=int, default=None, help="Optional target PID to filter events")
-            parser.add_argument("--duration", type=float, default=2.0, help="Duration in seconds to capture live trace (default: 2.0s)")
+            parser.add_argument("--duration", type=float, default=2.0, help="Duration in seconds to capture live trace (default: 2.0s, max: 300s)")
             parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
             args = parser.parse_args(sys.argv[2:])
 
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="etw-capture",
+                target=args.session_name,
+                capability=Capability.EVENT_LOG_READ,
+                access_mode="READ",
+            )
+            bounded_duration = min(max(float(args.duration), 0.1), 300.0)
+
             session = EtwLiveCaptureSession(session_name=args.session_name, target_pid=args.pid)
             start_res = session.start_session()
-            time.sleep(args.duration)
-            stop_res = session.stop_session()
+            try:
+                time.sleep(bounded_duration)
+            finally:
+                stop_res = session.stop_session()
 
             timeline = session.get_timeline(pid=args.pid)
             correlation = EtwTimelineCorrelator.correlate_crash_timeline(timeline)
@@ -1001,13 +1062,21 @@ def _dispatch_cli():
             parser.add_argument("--output", default=None, help="Path to write the generated mutation plan JSON")
             args = parser.parse_args()
 
-            with open(args.input, "r", encoding="utf-8") as f:
-                payload = json.load(f)
+            from security import SafeFileAccess, ExecutionGuard, Capability
+            if args.output:
+                ExecutionGuard.request_access(
+                    component="cli",
+                    operation="ghidra-analyze-output",
+                    target=args.output,
+                    capability=Capability.WORKSPACE_WRITE,
+                    access_mode="WRITE"
+                )
+            raw_input = SafeFileAccess.read_text(args.input)
+            payload = json.loads(raw_input)
 
             plan = GhidraAnnotationPlanner.analyze_program_export(payload)
             if args.output:
-                with open(args.output, "w", encoding="utf-8") as f:
-                    json.dump(plan, f, indent=2)
+                SafeFileAccess.write_workspace_file(args.output, json.dumps(plan, indent=2))
             print(json.dumps(plan, indent=2))
             return
         elif cmd == "ghidra-headless":
@@ -1095,16 +1164,18 @@ def _dispatch_cli():
                 ]
                 if args.token:
                     daemon_cmd.extend(["--token", args.token])
-                DETACHED_PROCESS = 0x00000008
-                CREATE_NEW_PROCESS_GROUP = 0x00000200
-                flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-                proc = subprocess.Popen(
-                    daemon_cmd,
-                    creationflags=flags,
-                    close_fds=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
+                popen_kwargs: Dict[str, Any] = {
+                    "close_fds": True,
+                    "stdout": subprocess.DEVNULL,
+                    "stderr": subprocess.DEVNULL,
+                }
+                if os.name == "nt":
+                    DETACHED_PROCESS = 0x00000008
+                    CREATE_NEW_PROCESS_GROUP = 0x00000200
+                    popen_kwargs["creationflags"] = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+                else:
+                    popen_kwargs["start_new_session"] = True
+                proc = subprocess.Popen(daemon_cmd, **popen_kwargs)
                 print(f"[+] Launched REA-Neural Ghidra Bridge background daemon (PID {proc.pid}) on http://127.0.0.1:{args.port}")
                 return
 
@@ -1356,15 +1427,21 @@ def _dispatch_cli():
 def _handle_update() -> None:
     parser = argparse.ArgumentParser(
         prog="rea-neural update",
-        description="Automatically update REA-Neural to latest commit from GitHub"
+        description="Check and safely update REA-Neural from GitHub (requires --yes/--confirm to modify installation)"
     )
     parser.add_argument("--check", action="store_true", help="Check for available updates without applying them")
     parser.add_argument("--branch", default="main", help="Target git branch (default: main)")
+    parser.add_argument("--ref", default=None, help="Optional pinned tag or commit SHA to verify/checkout on update")
+    parser.add_argument("--yes", "--confirm", dest="confirm", action="store_true", help="Explicit confirmation required to apply updates")
     args = parser.parse_args(sys.argv[2:])
 
     import re
-    if not re.match(r"^[a-zA-Z0-9_\./]+[a-zA-Z0-9_\-\./]*$", args.branch) or args.branch.startswith("-"):
+    ref_pat = r"^[a-zA-Z0-9_\./]+[a-zA-Z0-9_\-\./]*$"
+    if not re.match(ref_pat, args.branch) or args.branch.startswith("-"):
         print(f"[-] Invalid branch refname: '{args.branch}'")
+        sys.exit(1)
+    if args.ref and (not re.match(ref_pat, args.ref) or args.ref.startswith("-")):
+        print(f"[-] Invalid target ref: '{args.ref}'")
         sys.exit(1)
 
     import subprocess
@@ -1375,7 +1452,7 @@ def _handle_update() -> None:
         try:
             print(f"[*] Checking remote repository for updates (branch: '{args.branch}')...")
             fetch_res = subprocess.run(
-                ["git", "fetch", "origin", "--", args.branch],
+                ["git", "fetch", "--tags", "origin", "--", args.branch],
                 cwd=repo_dir,
                 capture_output=True,
                 text=True
@@ -1384,8 +1461,9 @@ def _handle_update() -> None:
                 print(f"[-] Git fetch error: {fetch_res.stderr.strip()}")
                 sys.exit(1)
 
+            target_rev = args.ref or f"origin/{args.branch}"
             local_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_dir, text=True).strip()
-            remote_hash = subprocess.check_output(["git", "rev-parse", "--verify", f"origin/{args.branch}"], cwd=repo_dir, text=True).strip()
+            remote_hash = subprocess.check_output(["git", "rev-parse", "--verify", target_rev], cwd=repo_dir, text=True).strip()
 
             if local_hash == remote_hash:
                 commit_title = subprocess.check_output(["git", "log", "-1", "--format=%s"], cwd=repo_dir, text=True).strip()
@@ -1393,7 +1471,7 @@ def _handle_update() -> None:
                 return
 
             incoming_commits = subprocess.check_output(
-                ["git", "log", f"HEAD..origin/{args.branch}", "--oneline"],
+                ["git", "log", f"HEAD..{remote_hash}", "--oneline"],
                 cwd=repo_dir,
                 text=True
             ).strip()
@@ -1403,22 +1481,22 @@ def _handle_update() -> None:
             print()
 
             if args.check:
-                print("[*] Update check completed. Run 'rea-neural update' to download and apply.")
+                print("[*] Update check completed. Run 'rea-neural update --yes' to apply.")
                 return
 
-            print(f"[*] Pulling latest commits from origin/{args.branch}...")
-            pull_res = subprocess.run(
-                ["git", "pull", "--ff-only", "origin", "--", args.branch],
-                cwd=repo_dir,
-                capture_output=True,
-                text=True
-            )
-            if pull_res.returncode != 0:
-                print(f"[-] Fast-forward pull failed, trying standard merge: {pull_res.stderr.strip()}")
-                subprocess.run(["git", "pull", "origin", "--", args.branch], cwd=repo_dir, check=True)
+            if not args.confirm:
+                print("[!] Refusing unconfirmed remote code update. Re-run with '--yes' (or '--confirm') to apply.")
+                sys.exit(2)
+
+            if args.ref:
+                print(f"[*] Fast-forwarding to verified ref '{args.ref}' ({remote_hash[:12]})...")
+                subprocess.run(["git", "merge", "--ff-only", remote_hash], cwd=repo_dir, check=True)
+            else:
+                print(f"[*] Fast-forwarding latest commits from origin/{args.branch}...")
+                subprocess.run(["git", "pull", "--ff-only", "origin", "--", args.branch], cwd=repo_dir, check=True)
 
             print("[*] Refreshing package entry points and dependencies...")
-            subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."], cwd=repo_dir, check=True)
+            subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "-e", "."], cwd=repo_dir, check=True)
 
             new_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_dir, text=True).strip()
             new_title = subprocess.check_output(["git", "log", "-1", "--format=%s"], cwd=repo_dir, text=True).strip()
@@ -1429,16 +1507,23 @@ def _handle_update() -> None:
     else:
         if args.check:
             print("[*] Package is installed without a local git working tree.")
-            print("[*] Run 'rea-neural update' to reinstall/upgrade directly from GitHub.")
+            print("[*] Run 'rea-neural update --yes --ref <tag-or-sha>' to reinstall/upgrade directly from GitHub.")
             return
 
-        print("[*] Updating REA-Neural via pip from official GitHub repository...")
+        if not args.confirm:
+            print("[!] Refusing unconfirmed remote pip installation. Re-run with '--yes' (optionally '--ref <tag-or-sha>') to apply.")
+            sys.exit(2)
+
+        pkg_spec = "git+https://github.com/bio-colab/rea-neural.git"
+        if args.ref:
+            pkg_spec = f"{pkg_spec}@{args.ref}"
+        print(f"[*] Updating REA-Neural via pip from {pkg_spec}...")
         try:
             subprocess.run(
-                [sys.executable, "-m", "pip", "install", "--upgrade", "git+https://github.com/bio-colab/rea-neural.git"],
+                [sys.executable, "-m", "pip", "install", "--upgrade", pkg_spec],
                 check=True
             )
-            print("[+] Successfully updated REA-Neural to latest remote version via pip!")
+            print("[+] Successfully updated REA-Neural via pip!")
         except Exception as e:
             print(f"[-] Pip update failed: {e}")
             sys.exit(1)

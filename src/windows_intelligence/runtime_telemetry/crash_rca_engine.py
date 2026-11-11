@@ -98,11 +98,15 @@ class CrashRootCauseAnalyzer:
         # Access Violation parameters
         av_details = exc_info.get("access_violation_details") or {}
         access_type = av_details.get("access_type") or av_details.get("operation") or "UNKNOWN"
-        target_vaddr_str = av_details.get("target_virtual_address", "0x0")
-        try:
-            target_vaddr = int(target_vaddr_str, 16) if isinstance(target_vaddr_str, str) else int(target_vaddr_str)
-        except ValueError:
-            target_vaddr = 0
+        target_vaddr_raw = av_details.get("target_virtual_address")
+        if target_vaddr_raw is None:
+            target_vaddr_raw = av_details.get("target_address")
+        target_vaddr: Optional[int] = None
+        if target_vaddr_raw is not None:
+            try:
+                target_vaddr = int(target_vaddr_raw, 16) if isinstance(target_vaddr_raw, str) else int(target_vaddr_raw)
+            except (ValueError, TypeError):
+                target_vaddr = None
 
         # 2. Memory Spatial Classification of Target Address
         spatial_verdict = cls._classify_target_memory(target_vaddr, parsed_dump)
@@ -141,7 +145,7 @@ class CrashRootCauseAnalyzer:
             "is_unmapped_fault_address": is_unmapped,
             "architecture": arch,
             "access_type": access_type,
-            "target_address": f"0x{target_vaddr:016X}",
+            "target_address": f"0x{target_vaddr:016X}" if target_vaddr is not None else "UNAVAILABLE",
             "root_cause_classification": root_cause,
             "confidence": confidence,
             "culprit_register": culprit_reg,
@@ -155,6 +159,12 @@ class CrashRootCauseAnalyzer:
     @classmethod
     def _classify_target_memory(cls, target_vaddr: int, parsed_dump: Dict[str, Any]) -> Dict[str, Any]:
         """Classifies the target memory location violated by the exception."""
+        if target_vaddr is None:
+            return {
+                "category": "UNKNOWN_TARGET_ADDRESS",
+                "severity": "UNKNOWN",
+                "description": "Exception record has no target virtual address (non-memory exception or incomplete dump)."
+            }
         if target_vaddr <= cls.NULL_PAGE_BOUND:
             return {
                 "category": "NULL_PAGE_TRAP",
@@ -181,9 +191,7 @@ class CrashRootCauseAnalyzer:
             if st_base_raw and st_size > 0:
                 try:
                     st_base = int(st_base_raw, 16) if isinstance(st_base_raw, str) else int(st_base_raw)
-                    low = min(st_base, st_base - st_size) if st_base > st_size else st_base
-                    high = max(st_base, st_base + st_size)
-                    if low <= target_vaddr <= high:
+                    if st_size > 0 and st_base <= target_vaddr < (st_base + st_size):
                         return {
                             "category": "THREAD_STACK",
                             "status": "VALID_STACK_REGION",
@@ -216,14 +224,19 @@ class CrashRootCauseAnalyzer:
                     "description": f"Target address resides within loaded module {mod.get('name')}."
                 }
 
-        # Cross-query live VAD if PID is recorded in dump (Stream 15)
+        # Cross-query live VAD only if PID is recorded in dump (Stream 15), live, and target_vaddr is known
         pid = parsed_dump.get("process_id")
-        if pid and pid > 0:
+        if pid and pid > 0 and target_vaddr is not None:
             try:
                 snap = VirtualMemoryInspector.inspect_process(pid)
-                cls_info = snap.classify_address(target_vaddr)
-                if cls_info.get("status") == "COMMITTED":
-                    return cls_info
+                if not getattr(snap, "is_simulated", False):
+                    cls_info = snap.classify_address(target_vaddr)
+                    if cls_info.get("status") == "COMMITTED":
+                        enriched = dict(cls_info)
+                        enriched["vad_live_pid_reuse_caveat"] = (
+                            f"Live VAD state queried from PID {pid}; verify process start time against dump timestamp to rule out PID reuse."
+                        )
+                        return enriched
             except Exception:
                 pass
 
@@ -349,11 +362,20 @@ class CrashRootCauseAnalyzer:
         cls,
         disasm_report: Dict[str, Any],
         registers: Dict[str, Any],
-        target_vaddr: int,
+        target_vaddr: Optional[int],
         access_type: str,
         spatial_verdict: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Correlates the memory operand in the faulting instruction with register context."""
+        if target_vaddr is None:
+            return {
+                "root_cause": "UNKNOWN_TARGET_ADDRESS",
+                "confidence": "LOW_NON_MEMORY_OR_INCOMPLETE",
+                "culprit_register": None,
+                "culprit_value": None,
+                "details": spatial_verdict.get("description", "No faulting memory address recorded in exception payload.")
+            }
+
         offending = disasm_report.get("offending_instruction") if disasm_report.get("available") else None
 
         # Fallback if disassembly is unavailable
@@ -426,10 +448,29 @@ class CrashRootCauseAnalyzer:
                 "details": f"Could not identify base register in memory expression [{mem_expr}]."
             }
 
-        reg_val_str = registers.get(found_reg, "0x0")
+        sub_to_64 = {
+            "eax": "rax", "ebx": "rbx", "ecx": "rcx", "edx": "rdx",
+            "esi": "rsi", "edi": "rdi", "ebp": "rbp", "esp": "rsp",
+        }
+        reg_candidates = [found_reg, found_reg.upper()]
+        if found_reg in sub_to_64:
+            reg_candidates.extend([sub_to_64[found_reg], sub_to_64[found_reg].upper()])
+        reg_key = next((k for k in reg_candidates if k in registers), None)
+        if reg_key is None:
+            return {
+                "root_cause": f"REGISTER_UNAVAILABLE_{access_type}",
+                "confidence": "LOW_HEURISTIC",
+                "culprit_register": found_reg.upper(),
+                "culprit_value": None,
+                "operand_expression": f"[{mem_expr}]",
+                "details": f"Register {found_reg.upper()} is absent from thread register context; cannot verify pointer value."
+            }
+        reg_val_str = registers[reg_key]
         try:
             reg_val = int(reg_val_str, 16) if isinstance(reg_val_str, str) else int(reg_val_str)
-        except ValueError:
+            if found_reg in sub_to_64 and reg_key.lower() == sub_to_64[found_reg]:
+                reg_val &= 0xFFFFFFFF
+        except (ValueError, TypeError):
             reg_val = 0
 
         # Extract numeric displacement (e.g. + 0x28 or + 40)

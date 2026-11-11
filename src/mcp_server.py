@@ -794,7 +794,11 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
 class ReaMcpServer:
     """Standard MCP Stdio JSON-RPC Server."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        workspace_root: Optional[str] = None,
+        allowed_workspace_roots: Optional[List[str]] = None,
+    ):
         self.handlers = {
             "initialize": self.handle_initialize,
             "notifications/initialized": self.handle_initialized_notification,
@@ -806,6 +810,65 @@ class ReaMcpServer:
             t["name"]: t.get("inputSchema", {})
             for t in TOOLS_REGISTRY
         }
+        from security import PathIdentity, TargetScope, AuditLogger
+        AuditLogger.ensure_chain_continuity(rotate_on_corrupt=True)
+        default_ws = os.path.join(os.path.expanduser("~"), ".rea_neural", "workspace")
+        chosen_ws = workspace_root or os.environ.get("REA_MCP_WORKSPACE") or default_ws
+        os.makedirs(chosen_ws, exist_ok=True)
+        can_host_ws = PathIdentity.canonicalize(chosen_ws)
+        unsafe_reason = TargetScope._is_unsafe_workspace_root(can_host_ws)
+        if unsafe_reason:
+            raise PermissionError(
+                f"UNSAFE_WORKSPACE_ROOT ({unsafe_reason}): Host MCP workspace '{can_host_ws}' is unsafe."
+            )
+        self._host_workspace = can_host_ws
+
+        raw_allowed = [can_host_ws]
+        if allowed_workspace_roots:
+            raw_allowed.extend(allowed_workspace_roots)
+        env_allowed = os.environ.get("REA_MCP_ALLOWED_WORKSPACES", "")
+        if env_allowed:
+            raw_allowed.extend([p.strip() for p in env_allowed.split(os.pathsep) if p.strip()])
+        self._allowed_workspace_roots: List[str] = []
+        for root in raw_allowed:
+            if not root:
+                continue
+            can_root = PathIdentity.canonicalize(root)
+            if not TargetScope._is_unsafe_workspace_root(can_root) and can_root not in self._allowed_workspace_roots:
+                self._allowed_workspace_roots.append(can_root)
+
+    def _resolve_server_workspace(self, args: Dict[str, Any]) -> str:
+        """
+        Derives the active workspace server-side.
+        Rejects untrusted client-supplied workspace_dir overrides unless explicitly
+        inside host-authorized workspace roots.
+        """
+        from security import PathIdentity, SecurityViolationError, AuditLogger, TargetScope
+        client_ws = args.get("workspace_dir") or args.get("workspace")
+        if not client_ws:
+            return self._host_workspace
+        try:
+            can_client_ws = PathIdentity.canonicalize(str(client_ws))
+        except Exception as exc:
+            raise SecurityViolationError(f"UNTRUSTED_WORKSPACE_OVERRIDE: Invalid workspace '{client_ws}': {exc}")
+
+        if not TargetScope._is_unsafe_workspace_root(can_client_ws):
+            for allowed_root in self._allowed_workspace_roots:
+                if PathIdentity.is_same_file(can_client_ws, allowed_root) or PathIdentity.is_within_directory(can_client_ws, allowed_root):
+                    return can_client_ws
+
+        AuditLogger.log_decision(
+            component="mcp_server",
+            operation="workspace_override",
+            target=str(client_ws),
+            decision="DENY",
+            reason="UNTRUSTED_WORKSPACE_OVERRIDE",
+            requested_capability="cap.workspace.write",
+            result="DENIED",
+        )
+        raise SecurityViolationError(
+            f"UNTRUSTED_WORKSPACE_OVERRIDE: Client-supplied workspace '{client_ws}' is not authorized by host MCP configuration."
+        )
 
     def _validate_tool_arguments(self, tool_name: str, args: Any) -> None:
         """Validates tool arguments against the declared JSON inputSchema."""
@@ -866,19 +929,19 @@ class ReaMcpServer:
         "rea_scan_hybrid": ("cap.file.read", "READ", "file_path"),
         "rea_sensory_audit": ("cap.file.read", "READ", "file_path"),
         "rea_match_pcode": ("cap.file.read", "READ", None),
-        "rea_deobfuscate_pcode": ("cap.file.read", "READ", "file_path"),
-        "rea_ghidra_analyze": ("cap.file.read", "READ", "file_path"),
+        "rea_deobfuscate_pcode": ("cap.file.read", "READ", None),
+        "rea_ghidra_analyze": ("cap.file.read", "READ", "input_file"),
         "rea_ghidra_headless": ("cap.file.read", "READ", "binary_path"),
-        "rea_windows_env_audit": ("cap.registry.read", "READ", "binary_path"),
-        "rea_resolve_dependencies": ("cap.file.read", "READ", "binary_path"),
-        "rea_inspect_crash_reports": ("cap.minidump.read", "READ", "binary_path"),
+        "rea_windows_env_audit": ("cap.registry.read", "READ", "file_path"),
+        "rea_resolve_dependencies": ("cap.file.read", "READ", "file_path"),
+        "rea_inspect_crash_reports": ("cap.minidump.read", "READ", "file_path"),
         "rea_correlate_failure_evidence": ("cap.file.read", "READ", "binary_path"),
         "rea_win_catalog_cmd": ("cap.subprocess.catalog_exec", "EXECUTE", "command_id"),
         "rea_registry_audit": ("cap.registry.read", "READ", "domain"),
         "rea_hardware_audit": ("cap.device.query", "QUERY", None),
         "rea_driver_audit": ("cap.driver.query", "QUERY", None),
         "rea_service_audit": ("cap.service.query", "QUERY", None),
-        "rea_dmp_inspect": ("cap.minidump.read", "READ", "dump_path"),
+        "rea_dmp_inspect": ("cap.minidump.read", "READ", "dmp_path"),
         "rea_etw_audit": ("cap.event_log.read", "READ", "session_name"),
         "rea_etw_capture": ("cap.event_log.read", "READ", "session_name"),
         "rea_vad_inspect": ("cap.process.query", "QUERY", "pid"),
@@ -891,7 +954,7 @@ class ReaMcpServer:
         "rea_wsp_audit": ("cap.file.read", "READ", "model_path"),
         "rea_patch_weights": ("cap.workspace.write", "WRITE", "output_path"),
         "rea_device_driver_intelligence": ("cap.device.query", "QUERY", "device_query"),
-        "rea_process_resource_audit": ("cap.process.query", "QUERY", "target_path")
+        "rea_process_resource_audit": ("cap.process.query", "QUERY", "file_path")
     }
 
     def handle_tools_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -910,13 +973,14 @@ class ReaMcpServer:
             cap_val, mode, target_param = sec_meta
             cap = Capability(cap_val)
 
-            # Extract target path and workspace if present
+            # Extract target path and derive workspace strictly server-side
             target_path = (
                 args.get("file_path") or args.get("binary_path") or
                 args.get("model_path") or args.get("source_path") or
-                args.get("target_path") or args.get("dump_path")
+                args.get("target_path") or args.get("dump_path") or
+                args.get("input_file") or args.get("dmp_path")
             )
-            workspace_dir = args.get("workspace_dir") or args.get("workspace")
+            workspace_dir = self._resolve_server_workspace(args if isinstance(args, dict) else {})
 
             # Determine mediated target name
             effective_target = args.get(target_param) if target_param else (target_path or tool_name)
@@ -1467,13 +1531,20 @@ class ReaMcpServer:
             out = args["output_path"]
             tname = args["tensor_name"]
             num_cols = int(args.get("num_columns", 64))
-            return WeightPatcher.patch_safetensors_file(
-                src_path=src,
-                output_path=out,
-                tensor_name=tname,
-                operation="column_direction_subtract",
-                num_columns=num_cols
+            tensor_arr, _ = SafetensorsHandler.read_tensor(src, tname)
+            patched_arr, metrics = WeightPatcher.apply_patch(
+                tensor_arr,
+                patch_operation="column_direction_subtract",
+                parameters={"num_columns": num_cols},
             )
+            res = SafetensorsHandler.write_patched_safetensors(
+                src, out, {tname: patched_arr}
+            )
+            res["status"] = res.get("status", "success")
+            res["tensor_name"] = tname
+            res["operation"] = "column_direction_subtract"
+            res["metrics"] = metrics
+            return res
 
         elif name == "rea_device_driver_intelligence":
             from windows_intelligence.device_intelligence import DriverMatcher, DriverPackageInventory

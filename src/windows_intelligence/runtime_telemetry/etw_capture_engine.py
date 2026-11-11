@@ -126,7 +126,11 @@ class EtwLiveCaptureSession:
                 "status": "success",
                 "session_name": self.session_name,
                 "mode": "SIMULATED",
-                "message": "ETW capture running in cross-platform test mode."
+                "is_simulated": True,
+                "source": "synthetic",
+                "etw_native_consumer_active": False,
+                "telemetry_backend": "NONE_SIMULATED_NON_NT",
+                "message": "ETW capture running in cross-platform simulated mode (no live kernel events captured on non-Windows hosts)."
             }
 
         try:
@@ -156,7 +160,8 @@ class EtwLiveCaptureSession:
                 self.trace_handle = h_trace.value
                 self.is_running = True
                 self._owns_session = True
-                self.status_description = "ACTIVE_REALTIME"
+                self.status_description = "ACTIVE_SESSION_EVENTLOG_POLLING"
+                self._register_atexit_cleanup()
 
                 # Enable requested providers
                 prov_list = providers or list(KNOWN_PROVIDER_GUIDS.keys())
@@ -171,7 +176,12 @@ class EtwLiveCaptureSession:
                 return {
                     "status": "success",
                     "session_name": self.session_name,
-                    "mode": "WIN32_REALTIME",
+                    "mode": "WIN32_SESSION_EVENTLOG_POLLING",
+                    "is_simulated": False,
+                    "source": "live_win32_session_with_eventlog_polling",
+                    "etw_native_consumer_active": False,
+                    "event_consumption_backend": "WEVTAPI_EVENT_LOG_POLLING",
+                    "consumer_note": "Trace session opened via StartTraceW; background consumer polls Event Log channels rather than native OpenTraceW/ProcessTrace callbacks.",
                     "enabled_providers": enabled,
                     "target_pid": self.target_pid
                 }
@@ -186,6 +196,9 @@ class EtwLiveCaptureSession:
                     "status": "non_elevated",
                     "session_name": self.session_name,
                     "mode": "USER_MODE_TELEMETRY",
+                    "is_simulated": False,
+                    "etw_native_consumer_active": False,
+                    "event_consumption_backend": "WEVTAPI_EVENT_LOG_POLLING",
                     "warning": "Real-time kernel trace requires Administrator privileges. Operating in non-elevated EventLog telemetry mode."
                 }
             else:
@@ -322,6 +335,22 @@ class EtwLiveCaptureSession:
             "captured_events_buffered": len(self.events_buffer)
         }
 
+    def _register_atexit_cleanup(self) -> None:
+        """Registers an interpreter-exit guard so owned native ETW trace sessions do not leak."""
+        if getattr(self, "_atexit_registered", False):
+            return
+        import atexit
+        import weakref
+        self._atexit_registered = True
+        self_ref = weakref.ref(self)
+
+        def _cleanup():
+            inst = self_ref()
+            if inst is not None and getattr(inst, "_owns_session", False):
+                inst.stop_session()
+
+        atexit.register(_cleanup)
+
     def _stop_session_native(self) -> None:
         if os.name != "nt" or not getattr(self, "_owns_session", False):
             return
@@ -340,9 +369,10 @@ class EtwLiveCaptureSession:
             prop.LoggerNameOffset = ctypes.sizeof(EVENT_TRACE_PROPERTIES)
 
             advapi32.ControlTraceW(0, self.session_name, prop_ptr, EVENT_TRACE_CONTROL_STOP)
-            self._owns_session = False
         except Exception:
             pass
+        finally:
+            self._owns_session = False
 
     def record_event(self, event: EtwEventRecord) -> None:
         """Ingests an event into the ring buffer, filtering by target PID if set."""

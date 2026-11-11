@@ -18,6 +18,57 @@ class TargetScope:
     Guarantees that analysis results are never written into target directories.
     """
 
+    @classmethod
+    def _is_unsafe_workspace_root(cls, can_ws: str) -> Optional[str]:
+        """Rejects filesystem roots, home directory root, and OS system directories as mutable workspaces."""
+        if os.path.dirname(can_ws) == can_ws:
+            return "FILESYSTEM_ROOT"
+        norm_ws = os.path.normcase(can_ws)
+        try:
+            home_dir = PathIdentity.canonicalize(os.path.expanduser("~"))
+            if norm_ws == os.path.normcase(home_dir) or PathIdentity.is_same_file(can_ws, home_dir):
+                return "USER_HOME_ROOT"
+        except Exception:
+            pass
+
+        if os.name == "nt":
+            sys_drive = os.environ.get("SystemDrive", "C:")
+            users_root = os.path.join(sys_drive + os.sep, "Users")
+            try:
+                if PathIdentity.is_same_file(can_ws, users_root):
+                    return "SYSTEM_USERS_ROOT"
+            except Exception:
+                pass
+            win_sys_dirs = [
+                os.environ.get("SystemRoot", r"C:\Windows"),
+                os.environ.get("ProgramFiles", r"C:\Program Files"),
+                os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                os.environ.get("ProgramData", r"C:\ProgramData"),
+            ]
+            for sys_dir in win_sys_dirs:
+                if not sys_dir:
+                    continue
+                try:
+                    can_sys = PathIdentity.canonicalize(sys_dir)
+                    if PathIdentity.is_same_file(can_ws, can_sys) or PathIdentity.is_within_directory(can_ws, can_sys):
+                        return "WINDOWS_SYSTEM_DIRECTORY"
+                except Exception:
+                    continue
+        else:
+            posix_sys_dirs = (
+                "/bin", "/sbin", "/usr", "/etc", "/lib", "/lib64",
+                "/boot", "/root", "/dev", "/proc", "/sys",
+            )
+            for sys_dir in posix_sys_dirs:
+                try:
+                    if os.path.normcase(can_ws) == sys_dir or PathIdentity.is_within_directory(can_ws, sys_dir):
+                        return "POSIX_SYSTEM_DIRECTORY"
+                except Exception:
+                    continue
+            if os.path.normcase(can_ws) == "/var":
+                return "POSIX_SYSTEM_DIRECTORY"
+        return None
+
     def __init__(
         self,
         target_binary_path: Optional[str] = None,
@@ -31,7 +82,13 @@ class TargetScope:
         self.strict_read_scope = strict_read_scope
 
         if workspace_dir:
-            self._workspace_dir = PathIdentity.canonicalize(workspace_dir)
+            can_ws = PathIdentity.canonicalize(workspace_dir)
+            unsafe_reason = self._is_unsafe_workspace_root(can_ws)
+            if unsafe_reason:
+                raise PermissionError(
+                    f"UNSAFE_WORKSPACE_ROOT ({unsafe_reason}): Refusing to designate '{can_ws}' as mutable workspace."
+                )
+            self._workspace_dir = can_ws
         else:
             default_ws = os.path.join(os.path.expanduser("~"), ".rea_neural", "workspace")
             os.makedirs(default_ws, exist_ok=True)
@@ -56,9 +113,15 @@ class TargetScope:
         target_dir = PathIdentity.canonicalize(os.path.dirname(can_path))
         self._target_dirs.add(target_dir)
 
-        # Disallow workspace from being identical to or contained inside the target directory
-        if PathIdentity.is_same_file(self._workspace_dir, target_dir) or PathIdentity.is_within_directory(self._workspace_dir, target_dir):
+        # Disallow workspace from being equal to, inside, or an ancestor containing target directory
+        if (
+            PathIdentity.is_same_file(self._workspace_dir, target_dir)
+            or PathIdentity.is_within_directory(self._workspace_dir, target_dir)
+            or PathIdentity.is_within_directory(target_dir, self._workspace_dir)
+        ):
             safe_ws = os.path.join(os.path.expanduser("~"), ".rea_neural", "workspace")
+            if PathIdentity.is_within_directory(target_dir, safe_ws) or PathIdentity.is_same_file(target_dir, safe_ws):
+                safe_ws = os.path.join(os.path.expanduser("~"), ".rea_neural", "isolated_workspace")
             os.makedirs(safe_ws, exist_ok=True)
             self._workspace_dir = PathIdentity.canonicalize(safe_ws)
 

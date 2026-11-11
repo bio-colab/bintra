@@ -1557,9 +1557,10 @@ class SurgicalBinaryPatcher:
                 capability=Capability.WORKSPACE_WRITE,
                 access_mode="WRITE"
             )
-        except ImportError:
-            if src_abs == out_abs:
-                raise ValueError("source_path and output_path cannot refer to the same file.")
+        except ImportError as imp_err:
+            raise RuntimeError(
+                f"SECURITY_KERNEL_UNAVAILABLE: Refusing unmediated binary patch write: {imp_err}"
+            ) from imp_err
 
         patch_bytes = bytes.fromhex(patch_hex.replace(" ", ""))
         with open(src_abs, "rb") as f:
@@ -2173,7 +2174,8 @@ def main():
     patch_p.add_argument("--output", required=True, help="Patched executable output")
     patch_p.add_argument("--offset", required=True, type=lambda x: int(x, 0), help="Byte offset (e.g. 0x1A00)")
     patch_p.add_argument("--patch-hex", required=True, help="Patch hex bytes")
-    patch_p.add_argument("--enforce-nociception", action="store_true", help="Abort patch if nociceptive pain is high")
+    patch_p.add_argument("--enforce-nociception", dest="enforce_nociception", action="store_true", default=True, help="Abort patch if nociceptive pain is high (enabled by default)")
+    patch_p.add_argument("--force", "--no-enforce-nociception", dest="enforce_nociception", action="store_false", help="Bypass nociceptive reflex check")
 
     hyb_p = subparsers.add_parser("scan-hybrid", help="Scan binary for embedded neural logic assets")
     hyb_p.add_argument("--file", required=True, help="Path to executable binary")

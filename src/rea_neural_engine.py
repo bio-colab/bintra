@@ -233,9 +233,10 @@ class SafetensorsHandler:
                 capability=Capability.WORKSPACE_WRITE,
                 access_mode="WRITE"
             )
-        except ImportError:
-            if src_abs == out_abs:
-                raise ValueError("source_path and output_path cannot refer to the same file.")
+        except ImportError as imp_err:
+            raise RuntimeError(
+                f"SECURITY_KERNEL_UNAVAILABLE: Refusing unmediated safetensors write: {imp_err}"
+            ) from imp_err
         header, base_offset, _ = cls.read_header(src_abs)
         missing_tensors = [t for t in patched_tensors if t not in header or t == "__metadata__"]
         if missing_tensors:
@@ -1571,7 +1572,50 @@ class WeightSecurityAuditor:
     """
 
     @staticmethod
+    def _compute_robust_row_zscores(row_norms: np.ndarray) -> Tuple[np.ndarray, float, float]:
+        """Computes outlier-excluded / leave-one-out row norm z-scores safe for small layers."""
+        n = row_norms.size
+        if n == 0:
+            return np.zeros(0, dtype=np.float64), 0.0, 1e-12
+        if n < 3:
+            return np.zeros(n, dtype=np.float64), float(np.mean(row_norms)), float(np.std(row_norms)) + 1e-12
+
+        rn = row_norms.astype(np.float64)
+        med = float(np.median(rn))
+        q1, q3 = float(np.percentile(rn, 25)), float(np.percentile(rn, 75))
+        mad_sigma = float(np.median(np.abs(rn - med))) * 1.4826
+        scale_hint = max((q3 - q1) / 1.349, mad_sigma, 1e-12)
+        core_mask = np.abs(rn - med) <= max(4.5 * scale_hint, 1e-9 * max(abs(med), 1.0))
+
+        if int(np.sum(core_mask)) >= max(3, (n // 2) + 1):
+            core = rn[core_mask]
+            k = core.size
+            c_mean = float(np.mean(core))
+            c_std = float(np.std(core, ddof=1)) if k > 1 else 0.0
+            s = core - c_mean
+            tot = float(np.sum(s))
+            sq = float(np.sum(s ** 2))
+            loo_m = (tot - s) / float(k - 1)
+            loo_var = np.maximum(0.0, (sq - s ** 2) / float(k - 1) - (loo_m ** 2))
+            loo_s = np.sqrt(loo_var * float(k - 1) / float(max(k - 2, 1)))
+            floor = max(1e-6 * max(abs(c_mean), abs(med)), 1e-12)
+            z_scores = np.empty(n, dtype=np.float64)
+            z_scores[core_mask] = (s - loo_m) / np.maximum(loo_s, floor)
+            z_scores[~core_mask] = (rn[~core_mask] - c_mean) / max(c_std, floor)
+            return z_scores, c_mean, max(c_std, floor)
+
+        s = rn - med
+        tot = float(np.sum(s))
+        sq = float(np.sum(s ** 2))
+        loo_m = (tot - s) / float(n - 1)
+        loo_s = np.sqrt(np.maximum(0.0, (sq - s ** 2) / float(n - 1) - (loo_m ** 2)))
+        floor = max(1e-6 * max(abs(med), 1.0), 1e-12)
+        z_scores = (s - loo_m) / np.maximum(loo_s, floor)
+        return z_scores, float(np.mean(rn)), max(float(np.std(rn)), floor)
+
+    @classmethod
     def audit_weights_without_evaluation(
+        cls,
         matrix: np.ndarray,
         spatial_height: int = 10,
         spatial_width: int = 10
@@ -1584,10 +1628,9 @@ class WeightSecurityAuditor:
         row_norms = np.linalg.norm(f32, axis=1)
         col_norms = np.linalg.norm(f32, axis=0)
 
-        mean_r = float(np.mean(row_norms))
-        std_r = float(np.std(row_norms)) + 1e-12
-        max_r_z = float((np.max(row_norms) - mean_r) / std_r) if row_norms.size > 0 else 0.0
-        suspect_rows = np.where((row_norms - mean_r) / std_r > 4.5)[0].tolist()
+        row_z, mean_r, std_r = cls._compute_robust_row_zscores(row_norms)
+        max_r_z = float(np.max(row_z)) if row_z.size > 0 else 0.0
+        suspect_rows = np.where(row_z > 4.5)[0].tolist()
 
         # Check rank-1 alignment of outlier rows (classic backdoor trigger signature)
         has_backdoor_spike = len(suspect_rows) > 0 and max_r_z > 5.0

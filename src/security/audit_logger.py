@@ -38,6 +38,7 @@ class AuditLogger:
     _sequence: int = 0
     _last_hash: str = "0" * 64
     _strict_persistence: bool = False
+    _explicitly_cleared: bool = False
 
     # Default persistent log path
     _log_dir = os.path.join(os.path.expanduser("~"), ".rea_neural", "logs")
@@ -61,6 +62,7 @@ class AuditLogger:
         with cls._lock:
             cls._log_file = os.path.abspath(file_path)
             cls._log_dir = os.path.dirname(cls._log_file)
+            cls._explicitly_cleared = False
 
     @classmethod
     def sanitize(cls, val: Any) -> Any:
@@ -83,6 +85,43 @@ class AuditLogger:
         return hashlib.sha256((prev_hash + canonical_str).encode("utf-8")).hexdigest()
 
     @classmethod
+    def _recover_chain_locked(cls, target_file: str) -> Dict[str, Any]:
+        """Must be called while holding cls._lock."""
+        if not os.path.exists(target_file) or os.path.getsize(target_file) == 0:
+            cls._sequence = 0
+            cls._last_hash = "0" * 64
+            cls._journal.clear()
+            return {"recovered": False, "records_count": 0, "head_hash": cls._last_hash}
+
+        records = []
+        with open(target_file, "r", encoding="utf-8") as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if line:
+                    try:
+                        records.append(json.loads(line))
+                    except json.JSONDecodeError as jde:
+                        raise AuditIntegrityError(f"Audit log on disk has invalid JSON at line {line_num}: {jde}")
+
+        # Verify entire existing chain
+        expected_prev = "0" * 64
+        for idx, rec in enumerate(records):
+            if rec.get("sequence") != idx:
+                raise AuditIntegrityError(f"Audit log sequence discontinuity on disk at index {idx}: got {rec.get('sequence')}")
+            if rec.get("prev_hash") != expected_prev:
+                raise AuditIntegrityError(f"Audit log hash break on disk at sequence {idx}: expected {expected_prev}, got {rec.get('prev_hash')}")
+            payload = {k: v for k, v in rec.items() if k not in ("prev_hash", "record_hash")}
+            computed = cls._compute_hash(payload, expected_prev)
+            if computed != rec.get("record_hash"):
+                raise AuditIntegrityError(f"Audit log tamper detected on disk at sequence {idx}: hash mismatch")
+            expected_prev = rec.get("record_hash")
+
+        cls._journal = records
+        cls._sequence = len(records)
+        cls._last_hash = expected_prev
+        return {"recovered": True, "records_count": len(records), "head_hash": expected_prev}
+
+    @classmethod
     def recover_chain_from_disk(cls, log_path: Optional[str] = None) -> Dict[str, Any]:
         """
         Recovers and cryptographically verifies an existing persistent audit journal from disk,
@@ -90,39 +129,38 @@ class AuditLogger:
         """
         with cls._lock:
             target_file = log_path or cls._log_file
-            if not os.path.exists(target_file) or os.path.getsize(target_file) == 0:
+            return cls._recover_chain_locked(target_file)
+
+    @classmethod
+    def ensure_chain_continuity(cls, log_path: Optional[str] = None, rotate_on_corrupt: bool = False) -> Dict[str, Any]:
+        """
+        Safely synchronizes in-memory chain sequence/head hash with an existing persistent log on disk
+        across separate process invocations. If rotate_on_corrupt=True and an older on-disk log has
+        legacy breaks, rotates the stale file rather than breaking startup while still rejecting tampering
+        in strict recover_chain_from_disk() calls.
+        """
+        with cls._lock:
+            target_file = log_path or cls._log_file
+            if cls._explicitly_cleared and log_path is None:
+                return {"recovered": False, "records_count": 0, "skipped": "cleared_test_state"}
+            if cls._sequence > 0 and cls._journal:
+                return {"recovered": True, "records_count": len(cls._journal), "head_hash": cls._last_hash}
+            try:
+                return cls._recover_chain_locked(target_file)
+            except AuditIntegrityError as err:
+                if not rotate_on_corrupt or not os.path.exists(target_file):
+                    raise
+                import sys, time
+                rotated = f"{target_file}.legacy.{int(time.time())}.jsonl"
+                try:
+                    os.replace(target_file, rotated)
+                except OSError:
+                    rotated = None
                 cls._sequence = 0
                 cls._last_hash = "0" * 64
                 cls._journal.clear()
-                return {"recovered": False, "records_count": 0, "head_hash": cls._last_hash}
-
-            records = []
-            with open(target_file, "r", encoding="utf-8") as f:
-                for line_num, line in enumerate(f, 1):
-                    line = line.strip()
-                    if line:
-                        try:
-                            records.append(json.loads(line))
-                        except json.JSONDecodeError as jde:
-                            raise AuditIntegrityError(f"Audit log on disk has invalid JSON at line {line_num}: {jde}")
-
-            # Verify entire existing chain
-            expected_prev = "0" * 64
-            for idx, rec in enumerate(records):
-                if rec.get("sequence") != idx:
-                    raise AuditIntegrityError(f"Audit log sequence discontinuity on disk at index {idx}: got {rec.get('sequence')}")
-                if rec.get("prev_hash") != expected_prev:
-                    raise AuditIntegrityError(f"Audit log hash break on disk at sequence {idx}: expected {expected_prev}, got {rec.get('prev_hash')}")
-                payload = {k: v for k, v in rec.items() if k not in ("prev_hash", "record_hash")}
-                computed = cls._compute_hash(payload, expected_prev)
-                if computed != rec.get("record_hash"):
-                    raise AuditIntegrityError(f"Audit log tamper detected on disk at sequence {idx}: hash mismatch")
-                expected_prev = rec.get("record_hash")
-
-            cls._journal = records
-            cls._sequence = len(records)
-            cls._last_hash = expected_prev
-            return {"recovered": True, "records_count": len(records), "head_hash": expected_prev}
+                print(f"[REA-Neural][AuditLogger] Warning: rotated legacy/broken audit log ({err}) -> {rotated}", file=sys.stderr)
+                return {"recovered": False, "records_count": 0, "rotated_legacy_log": rotated, "head_hash": cls._last_hash}
 
     @classmethod
     def log_decision(
@@ -286,3 +324,4 @@ class AuditLogger:
             cls._journal.clear()
             cls._sequence = 0
             cls._last_hash = "0" * 64
+            cls._explicitly_cleared = True

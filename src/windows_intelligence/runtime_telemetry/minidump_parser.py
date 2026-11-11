@@ -392,21 +392,27 @@ class MiniDumpParser:
                     }
                     info["thread_context"] = dict(info["thread_registers"])
                 elif len(ctx_bytes) >= 716:
-                    # x86 context
+                    # x86 CONTEXT (WinNT offsets: Edi=156, Esi=160, Ebx=164, Edx=168, Ecx=172, Eax=176, Ebp=180, Eip=184, Esp=196)
+                    (edi,) = struct.unpack("<I", ctx_bytes[156:160])
+                    (esi,) = struct.unpack("<I", ctx_bytes[160:164])
+                    (ebx,) = struct.unpack("<I", ctx_bytes[164:168])
+                    (edx,) = struct.unpack("<I", ctx_bytes[168:172])
+                    (ecx,) = struct.unpack("<I", ctx_bytes[172:176])
+                    (eax,) = struct.unpack("<I", ctx_bytes[176:180])
+                    (ebp,) = struct.unpack("<I", ctx_bytes[180:184])
                     (eip,) = struct.unpack("<I", ctx_bytes[184:188])
                     (esp,) = struct.unpack("<I", ctx_bytes[196:200])
-                    (ebp,) = struct.unpack("<I", ctx_bytes[180:184])
-                    (eax,) = struct.unpack("<I", ctx_bytes[176:180])
-                    (ecx,) = struct.unpack("<I", ctx_bytes[160:164])
-                    (edx,) = struct.unpack("<I", ctx_bytes[164:168])
                     info["thread_registers"] = {
                         "arch": "x86",
                         "eip": hex(eip),
                         "esp": hex(esp),
                         "ebp": hex(ebp),
                         "eax": hex(eax),
+                        "ebx": hex(ebx),
                         "ecx": hex(ecx),
-                        "edx": hex(edx)
+                        "edx": hex(edx),
+                        "esi": hex(esi),
+                        "edi": hex(edi),
                     }
                     info["thread_context"] = dict(info["thread_registers"])
             except Exception:

@@ -146,23 +146,21 @@ class EventLogCollector:
 
         stdout_data = ""
         try:
-            # Mediate execution through SafeSubprocessBroker to avoid raw unbrokered subprocess invocation
+            # Always mediate execution through SafeSubprocessBroker; never fall back to raw subprocess
             from security.safe_subprocess import SafeSubprocessBroker
+            from security import SecurityViolationError
+        except ImportError as imp_err:
+            cls.LAST_QUERY_ERRORS.append(f"SafeSubprocessBroker unavailable for channel '{channel}': {imp_err}")
+            return []
+
+        try:
             res = SafeSubprocessBroker.execute_catalog_command("event_query", extra_flags=extra_flags, timeout=8)
             stdout_data = res.get("stdout", "")
+        except SecurityViolationError:
+            raise
         except Exception as broker_err:
-            # Fallback to direct subprocess if security module is absent in minimal standalone execution
-            try:
-                cmd = ["wevtutil", "qe"] + extra_flags
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
-                if res.returncode != 0:
-                    err_msg = res.stderr.strip() or f"wevtutil exited with code {res.returncode} on channel '{channel}'"
-                    cls.LAST_QUERY_ERRORS.append(err_msg)
-                    return []
-                stdout_data = res.stdout
-            except Exception as e:
-                cls.LAST_QUERY_ERRORS.append(f"wevtutil execution exception on channel '{channel}': {str(e)}")
-                return []
+            cls.LAST_QUERY_ERRORS.append(f"wevtutil execution exception on channel '{channel}': {str(broker_err)}")
+            return []
 
         if not stdout_data:
             return []

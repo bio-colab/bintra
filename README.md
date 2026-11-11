@@ -159,7 +159,7 @@ rea-neural/
 ├── skills/
 │   └── reverse-engineer-anything/ # Agent-native skill specification
 ├── schemas/                       # Agent MCP tool definitions
-├── tests/                         # 180 automated unit, sensory, telemetry & security tests
+├── tests/                         # 182 automated unit, sensory, telemetry & security tests
 └── docs/                          # Architecture, Roadmap & mathematical foundations
     ├── architecture.md            # Master architecture & formal model
     └── ROADMAP.md                 # Strategic direction, tech evaluation & roadmap
@@ -343,13 +343,13 @@ rea-neural patch-weights `
 # Check whether an upstream update is available from GitHub
 rea-neural update --check
 
-# Automatically pull latest commits, sync dependencies, and run verification smoke tests
-rea-neural update
+# Pull verified commits with explicit confirmation (--yes), sync dependencies, or pin --ref <tag-or-sha>
+rea-neural update --yes
 ```
 
 ### Running the Test Suite
 ```powershell
-# Run the complete test suite (180 unit, sensory, runtime telemetry, and security remediation tests)
+# Run the complete test suite (182 unit, sensory, runtime telemetry, and security remediation tests)
 python -m unittest discover -s tests -p "test_*.py"
 ```
 

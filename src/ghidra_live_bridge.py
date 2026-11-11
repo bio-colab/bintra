@@ -553,23 +553,55 @@ def get_active_bridge() -> Optional[GhidraLiveBridgeServer]:
     return _GLOBAL_BRIDGE_SERVER
 
 
-def resolve_bridge_marker() -> Optional[Dict[str, Any]]:
-    """Resolves active bridge discovery marker from system tempdir, workspace, or home."""
-    scope = ExecutionGuard.get_current_scope()
-    ws_dir = scope.workspace_dir if scope else os.path.abspath(".")
-    candidates = [
-        os.path.join(tempfile.gettempdir(), ".rea_bridge.json"),
-        os.path.join(ws_dir, ".rea_bridge.json"),
-        os.path.join(os.getcwd(), ".rea_bridge.json"),
-        os.path.expanduser("~/.rea_bridge.json")
-    ]
-    for c in candidates:
-        if os.path.isfile(c):
+def _read_trusted_marker_file(marker_path: str) -> Optional[Dict[str, Any]]:
+    """Reads a bridge discovery marker safely without following symlinks and verifying ownership on POSIX."""
+    if not os.path.isfile(marker_path) or os.path.islink(marker_path):
+        return None
+    try:
+        if hasattr(os, "O_NOFOLLOW"):
+            flags = os.O_RDONLY | os.O_NOFOLLOW
+            fd = os.open(marker_path, flags)
             try:
-                with open(c, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                st = os.fstat(fd)
+                if hasattr(os, "getuid") and st.st_uid != os.getuid():
+                    return None
+                with os.fdopen(fd, "r", encoding="utf-8") as f:
+                    data = json.load(f)
             except Exception:
-                pass
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                return None
+        else:
+            with open(marker_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        if isinstance(data, dict) and isinstance(data.get("port"), int):
+            return data
+    except Exception:
+        return None
+    return None
+
+
+def resolve_bridge_marker() -> Optional[Dict[str, Any]]:
+    """Resolves active bridge discovery marker from trusted workspace or verified tempdir locations."""
+    scope = ExecutionGuard.get_current_scope()
+    default_ws = os.path.join(os.path.expanduser("~"), ".rea_neural", "workspace")
+    ws_dir = scope.workspace_dir if scope else default_ws
+    candidates = [
+        os.path.join(ws_dir, ".rea_bridge.json"),
+        os.path.join(tempfile.gettempdir(), ".rea_bridge.json"),
+        os.path.join(default_ws, ".rea_bridge.json"),
+    ]
+    seen = set()
+    for c in candidates:
+        norm = os.path.normcase(os.path.abspath(c))
+        if norm in seen:
+            continue
+        seen.add(norm)
+        data = _read_trusted_marker_file(c)
+        if data is not None:
+            return data
     return None
 
 

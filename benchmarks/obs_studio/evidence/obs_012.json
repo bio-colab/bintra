@@ -43,7 +43,9 @@
         "sha256",
         "entry_point_file_offset",
         "imports",
-        "exports"
+        "exports",
+        "delay_imports",
+        "version_info"
       ],
       "status": null,
       "verdict": null,

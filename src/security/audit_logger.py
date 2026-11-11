@@ -18,6 +18,68 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 
+class _ProcessFileLock:
+    """Inter-process cross-process file lock using msvcrt (Windows) or fcntl (POSIX)."""
+
+    def __init__(self, lock_file_path: str, timeout: float = 10.0):
+        self.lock_file_path = lock_file_path
+        self.timeout = timeout
+        self._fd = None
+
+    def __enter__(self):
+        if not self.lock_file_path:
+            return self
+        start = time.time()
+        parent_dir = os.path.dirname(self.lock_file_path)
+        if parent_dir:
+            try:
+                os.makedirs(parent_dir, exist_ok=True)
+            except Exception:
+                pass
+        try:
+            self._fd = open(self.lock_file_path, "a+b")
+        except Exception:
+            self._fd = None
+            return self
+
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    self._fd.seek(0)
+                    msvcrt.locking(self._fd.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self._fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return self
+            except (BlockingIOError, OSError, PermissionError):
+                if time.time() - start > self.timeout:
+                    # Timeout fallback - proceed without deadlock
+                    break
+                time.sleep(0.01)
+            except Exception:
+                break
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._fd:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    self._fd.seek(0)
+                    msvcrt.locking(self._fd.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self._fd.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                self._fd.close()
+            except Exception:
+                pass
+            self._fd = None
+
+
 class AuditPersistenceError(RuntimeError):
     """Raised when an audit record fails to persist to durable storage."""
     pass
@@ -150,6 +212,24 @@ class AuditLogger:
         return {"recovered": True, "records_count": len(records), "head_hash": expected_prev}
 
     @classmethod
+    def _read_disk_tail(cls, target_file: str) -> Optional[Dict[str, Any]]:
+        """Reads the last valid JSONL record from the persistent log file on disk."""
+        if not target_file or not os.path.exists(target_file) or os.path.getsize(target_file) == 0:
+            return None
+        try:
+            with open(target_file, "rb") as f:
+                size = os.path.getsize(target_file)
+                buffer_size = min(size, 8192)
+                f.seek(size - buffer_size)
+                chunk = f.read(buffer_size).decode("utf-8", errors="replace")
+                lines = [l.strip() for l in chunk.splitlines() if l.strip()]
+                if lines:
+                    return json.loads(lines[-1])
+        except Exception:
+            pass
+        return None
+
+    @classmethod
     def recover_chain_from_disk(cls, log_path: Optional[str] = None) -> Dict[str, Any]:
         """
         Recovers and cryptographically verifies an existing persistent audit journal from disk,
@@ -157,7 +237,9 @@ class AuditLogger:
         """
         with cls._lock:
             target_file = log_path or cls._log_file
-            return cls._recover_chain_locked(target_file)
+            lock_path = (target_file or "") + ".lock"
+            with _ProcessFileLock(lock_path):
+                return cls._recover_chain_locked(target_file)
 
     @classmethod
     def ensure_chain_continuity(cls, log_path: Optional[str] = None, rotate_on_corrupt: bool = False) -> Dict[str, Any]:
@@ -172,67 +254,69 @@ class AuditLogger:
             if cls._explicitly_cleared and log_path is None:
                 return {"recovered": False, "records_count": 0, "skipped": "cleared_test_state"}
 
-            res: Dict[str, Any]
-            if cls._sequence > 0 and cls._journal:
-                res = {"recovered": True, "records_count": len(cls._journal), "head_hash": cls._last_hash}
-            else:
-                try:
-                    res = cls._recover_chain_locked(target_file)
-                except AuditIntegrityError as err:
-                    if not rotate_on_corrupt or not os.path.exists(target_file):
-                        cls._audit_degraded = True
-                        cls._degraded_reason = str(err)
-                        raise
-                    rotated = f"{target_file}.legacy.{int(time.time())}.jsonl"
+            lock_path = (target_file or "") + ".lock"
+            with _ProcessFileLock(lock_path):
+                res: Dict[str, Any]
+                if cls._sequence > 0 and cls._journal:
+                    res = {"recovered": True, "records_count": len(cls._journal), "head_hash": cls._last_hash}
+                else:
                     try:
-                        os.replace(target_file, rotated)
-                    except OSError as rot_err:
-                        rotated = None
-                        if cls._strict_persistence:
+                        res = cls._recover_chain_locked(target_file)
+                    except AuditIntegrityError as err:
+                        if not rotate_on_corrupt or not os.path.exists(target_file):
                             cls._audit_degraded = True
-                            cls._degraded_reason = str(rot_err)
+                            cls._degraded_reason = str(err)
+                            raise
+                        rotated = f"{target_file}.legacy.{int(time.time())}.jsonl"
+                        try:
+                            os.replace(target_file, rotated)
+                        except OSError as rot_err:
+                            rotated = None
+                            if cls._strict_persistence:
+                                cls._audit_degraded = True
+                                cls._degraded_reason = str(rot_err)
+                                raise AuditPersistenceError(
+                                    f"CRITICAL: Cannot rotate corrupt audit log '{target_file}': {rot_err}"
+                                ) from rot_err
+                        cls._sequence = 0
+                        cls._last_hash = "0" * 64
+                        cls._journal.clear()
+                        print(f"[Bintra][AuditLogger] Warning: rotated legacy/broken audit log ({err}) -> {rotated}", file=sys.stderr)
+                        res = {"recovered": False, "records_count": 0, "rotated_legacy_log": rotated, "head_hash": cls._last_hash}
+                    except OSError as io_err:
+                        cls._audit_degraded = True
+                        cls._degraded_reason = str(io_err)
+                        if cls._strict_persistence:
                             raise AuditPersistenceError(
-                                f"CRITICAL: Cannot rotate corrupt audit log '{target_file}': {rot_err}"
-                            ) from rot_err
-                    cls._sequence = 0
-                    cls._last_hash = "0" * 64
-                    cls._journal.clear()
-                    print(f"[Bintra][AuditLogger] Warning: rotated legacy/broken audit log ({err}) -> {rotated}", file=sys.stderr)
-                    res = {"recovered": False, "records_count": 0, "rotated_legacy_log": rotated, "head_hash": cls._last_hash}
-                except OSError as io_err:
-                    cls._audit_degraded = True
-                    cls._degraded_reason = str(io_err)
-                    if cls._strict_persistence:
-                        raise AuditPersistenceError(
-                            f"CRITICAL: Cannot read audit log '{target_file}': {io_err}"
-                        ) from io_err
-                    sys.stderr.write(
-                        f"[AUDIT PERSISTENCE WARNING] Cannot read audit log '{target_file}': {io_err}\n"
-                    )
-                    return {"recovered": False, "records_count": 0, "audit_degraded": True, "audit_degraded_reason": str(io_err), "head_hash": cls._last_hash}
+                                f"CRITICAL: Cannot read audit log '{target_file}': {io_err}"
+                            ) from io_err
+                        sys.stderr.write(
+                            f"[AUDIT PERSISTENCE WARNING] Cannot read audit log '{target_file}': {io_err}\n"
+                        )
+                        return {"recovered": False, "records_count": 0, "audit_degraded": True, "audit_degraded_reason": str(io_err), "head_hash": cls._last_hash}
 
-            # Verify directory/file writability upfront so callers detect degraded audit early
-            if log_path is None:
-                parent_dir = os.path.dirname(target_file)
-                try:
-                    if parent_dir:
-                        os.makedirs(parent_dir, exist_ok=True)
-                    with open(target_file, "a", encoding="utf-8"):
-                        pass
-                except Exception as exc:
-                    cls._audit_degraded = True
-                    cls._degraded_reason = str(exc)
-                    if cls._strict_persistence:
-                        raise AuditPersistenceError(
-                            f"CRITICAL: Audit log location '{target_file}' is not writable: {exc}"
-                        ) from exc
-                    sys.stderr.write(
-                        f"[AUDIT PERSISTENCE WARNING] Audit log location '{target_file}' is not writable: {exc}\n"
-                    )
-                    res["audit_degraded"] = True
-                    res["audit_degraded_reason"] = str(exc)
+                # Verify directory/file writability upfront so callers detect degraded audit early
+                if log_path is None:
+                    parent_dir = os.path.dirname(target_file)
+                    try:
+                        if parent_dir:
+                            os.makedirs(parent_dir, exist_ok=True)
+                        with open(target_file, "a", encoding="utf-8"):
+                            pass
+                    except Exception as exc:
+                        cls._audit_degraded = True
+                        cls._degraded_reason = str(exc)
+                        if cls._strict_persistence:
+                            raise AuditPersistenceError(
+                                f"CRITICAL: Audit log location '{target_file}' is not writable: {exc}"
+                            ) from exc
+                        sys.stderr.write(
+                            f"[AUDIT PERSISTENCE WARNING] Audit log location '{target_file}' is not writable: {exc}\n"
+                        )
+                        res["audit_degraded"] = True
+                        res["audit_degraded_reason"] = str(exc)
 
-            return res
+                return res
 
     @classmethod
     def log_decision(
@@ -257,38 +341,50 @@ class AuditLogger:
         clean_meta = cls.sanitize(metadata or {})
 
         with cls._lock:
-            seq = cls._sequence
-            prev_h = cls._last_hash
-            ts = datetime.now(timezone.utc).isoformat()
+            lock_path = (cls._log_file or "") + ".lock"
+            with _ProcessFileLock(lock_path):
+                # Synchronize with on-disk state if another process appended
+                if cls._log_file:
+                    disk_tail = cls._read_disk_tail(cls._log_file)
+                    if disk_tail is not None:
+                        disk_seq = disk_tail.get("sequence", -1)
+                        disk_hash = disk_tail.get("record_hash")
+                        if disk_seq >= cls._sequence or (cls._sequence == 0 and cls._last_hash == "0" * 64):
+                            cls._sequence = disk_seq + 1
+                            cls._last_hash = disk_hash
 
-            payload = {
-                "sequence": seq,
-                "timestamp": ts,
-                "component": clean_component,
-                "operation": clean_op,
-                "target": clean_target,
-                "requested_capability": requested_capability,
-                "decision": decision.upper(),
-                "reason": clean_reason,
-                "side_effects": side_effects or [],
-                "result": result.upper(),
-                "metadata": clean_meta
-            }
+                seq = cls._sequence
+                prev_h = cls._last_hash
+                ts = datetime.now(timezone.utc).isoformat()
 
-            rec_hash = cls._compute_hash(payload, prev_h)
+                payload = {
+                    "sequence": seq,
+                    "timestamp": ts,
+                    "component": clean_component,
+                    "operation": clean_op,
+                    "target": clean_target,
+                    "requested_capability": requested_capability,
+                    "decision": decision.upper(),
+                    "reason": clean_reason,
+                    "side_effects": side_effects or [],
+                    "result": result.upper(),
+                    "metadata": clean_meta
+                }
 
-            full_record = dict(payload)
-            full_record["prev_hash"] = prev_h
-            full_record["record_hash"] = rec_hash
+                rec_hash = cls._compute_hash(payload, prev_h)
 
-            cls._journal.append(full_record)
-            cls._sequence += 1
-            cls._last_hash = rec_hash
+                full_record = dict(payload)
+                full_record["prev_hash"] = prev_h
+                full_record["record_hash"] = rec_hash
 
-            # Persist to disk with error checking
-            cls._persist_record(full_record)
+                cls._journal.append(full_record)
+                cls._sequence += 1
+                cls._last_hash = rec_hash
 
-        return full_record
+                # Persist to disk with error checking while holding process lock
+                cls._persist_record(full_record)
+
+            return full_record
 
     @classmethod
     def _persist_record(cls, record: Dict[str, Any]) -> None:
@@ -314,8 +410,9 @@ class AuditLogger:
         and asserts synchronization with on-disk log if present.
         """
         records = []
-        if log_path and os.path.exists(log_path):
-            with open(log_path, "r", encoding="utf-8") as f:
+        target = log_path or (cls._log_file if not cls._explicitly_cleared else None)
+        if target and os.path.exists(target) and os.path.getsize(target) > 0:
+            with open(target, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line:

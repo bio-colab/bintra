@@ -823,7 +823,7 @@ class TestAuditRemediations(unittest.TestCase):
         discovered_count = unittest.defaultTestLoader.discover(
             os.path.join(repo_root, "tests"), pattern="test_*.py"
         ).countTestCases()
-        self.assertEqual(discovered_count, 195)
+        self.assertEqual(discovered_count, 206)
 
         doc_paths = [
             "README.md",

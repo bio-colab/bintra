@@ -214,7 +214,7 @@ public class BintraGhidraBridge extends GhidraScript {
         int exitCode = proc.waitFor();
         if (exitCode != 0 || !tempPlan.exists()) {
             printerr("[Bintra] Bintra Analysis failed with exit code: " + exitCode);
-            return;
+            throw new RuntimeException("[Bintra] Bintra Analysis failed with exit code: " + exitCode);
         }
 
         // 5. Read Mutation Plan

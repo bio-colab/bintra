@@ -51,6 +51,26 @@ OBS_PLUGINS_DIR = OBS_ROOT / "obs-plugins" / "64bit"
 HOME_DIR = Path.home()
 
 
+def resolve_obs_binary(name: str) -> Optional[Path]:
+    """Resolves an OBS binary across OBS 32 flat layout and OBS 33 modular core layout."""
+    candidates = [
+        OBS_BIN_DIR / name,
+        OBS_PLUGINS_DIR / name,
+        OBS_ROOT / "core" / name.replace(".dll", "") / name,
+        OBS_ROOT / "core" / "obs-browser" / name,
+        OBS_ROOT / "core" / "win-capture" / "data" / name,
+        OBS_ROOT / "core" / "win-dshow" / "data" / name,
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    if OBS_ROOT.exists():
+        found = list(OBS_ROOT.rglob(name))
+        if found:
+            return found[0]
+    return None
+
+
 def sanitize_text(value: str) -> str:
     if not value:
         return value
@@ -253,11 +273,14 @@ def main() -> None:
         stderr=subprocess.DEVNULL,
     )
     obs_pid = obs_proc.pid
+    etw_session.target_pid = obs_pid
     print(f"Spawned isolated OBS Studio PID={obs_pid} (--multi --disable-shutdown-check)")
 
     try:
         # Poll up to 18s until obs.dll and plugins appear in process modules
         disk_plugins_set = {p.name.lower() for p in OBS_PLUGINS_DIR.glob("*.dll")} if OBS_PLUGINS_DIR.exists() else set()
+        if (OBS_ROOT / "core").exists():
+            disk_plugins_set |= {p.name.lower() for p in (OBS_ROOT / "core").rglob("*.dll")}
         snap1 = None
         for _ in range(24):
             time.sleep(0.75)
@@ -275,7 +298,6 @@ def main() -> None:
             snap1 = VirtualMemoryInspector.inspect_process(obs_pid)
 
         proc_alive = obs_proc.poll() is None
-        etw_session.target_pid = obs_pid
         children = _find_child_pids(obs_pid)
 
         # ------------------------------------------------------------------
@@ -286,6 +308,8 @@ def main() -> None:
 
         disk_core_dlls = {p.name.lower() for p in OBS_BIN_DIR.glob("*.dll")}
         disk_plugin_dlls = {p.name.lower() for p in OBS_PLUGINS_DIR.glob("*.dll")} if OBS_PLUGINS_DIR.exists() else set()
+        if (OBS_ROOT / "core").exists():
+            disk_plugin_dlls |= {p.name.lower() for p in (OBS_ROOT / "core").rglob("*.dll")}
 
         loaded_core_dlls = sorted(d for d in disk_core_dlls if d in loaded_lower)
         loaded_plugin_dlls = sorted(d for d in disk_plugin_dlls if d in loaded_lower)
@@ -429,8 +453,8 @@ def main() -> None:
             ("droidcam-obs.dll", "obs_module_ver"),
         ]:
             mod_info = loaded_lower.get(mod_name.lower())
-            mod_disk = (OBS_BIN_DIR / mod_name) if (OBS_BIN_DIR / mod_name).exists() else (OBS_PLUGINS_DIR / mod_name)
-            if not (mod_info and mod_disk.exists()):
+            mod_disk = resolve_obs_binary(mod_name)
+            if not (mod_info and mod_disk and mod_disk.exists()):
                 continue
 
             pe_info = BinaryFormatInspector.inspect(str(mod_disk))

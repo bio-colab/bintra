@@ -12,92 +12,135 @@
   "stop_result": {
     "status": "stopped",
     "session_name": "Bintra_OBS_Bench_Trace",
-    "duration_seconds": 47.273,
-    "captured_events_buffered": 30,
+    "duration_seconds": 91.168,
+    "captured_events_buffered": 626,
     "consumer_errors_count": 0,
     "consumer_errors": []
   },
-  "global_timeline_count": 5,
-  "obs_pid_filtered_count": 0,
+  "global_timeline_count": 500,
+  "obs_pid_filtered_count": 200,
   "event_sources_breakdown": {
-    "event_log_polling": 5
+    "toolhelp_module_delta": 500
   },
   "sample_events": [
     {
-      "timestamp": 1794404579.4116,
-      "time_str": "16:42:59.411",
-      "provider_name": "EventLog",
-      "event_id": 6013,
-      "pid": 0,
+      "timestamp": 1794423851.3029,
+      "time_str": "22:04:11.302",
+      "provider_name": "Bintra-Toolhelp32-ModuleMonitor",
+      "event_id": 6,
+      "pid": 12056,
       "tid": 0,
-      "event_type": "INFO",
+      "event_type": "IMAGE_UNLOAD",
       "opcode": 0,
-      "source": "event_log_polling",
+      "source": "toolhelp_module_delta",
       "details": {
-        "message": "Param_4=76025; Param_5=60; Param_6=-180 Arabic Standard Time",
-        "Param_4": "76025",
-        "Param_5": "60",
-        "Param_6": "-180 Arabic Standard Time"
+        "image_name": "gdi32full.dll",
+        "base_address": "0x7ff903f80000"
       }
     },
     {
-      "timestamp": 1794408403.3828,
-      "time_str": "17:46:43.382",
-      "provider_name": "Microsoft-Windows-Security-SPP",
-      "event_id": 16394,
-      "pid": 0,
+      "timestamp": 1794423851.3029,
+      "time_str": "22:04:11.302",
+      "provider_name": "Bintra-Toolhelp32-ModuleMonitor",
+      "event_id": 6,
+      "pid": 12056,
       "tid": 0,
-      "event_type": "INFO",
+      "event_type": "IMAGE_UNLOAD",
       "opcode": 0,
-      "source": "event_log_polling",
+      "source": "toolhelp_module_delta",
       "details": {
-        "message": ""
+        "image_name": "ole32.dll",
+        "base_address": "0x7ff9060d0000"
       }
     },
     {
-      "timestamp": 1794408434.8665,
-      "time_str": "17:47:14.866",
-      "provider_name": "Microsoft-Windows-Security-SPP",
-      "event_id": 16384,
-      "pid": 0,
+      "timestamp": 1794423851.3029,
+      "time_str": "22:04:11.302",
+      "provider_name": "Bintra-Toolhelp32-ModuleMonitor",
+      "event_id": 6,
+      "pid": 12056,
       "tid": 0,
-      "event_type": "INFO",
+      "event_type": "IMAGE_UNLOAD",
       "opcode": 0,
-      "source": "event_log_polling",
+      "source": "toolhelp_module_delta",
       "details": {
-        "message": "Param_0=2027-01-26T10:17:14Z; Param_1=RulesEngine",
-        "Param_0": "2027-01-26T10:17:14Z",
-        "Param_1": "RulesEngine"
+        "image_name": "WLDAP32.dll",
+        "base_address": "0x7ff904610000"
       }
     },
     {
-      "timestamp": 1794409200.4353,
-      "time_str": "18:00:00.435",
-      "provider_name": "igcc",
-      "event_id": 0,
-      "pid": 0,
+      "timestamp": 1794423851.3029,
+      "time_str": "22:04:11.302",
+      "provider_name": "Bintra-Toolhelp32-ModuleMonitor",
+      "event_id": 6,
+      "pid": 12056,
       "tid": 0,
-      "event_type": "INFO",
+      "event_type": "IMAGE_UNLOAD",
       "opcode": 0,
-      "source": "event_log_polling",
+      "source": "toolhelp_module_delta",
       "details": {
-        "message": "Param_0=PowerEvent handled successfully by the service.",
-        "Param_0": "PowerEvent handled successfully by the service."
+        "image_name": "avformat-62.dll",
+        "base_address": "0x7ff8bfe50000"
       }
     },
     {
-      "timestamp": 1794409350.151,
-      "time_str": "18:02:30.150",
-      "provider_name": "igcc",
-      "event_id": 0,
-      "pid": 0,
+      "timestamp": 1794423851.3029,
+      "time_str": "22:04:11.302",
+      "provider_name": "Bintra-Toolhelp32-ModuleMonitor",
+      "event_id": 6,
+      "pid": 12056,
       "tid": 0,
-      "event_type": "INFO",
+      "event_type": "IMAGE_UNLOAD",
       "opcode": 0,
-      "source": "event_log_polling",
+      "source": "toolhelp_module_delta",
       "details": {
-        "message": "Param_0=PowerEvent handled successfully by the service.",
-        "Param_0": "PowerEvent handled successfully by the service."
+        "image_name": "RPCRT4.dll",
+        "base_address": "0x7ff905530000"
+      }
+    },
+    {
+      "timestamp": 1794423851.3029,
+      "time_str": "22:04:11.302",
+      "provider_name": "Bintra-Toolhelp32-ModuleMonitor",
+      "event_id": 6,
+      "pid": 12056,
+      "tid": 0,
+      "event_type": "IMAGE_UNLOAD",
+      "opcode": 0,
+      "source": "toolhelp_module_delta",
+      "details": {
+        "image_name": "WS2_32.dll",
+        "base_address": "0x7ff905b50000"
+      }
+    },
+    {
+      "timestamp": 1794423851.3029,
+      "time_str": "22:04:11.302",
+      "provider_name": "Bintra-Toolhelp32-ModuleMonitor",
+      "event_id": 6,
+      "pid": 12056,
+      "tid": 0,
+      "event_type": "IMAGE_UNLOAD",
+      "opcode": 0,
+      "source": "toolhelp_module_delta",
+      "details": {
+        "image_name": "combase.dll",
+        "base_address": "0x7ff905650000"
+      }
+    },
+    {
+      "timestamp": 1794423851.3029,
+      "time_str": "22:04:11.302",
+      "provider_name": "Bintra-Toolhelp32-ModuleMonitor",
+      "event_id": 6,
+      "pid": 12056,
+      "tid": 0,
+      "event_type": "IMAGE_UNLOAD",
+      "opcode": 0,
+      "source": "toolhelp_module_delta",
+      "details": {
+        "image_name": "ADVAPI32.dll",
+        "base_address": "0x7ff906340000"
       }
     }
   ],
@@ -115,6 +158,6 @@
   },
   "cli_etw_audit": {
     "returncode": 0,
-    "stdout_head": "{\n  \"status\": \"success\",\n  \"is_windows\": true,\n  \"standard_sessions_probed\": 7,\n  \"active_sessions_count\": 5,\n  \"accessible_sessions_count\": 0,\n  \"system_protected_sessions_count\": 5,\n  \"system_total_registered_providers\": 1144,\n  \"active_kernel_providers_count\": 2142,\n  \"active_sessions\": [\n    \"Eventlog-Application\",\n    \"Eventlog-System\",\n    \"DiagLog\",\n    \"Circular Kernel Context Logger\",\n    \"WdiContextLog\"\n  ],\n  \"accessible_sessions\": [],\n  \"system_protected_sessions\": [\n    \"Eventlog-Application\",\n    \"Eventlog-System\",\n    \"DiagLog\",\n    \"Circular Kernel Context Logger\",\n    \"WdiContextLog\"\n  ],\n  \"sessions\": [\n    {\n      \"session_name\": \"Eventlog-Application\",\n      \"is_active\": true,\n      \"is_accessible\": false,\n      \"is_system_protected\": true,\n      \"status_code\": 5,\n     "
+    "stdout_head": "{\n  \"status\": \"success\",\n  \"is_windows\": true,\n  \"standard_sessions_probed\": 7,\n  \"active_sessions_count\": 5,\n  \"accessible_sessions_count\": 0,\n  \"system_protected_sessions_count\": 5,\n  \"system_total_registered_providers\": 1144,\n  \"active_kernel_providers_count\": 2147,\n  \"active_sessions\": [\n    \"Eventlog-Application\",\n    \"Eventlog-System\",\n    \"DiagLog\",\n    \"Circular Kernel Context Logger\",\n    \"WdiContextLog\"\n  ],\n  \"accessible_sessions\": [],\n  \"system_protected_sessions\": [\n    \"Eventlog-Application\",\n    \"Eventlog-System\",\n    \"DiagLog\",\n    \"Circular Kernel Context Logger\",\n    \"WdiContextLog\"\n  ],\n  \"sessions\": [\n    {\n      \"session_name\": \"Eventlog-Application\",\n      \"is_active\": true,\n      \"is_accessible\": false,\n      \"is_system_protected\": true,\n      \"status_code\": 5,\n     "
   }
 }

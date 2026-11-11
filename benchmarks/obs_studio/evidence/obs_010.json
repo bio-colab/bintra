@@ -5,12 +5,12 @@
     "inplace_overwrite_blocked": {
       "blocked": true,
       "exception": "TargetMutationError",
-      "detail": "TARGET_WRITE_FORBIDDEN: In-place binary modification is strictly forbidden by Bintra Safety Policy. Destination '%USERPROFILE%\\AppData\\Local\\Temp\\bintra_obs_guard_zvh_qquu\\target_dir\\obs-frontend-api.dll' matches source."
+      "detail": "TARGET_WRITE_FORBIDDEN: In-place binary modification is strictly forbidden by Bintra Safety Policy. Destination '%USERPROFILE%\\AppData\\Local\\Temp\\bintra_obs_guard_tnq8twv_\\target_dir\\obs-frontend-api.dll' matches source."
     },
     "target_dir_sibling_write_blocked": {
       "blocked": true,
       "exception": "TargetMutationError",
-      "detail": "TARGET_DIRECTORY_WRITE_FORBIDDEN: Output patch cannot be placed in the target's original directory '%USERPROFILE%\\AppData\\Local\\Temp\\bintra_obs_guard_zvh_qquu\\target_dir'."
+      "detail": "TARGET_DIRECTORY_WRITE_FORBIDDEN: Output patch cannot be placed in the target's original directory '%USERPROFILE%\\AppData\\Local\\Temp\\bintra_obs_guard_tnq8twv_\\target_dir'."
     },
     "workspace_traversal_blocked": {
       "blocked": true,
@@ -20,7 +20,7 @@
     "ads_injection_blocked": {
       "blocked": true,
       "exception": "SecurityViolationError",
-      "detail": "INVALID_PATH: Alternate Data Streams (:stream) are prohibited: '%USERPROFILE%\\AppData\\Local\\Temp\\bintra_obs_guard_zvh_qquu\\authorized_ws\\clean.dll:hidden_stream'."
+      "detail": "INVALID_PATH: Alternate Data Streams (:stream) are prohibited: '%USERPROFILE%\\AppData\\Local\\Temp\\bintra_obs_guard_tnq8twv_\\authorized_ws\\clean.dll:hidden_stream'."
     },
     "process_mutate_blocked": {
       "blocked": true,
@@ -68,16 +68,16 @@
     "audit_logger": {
       "verify_audit_chain": {
         "is_valid": true,
-        "records_verified": 6,
-        "head_hash": "317c792576ccdea3c38277efc9086ae08afe98b1d76c78bda35d43dcaa144516"
+        "records_verified": 1589,
+        "head_hash": "3f0f980d14c16358e8f4eb4343e8cc40adb36bea15a1f84e825ca24f6e7b91cb"
       },
-      "legacy_broken_chain_rotations_count": 11,
+      "legacy_broken_chain_rotations_count": 19,
       "legacy_rotation_filenames_sample": [
-        "audit.jsonl.legacy.1794411435.jsonl",
-        "audit.jsonl.legacy.1794411720.jsonl",
-        "audit.jsonl.legacy.1794411721.jsonl",
-        "audit.jsonl.legacy.1794411807.jsonl",
-        "audit.jsonl.legacy.1794411848.jsonl"
+        "audit.jsonl.legacy.1794414101.jsonl",
+        "audit.jsonl.legacy.1794414104.jsonl",
+        "audit.jsonl.legacy.1794414572.jsonl",
+        "audit.jsonl.legacy.1794419917.jsonl",
+        "audit.jsonl.legacy.1794419921.jsonl"
       ],
       "recent_denials_count": 4
     }

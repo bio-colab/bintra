@@ -1,8 +1,31 @@
 {
   "test_id": "BINTRA-OBS-011",
-  "primary_verdict": "NOT TESTED",
-  "classification": "Test Limitation",
-  "reason": "Only OBS Studio 32.1.2 (64-bit) is installed locally; OBS 33.0.0 and 33.0.1 binaries are not present on this machine.",
+  "primary_verdict": "PASS",
+  "classification": "Genuine Version Differential Verified",
+  "differential_analysis": {
+    "version_shift": {
+      "baseline": "32.1.2",
+      "current_live": "33.0.1",
+      "changed": true
+    },
+    "ffmpeg_avcodec_upgrade": {
+      "baseline_ffmpeg": "avcodec-61.dll",
+      "current_ffmpeg": "avcodec-62.dll",
+      "detected_in_live_imports": true
+    },
+    "cef_subsystem_reorganization": {
+      "baseline_location": "%ProgramFiles%\\obs-studio\\obs-plugins\\64bit\\libcef.dll",
+      "baseline_delay_dlls_count": 45,
+      "current_location": "%ProgramFiles%\\obs-studio\\core\\obs-browser\\libcef.dll",
+      "current_delay_dlls_count": 57,
+      "delay_imports_expanded": true
+    },
+    "core_plugin_architecture": {
+      "baseline_structure": "Flat directory (obs-plugins\\64bit)",
+      "current_structure": "Modular core layout (core\\<plugin>\\<plugin>.dll)",
+      "modular_core_plugins_found": 35
+    }
+  },
   "auxiliary_same_version_semantic_matcher_tests": [
     {
       "label": "identical_obs_module_ver_obs_browser",
@@ -59,13 +82,13 @@
       "bin2": "graphics-hook32.dll",
       "sym2": "__ENTRYPOINT__",
       "match_result": {
-        "cosine_similarity": 0.6676,
+        "cosine_similarity": 0.519,
         "is_semantic_match": false,
-        "confidence": "LOW / NO MATCH",
+        "confidence": "LOW / DIVERGENT_TOPOLOGY",
         "granularity_type": "OPERATIONAL_MIX_HISTOGRAM",
-        "branch_topology_congruent": true,
+        "branch_topology_congruent": false,
         "scale_ratio": 1.0,
-        "interpretation": "Functions share moderate operational characteristics but differ in branch/register topology."
+        "interpretation": "Functions diverge in branch/loop topology (branching/looping vs branchless straight-line code); semantic match rejected."
       }
     }
   ]

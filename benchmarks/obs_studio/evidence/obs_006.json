@@ -1,46 +1,46 @@
 {
   "test_id": "BINTRA-OBS-006",
   "first_scan_writable_string": {
-    "elapsed_ms": 750.19,
-    "regions_scanned": 604,
-    "total_target_regions": 604,
-    "total_candidates": 19,
+    "elapsed_ms": 1374.27,
+    "regions_scanned": 615,
+    "total_target_regions": 615,
+    "total_candidates": 28,
     "candidates_sample": [
       {
-        "address": "0x000001D917EC4CAB",
-        "address_int": 2031920893099,
+        "address": "0x0000015B449F90EB",
+        "address_int": 1491504959723,
         "value": "OBS Studio",
         "raw_hex": "4f42532053747564696f",
         "match_len": 10,
         "category": "HEAP"
       },
       {
-        "address": "0x000001D917ED466A",
-        "address_int": 2031920957034,
+        "address": "0x0000015B44A6C400",
+        "address_int": 1491505431552,
         "value": "OBS Studio",
         "raw_hex": "4f42532053747564696f",
         "match_len": 10,
         "category": "HEAP"
       },
       {
-        "address": "0x000001D917EE9FFD",
-        "address_int": 2031921045501,
+        "address": "0x0000015B44A6CE60",
+        "address_int": 1491505434208,
         "value": "OBS Studio",
         "raw_hex": "4f42532053747564696f",
         "match_len": 10,
         "category": "HEAP"
       },
       {
-        "address": "0x000001D917EEA78C",
-        "address_int": 2031921047436,
+        "address": "0x0000015B44A850DD",
+        "address_int": 1491505533149,
         "value": "OBS Studio",
         "raw_hex": "4f42532053747564696f",
         "match_len": 10,
         "category": "HEAP"
       },
       {
-        "address": "0x000001D917EEACFD",
-        "address_int": 2031921048829,
+        "address": "0x0000015B44A852CC",
+        "address_int": 1491505533644,
         "value": "OBS Studio",
         "raw_hex": "4f42532053747564696f",
         "match_len": 10,
@@ -49,8 +49,8 @@
     ]
   },
   "next_scan_confirmation": {
-    "previous_count": 19,
-    "surviving_count": 19,
+    "previous_count": 28,
+    "surviving_count": 28,
     "keys": [
       "session_id",
       "pid",
@@ -62,75 +62,93 @@
     ]
   },
   "live_cpp_object_probe": {
-    "object_va": null,
-    "vtable_va": null,
-    "vtable_module": null
+    "object_va": "0x15b449d1360",
+    "vtable_va": "0x7ff8af697ed0",
+    "vtable_module": "Qt6Gui.dll"
   },
   "structure_dissection": {
     "fields_count": 16,
-    "vtable_detected": false,
+    "vtable_detected": true,
     "fields_sample": [
       {
         "offset": "0x0",
         "offset_bytes": 0,
-        "size_bytes": 4,
-        "raw_hex": "0x2053424F",
-        "inferred_type": "int32_t",
-        "confidence": "MEDIUM",
+        "size_bytes": 8,
+        "raw_hex": "0x00007FF8AF697ED0",
+        "inferred_type": "void**",
+        "confidence": "HIGH",
         "alternatives": [
-          "uint32_t",
-          "bitflags"
+          "uint64_t",
+          "void*"
         ],
         "heuristic": true,
-        "description": "Integer32: 542327375 (0x2053424F)"
-      },
-      {
-        "offset": "0x4",
-        "offset_bytes": 4,
-        "size_bytes": 4,
-        "raw_hex": "0x64757453",
-        "inferred_type": "int32_t",
-        "confidence": "MEDIUM",
-        "alternatives": [
-          "uint32_t",
-          "bitflags"
-        ],
-        "heuristic": true,
-        "description": "Integer32: 1685419091 (0x64757453)"
+        "description": "vtable_ptr (Qt6Gui.dll+0x5E7ED0 -> Qt6Gui.dll+0xD5E40)"
       },
       {
         "offset": "0x8",
         "offset_bytes": 8,
-        "size_bytes": 4,
-        "raw_hex": "0xD8206F69",
-        "inferred_type": "uint32_t",
-        "confidence": "MEDIUM",
+        "size_bytes": 8,
+        "raw_hex": "0x0000000000000000",
+        "inferred_type": "uint64_t",
+        "confidence": "LOW",
         "alternatives": [
-          "int32_t",
-          "bitflags"
+          "void* (NULL)",
+          "int32_t[2] (0, 0)",
+          "double (0.0)"
         ],
         "heuristic": true,
-        "description": "Integer32: 3626004329 (0xD8206F69)"
-      },
-      {
-        "offset": "0xC",
-        "offset_bytes": 12,
-        "size_bytes": 4,
-        "raw_hex": "0xD9B0D8A5",
-        "inferred_type": "uint32_t",
-        "confidence": "MEDIUM",
-        "alternatives": [
-          "int32_t",
-          "bitflags"
-        ],
-        "heuristic": true,
-        "description": "Integer32: 3652245669 (0xD9B0D8A5)"
+        "description": "NULL_POINTER_OR_ZERO (8 bytes all zero)"
       },
       {
         "offset": "0x10",
         "offset_bytes": 16,
+        "size_bytes": 8,
+        "raw_hex": "0x0000000000000000",
+        "inferred_type": "uint64_t",
+        "confidence": "LOW",
+        "alternatives": [
+          "void* (NULL)",
+          "int32_t[2] (0, 0)",
+          "double (0.0)"
+        ],
+        "heuristic": true,
+        "description": "NULL_POINTER_OR_ZERO (8 bytes all zero)"
+      },
+      {
+        "offset": "0x18",
+        "offset_bytes": 24,
+        "size_bytes": 8,
+        "raw_hex": "0x0000000000000000",
+        "inferred_type": "uint64_t",
+        "confidence": "LOW",
+        "alternatives": [
+          "void* (NULL)",
+          "int32_t[2] (0, 0)",
+          "double (0.0)"
+        ],
+        "heuristic": true,
+        "description": "NULL_POINTER_OR_ZERO (8 bytes all zero)"
+      },
+      {
+        "offset": "0x20",
+        "offset_bytes": 32,
+        "size_bytes": 8,
+        "raw_hex": "0x0000000000000000",
+        "inferred_type": "uint64_t",
+        "confidence": "LOW",
+        "alternatives": [
+          "void* (NULL)",
+          "int32_t[2] (0, 0)",
+          "double (0.0)"
+        ],
+        "heuristic": true,
+        "description": "NULL_POINTER_OR_ZERO (8 bytes all zero)"
+      },
+      {
+        "offset": "0x28",
+        "offset_bytes": 40,
         "size_bytes": 4,
-        "raw_hex": "0x2083D986",
+        "raw_hex": "0x7B4B71A7",
         "inferred_type": "int32_t",
         "confidence": "MEDIUM",
         "alternatives": [
@@ -138,13 +156,13 @@
           "bitflags"
         ],
         "heuristic": true,
-        "description": "Integer32: 545511814 (0x2083D986)"
+        "description": "Integer32: 2068541863 (0x7B4B71A7)"
       },
       {
-        "offset": "0x14",
-        "offset_bytes": 20,
+        "offset": "0x2C",
+        "offset_bytes": 44,
         "size_bytes": 4,
-        "raw_hex": "0xAAD884D9",
+        "raw_hex": "0x90001254",
         "inferred_type": "uint32_t",
         "confidence": "MEDIUM",
         "alternatives": [
@@ -152,47 +170,166 @@
           "bitflags"
         ],
         "heuristic": true,
-        "description": "Integer32: 2866316505 (0xAAD884D9)"
+        "description": "Integer32: 2415923796 (0x90001254)"
       },
       {
-        "offset": "0x18",
-        "offset_bytes": 24,
-        "size_bytes": 4,
-        "raw_hex": "0x85D9AAD8",
-        "inferred_type": "uint32_t",
+        "offset": "0x30",
+        "offset_bytes": 48,
+        "size_bytes": 8,
+        "raw_hex": "0x0000000000000001",
+        "inferred_type": "uint64_t",
         "confidence": "MEDIUM",
         "alternatives": [
-          "int32_t",
-          "bitflags"
+          "uint32_t + uint32_t_padding"
         ],
         "heuristic": true,
-        "description": "Integer32: 2245634776 (0x85D9AAD8)"
-      },
-      {
-        "offset": "0x1C",
-        "offset_bytes": 28,
-        "size_bytes": 4,
-        "raw_hex": "0x86D983D9",
-        "inferred_type": "uint32_t",
-        "confidence": "MEDIUM",
-        "alternatives": [
-          "int32_t",
-          "bitflags"
-        ],
-        "heuristic": true,
-        "description": "Integer32: 2262402009 (0x86D983D9)"
+        "description": "Unsigned 64-bit integer: 1 (0x1)"
       }
     ],
-    "c_struct_definition": "struct Reconstructed_0x1D917EC4CAB {\n    int32_t    field_0x0; // 0x00: Integer32: 542327375 (0x2053424F)\n    int32_t    field_0x4; // 0x04: Integer32: 1685419091 (0x64757453)\n    uint32_t   field_0x8; // 0x08: Integer32: 3626004329 (0xD8206F69)\n    uint32_t   field_0xC; // 0x0C: Integer32: 3652245669 (0xD9B0D8A5)\n    int32_t    field_0x10; // 0x10: Integer32: 545511814 (0x2083D986)\n    uint32_t   field_0x14; // 0x14: Integer32: 2866316505 (0xAAD884D9)\n    uint32_t   field_0x18; // 0x18: Integer32: 2245634776 (0x85D9AAD8)\n    uint32_t   field_0x1C; // 0x1C: Integer32: 2262402009 (0x86D983D9)\n    uint32_t   field_0x20; // 0x20: Integer32: 3649427744 (0xD985D920)\n    uint32_t   field_0x24; // 0x24: Integer32: 2866290822 (0xAAD82086)\n    uint32_t   field_0x28; // 0x28: Integer32: 2178517209 (0x81D988D9)\n    uint32_t   field_0x2C; // 0x2C: Integer32: 2983758553 (0xB1D88AD9)\n    uint32_t   field_0x30; // 0x30: Integer32: 3649427744 (0xD985D920)\n    uint32_t   field_0x34; // 0x34: Integer32: 3635599498 (0xD8B2D88A)\n    int32_t    field_0x38; // 0x38: Integer32: 548067495 (0x20AAD8A7)\n    float      field_0x3C; // 0x3C: Float value: -0.0004\n};"
+    "c_struct_definition": "struct OBS_LiveCppObject {\n    void**     field_0x0; // 0x00: vtable_ptr (Qt6Gui.dll+0x5E7ED0 -> Qt6Gui.dll+0xD5E40)\n    uint64_t   field_0x8; // 0x08: NULL_POINTER_OR_ZERO\n    uint64_t   field_0x10; // 0x10: NULL_POINTER_OR_ZERO\n    uint64_t   field_0x18; // 0x18: NULL_POINTER_OR_ZERO\n    uint64_t   field_0x20; // 0x20: NULL_POINTER_OR_ZERO\n    int32_t    field_0x28; // 0x28: Integer32: 2068541863 (0x7B4B71A7)\n    uint32_t   field_0x2C; // 0x2C: Integer32: 2415923796 (0x90001254)\n    uint64_t   field_0x30; // 0x30: uint64_t 1\n    uint64_t   field_0x38; // 0x38: uint64_t 14\n    uint32_t   field_0x40; // 0x40: Zero32 / Padding (0x0)\n    int32_t    field_0x44; // 0x44: Integer32: 1 (0x00000001)\n    int32_t    field_0x48; // 0x48: Integer32: 1704779008 (0x659CDD00)\n    int32_t    field_0x4C; // 0x4C: Integer32: 327844467 (0x138A8273)\n    void*      field_0x50; // 0x50: heap_ptr (0x15B44A6CDE8)\n    int32_t    field_0x58; // 0x58: Integer32: 2068607396 (0x7B4C71A4)\n    uint32_t   field_0x5C; // 0x5C: Integer32: 2415924036 (0x90001344)\n};"
   },
   "pointer_scan": {
-    "pid": 5224,
-    "target_address": "0x1D917EC4CAB",
+    "pid": 12056,
+    "target_address": "0x15B449D1360",
     "max_depth_searched": 2,
     "alignment": 8,
     "heuristic": true,
     "notice": "Pointer chains are heuristic candidates verified immediately via read-only dereferencing; ASLR or heap freeing may invalidate paths later.",
-    "paths_count": 0,
-    "paths": []
+    "paths_count": 10,
+    "paths": [
+      {
+        "depth": 1,
+        "base_module": "Qt6Gui.dll",
+        "base_rva": "0x793BB0",
+        "offsets": [
+          "0xC0"
+        ],
+        "expression": "[Qt6Gui.dll+0x793BB0] + 0xC0",
+        "resolved_target": "0x15B449D1360",
+        "verified": true,
+        "confidence": "HEURISTIC_STATIC_DEREF"
+      },
+      {
+        "depth": 1,
+        "base_module": "Qt6Gui.dll",
+        "base_rva": "0x793BB8",
+        "offsets": [
+          "0xB0"
+        ],
+        "expression": "[Qt6Gui.dll+0x793BB8] + 0xB0",
+        "resolved_target": "0x15B449D1360",
+        "verified": true,
+        "confidence": "HEURISTIC_STATIC_DEREF"
+      },
+      {
+        "depth": 1,
+        "base_module": "KERNELBASE.dll",
+        "base_rva": "0x2B7B00",
+        "offsets": [
+          "0x30"
+        ],
+        "expression": "[KERNELBASE.dll+0x2B7B00] + 0x30",
+        "resolved_target": "0x15B449D1360",
+        "verified": true,
+        "confidence": "HEURISTIC_STATIC_DEREF"
+      },
+      {
+        "depth": 1,
+        "base_module": "cfgmgr32.dll",
+        "base_rva": "0x468C8",
+        "offsets": [
+          "0x180"
+        ],
+        "expression": "[cfgmgr32.dll+0x468C8] + 0x180",
+        "resolved_target": "0x15B449D1360",
+        "verified": true,
+        "confidence": "HEURISTIC_STATIC_DEREF"
+      },
+      {
+        "depth": 2,
+        "base_module": "Qt6Core.dll",
+        "base_rva": "0x9B9128",
+        "offsets": [
+          "0x90",
+          "0x1E0"
+        ],
+        "expression": "[[Qt6Core.dll+0x9B9128] + 0x90] + 0x1E0",
+        "intermediate_heap_address": "0x15B449D1900",
+        "resolved_target": "0x15B449D1360",
+        "verified": true,
+        "confidence": "HEURISTIC_STATIC_DEREF"
+      },
+      {
+        "depth": 2,
+        "base_module": "Qt6Gui.dll",
+        "base_rva": "0x7930F8",
+        "offsets": [
+          "0x180",
+          "0x120"
+        ],
+        "expression": "[[Qt6Gui.dll+0x7930F8] + 0x180] + 0x120",
+        "intermediate_heap_address": "0x15B449D1510",
+        "resolved_target": "0x15B449D1360",
+        "verified": true,
+        "confidence": "HEURISTIC_STATIC_DEREF"
+      },
+      {
+        "depth": 2,
+        "base_module": "Qt6Gui.dll",
+        "base_rva": "0x793100",
+        "offsets": [
+          "0x170",
+          "0x120"
+        ],
+        "expression": "[[Qt6Gui.dll+0x793100] + 0x170] + 0x120",
+        "intermediate_heap_address": "0x15B449D1510",
+        "resolved_target": "0x15B449D1360",
+        "verified": true,
+        "confidence": "HEURISTIC_STATIC_DEREF"
+      },
+      {
+        "depth": 2,
+        "base_module": "Qt6Gui.dll",
+        "base_rva": "0x793A68",
+        "offsets": [
+          "0x8",
+          "0x0"
+        ],
+        "expression": "[[Qt6Gui.dll+0x793A68] + 0x8] + 0x0",
+        "intermediate_heap_address": "0x15B44A5DEC8",
+        "resolved_target": "0x15B449D1360",
+        "verified": true,
+        "confidence": "HEURISTIC_STATIC_DEREF"
+      },
+      {
+        "depth": 2,
+        "base_module": "Qt6Gui.dll",
+        "base_rva": "0x794EA8",
+        "offsets": [
+          "0x180",
+          "0x1E0"
+        ],
+        "expression": "[[Qt6Gui.dll+0x794EA8] + 0x180] + 0x1E0",
+        "intermediate_heap_address": "0x15B449D1900",
+        "resolved_target": "0x15B449D1360",
+        "verified": true,
+        "confidence": "HEURISTIC_STATIC_DEREF"
+      },
+      {
+        "depth": 2,
+        "base_module": "Qt6Gui.dll",
+        "base_rva": "0x794EB0",
+        "offsets": [
+          "0x170",
+          "0x1E0"
+        ],
+        "expression": "[[Qt6Gui.dll+0x794EB0] + 0x170] + 0x1E0",
+        "intermediate_heap_address": "0x15B449D1900",
+        "resolved_target": "0x15B449D1360",
+        "verified": true,
+        "confidence": "HEURISTIC_STATIC_DEREF"
+      }
+    ],
+    "elapsed_ms": 15437.97
   }
 }

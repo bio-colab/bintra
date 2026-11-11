@@ -260,8 +260,9 @@ def run_poc_010() -> Dict[str, Any]:
                 }
 
         # 9. Audit logger chain continuity + legacy rotation history check
-        chain_res = AuditLogger.verify_audit_chain()
         bintra_logs_dir = HOME_DIR / ".bintra" / "logs"
+        log_file = bintra_logs_dir / "audit.jsonl"
+        chain_res = AuditLogger.verify_audit_chain(str(log_file) if log_file.exists() else None)
         legacy_rotations = sorted(p.name for p in bintra_logs_dir.glob("audit.jsonl.legacy.*")) if bintra_logs_dir.exists() else []
         denials = AuditLogger.get_denials() if hasattr(AuditLogger, "get_denials") else []
 

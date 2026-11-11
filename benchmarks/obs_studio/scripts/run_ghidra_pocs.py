@@ -263,7 +263,7 @@ def run_poc_003(ghidra_dir: Path) -> Dict[str, Any]:
             ["bintra", "ghidra-headless", "--file", str(blind_copy)],
             capture_output=True,
             text=True,
-            timeout=20,
+            timeout=180,
             env=clean_env,
         )
 

@@ -1202,6 +1202,8 @@ def _dispatch_cli():
             print(f"[Bintra] Binary: {args.binary}")
             print(f"[Bintra] Script: {script_dir / 'BintraGhidraBridge.java'}")
             res = subprocess.run(cmd_args)
+            if res.returncode != 0:
+                sys.stderr.write(f"[Bintra] Ghidra Headless Analyzer failed with return code {res.returncode}\n")
             sys.exit(res.returncode)
 
         elif cmd == "ghidra-bridge":

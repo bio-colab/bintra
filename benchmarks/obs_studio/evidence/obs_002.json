@@ -3,13 +3,13 @@
   "cli_probe": {
     "command": "bintra resolve-deps --file <OBS>/bin/64bit/obs64.exe",
     "returncode": 0,
-    "stdout_head": "{\n  \"status\": \"success\",\n  \"audit_scope\": \"STATIC_HEURISTIC_AUDIT\",\n  \"binary_path\": \"C:\\\\Program Files\\\\obs-studio\\\\bin\\\\64bit\\\\obs64.exe\",\n  \"binary_architecture\": \"PE32+ (64-bit)\",\n  \"loader_mode\": \"Native\",\n  \"known_dlls_enforced\": 32,\n  \"verdict\": \"HEALTHY\",\n  \"total_imported_dlls\": 31,\n  \"resolved_dlls_count\": 31,\n  \"missing_dlls_count\": 0,\n  \"architecture_mismatches_count\": 0,\n  \"missing_exports_count\": 0,\n  \"resolved_dlls\": [\n    {\n      \"imported_name\": \"libcurl.dll\",\n      \"is_api_set\": false,\n      \"is_known_dll\": false,\n      \"located_path\": \"C:\\\\Program Files\\\\obs-studio\\\\bin\\\\64bit\\\\libcurl.dll\",\n      \"imported_functions_count\": 9\n    },\n    {\n      \"imported_name\": \"avcodec-61.dll\",\n      \"is_api_set\": false,\n      \"is_known_dll\": false,\n      \"located_path\": \"C:\\\\Program Files\\\\obs-studio\\\\bin\\\\64bit\\\\avcodec-61.dll\",\n      \"imported_functions_count\": 4\n    },\n    {\n      \"imported_name\": \"avformat-61.dll\",\n      \"is_api_set\": false,\n      \"is_known_dll\": false,\n      \"located_path\": \"C:\\\\Program Files\\\\obs-studio\\\\bin\\\\64bit\\\\avformat-61.dll\",\n      \"imported_functions_count\": 4\n    },\n    {\n      \"imported_name\": \"obs.dll\",\n      \"is_api_set\": false,\n      \"is_kn",
+    "stdout_head": "{\n  \"status\": \"success\",\n  \"audit_scope\": \"STATIC_HEURISTIC_AUDIT\",\n  \"binary_path\": \"C:\\\\Program Files\\\\obs-studio\\\\bin\\\\64bit\\\\obs64.exe\",\n  \"binary_architecture\": \"PE32+ (64-bit)\",\n  \"loader_mode\": \"Native\",\n  \"known_dlls_enforced\": 32,\n  \"verdict\": \"HEALTHY\",\n  \"total_imported_dlls\": 31,\n  \"resolved_dlls_count\": 31,\n  \"missing_dlls_count\": 0,\n  \"architecture_mismatches_count\": 0,\n  \"missing_exports_count\": 0,\n  \"resolved_dlls\": [\n    {\n      \"imported_name\": \"libcurl.dll\",\n      \"is_api_set\": false,\n      \"is_known_dll\": false,\n      \"located_path\": \"C:\\\\Program Files\\\\obs-studio\\\\bin\\\\64bit\\\\libcurl.dll\",\n      \"imported_functions_count\": 9\n    },\n    {\n      \"imported_name\": \"avcodec-62.dll\",\n      \"is_api_set\": false,\n      \"is_known_dll\": false,\n      \"located_path\": \"C:\\\\Program Files\\\\obs-studio\\\\bin\\\\64bit\\\\avcodec-62.dll\",\n      \"imported_functions_count\": 4\n    },\n    {\n      \"imported_name\": \"avformat-62.dll\",\n      \"is_api_set\": false,\n      \"is_known_dll\": false,\n      \"located_path\": \"C:\\\\Program Files\\\\obs-studio\\\\bin\\\\64bit\\\\avformat-62.dll\",\n      \"imported_functions_count\": 4\n    },\n    {\n      \"imported_name\": \"obs.dll\",\n      \"is_api_set\": false,\n      \"is_kn",
     "stderr": ""
   },
   "audits": [
     {
       "binary": "obs64.exe",
-      "elapsed_ms": 9892.33,
+      "elapsed_ms": 8273.12,
       "verdict": "HEALTHY",
       "loader_mode": "Native",
       "total_imports_checked": 31,
@@ -28,7 +28,7 @@
     },
     {
       "binary": "obs.dll",
-      "elapsed_ms": 3348.62,
+      "elapsed_ms": 2815.24,
       "verdict": "HEALTHY",
       "loader_mode": "Native",
       "total_imports_checked": 29,
@@ -47,12 +47,12 @@
     },
     {
       "binary": "obs-frontend-api.dll",
-      "elapsed_ms": 1076.77,
+      "elapsed_ms": 1038.01,
       "verdict": "HEALTHY",
       "loader_mode": "Native",
       "total_imports_checked": 7,
       "resolved_dlls_count": 7,
-      "api_sets_resolved_count": 2,
+      "api_sets_resolved_count": 3,
       "missing_dlls_count": 0,
       "missing_dlls": [],
       "missing_exports_count": 0,
@@ -66,33 +66,139 @@
     },
     {
       "binary": "obs-browser.dll",
-      "elapsed_ms": 6481.02,
-      "verdict": "HEALTHY",
+      "elapsed_ms": 2253.86,
+      "verdict": "DEPENDENCY_INTEGRITY_FAILURE",
       "loader_mode": "Native",
       "total_imports_checked": 10,
-      "resolved_dlls_count": 10,
+      "resolved_dlls_count": 5,
       "api_sets_resolved_count": 0,
-      "missing_dlls_count": 0,
-      "missing_dlls": [],
+      "missing_dlls_count": 5,
+      "missing_dlls": [
+        {
+          "imported_name": "obs.dll",
+          "resolved_as": "obs.dll",
+          "is_api_set": false,
+          "is_known_dll": false,
+          "functions_count": 101,
+          "functions_preview": [
+            "obs_get_audio",
+            "obs_enter_graphics",
+            "obs_source_output_audio",
+            "obs_source_get_ref",
+            "gs_texture_set_image"
+          ]
+        },
+        {
+          "imported_name": "obs-frontend-api.dll",
+          "resolved_as": "obs-frontend-api.dll",
+          "is_api_set": false,
+          "is_known_dll": false,
+          "functions_count": 22,
+          "functions_preview": [
+            "obs_frontend_recording_active",
+            "obs_frontend_replay_buffer_start",
+            "obs_frontend_streaming_start",
+            "obs_frontend_start_virtualcam",
+            "obs_frontend_streaming_stop"
+          ]
+        },
+        {
+          "imported_name": "Qt6Widgets.dll",
+          "resolved_as": "Qt6Widgets.dll",
+          "is_api_set": false,
+          "is_known_dll": false,
+          "functions_count": 111,
+          "functions_preview": [
+            "?qt_metacast@QWidget@@UEAAPEAXPEBD@Z",
+            "?qt_metacall@QWidget@@UEAAHW4Call@QMetaObject@@HPEAPEAX@Z",
+            "?staticMetaObject@QWidget@@2UQMetaObject@@B",
+            "?resize@QWidget@@QEAAXHH@Z",
+            "?size@QWidget@@QEBA?AVQSize@@XZ"
+          ]
+        },
+        {
+          "imported_name": "Qt6Gui.dll",
+          "resolved_as": "Qt6Gui.dll",
+          "is_api_set": false,
+          "is_known_dll": false,
+          "functions_count": 48,
+          "functions_preview": [
+            "?keyPressEvent@QWindow@@MEAAXPEAVQKeyEvent@@@Z",
+            "?devicePixelRatioF@QPaintDevice@@QEBANXZ",
+            "?size@QWindow@@UEBA?AVQSize@@XZ",
+            "?metaObject@QWindow@@UEBAPEBUQMetaObject@@XZ",
+            "?qt_metacast@QWindow@@UEAAPEAXPEBD@Z"
+          ]
+        },
+        {
+          "imported_name": "Qt6Core.dll",
+          "resolved_as": "Qt6Core.dll",
+          "is_api_set": false,
+          "is_known_dll": false,
+          "functions_count": 64,
+          "functions_preview": [
+            "?disconnectNotify@QObject@@MEAAXAEBVQMetaMethod@@@Z",
+            "??0QMetaType@@QEAA@XZ",
+            "?dynamicMetaObject@QObjectData@@QEBAPEBUQMetaObject@@XZ",
+            "?activate@QMetaObject@@SAXPEAVQObject@@PEBU1@HPEAPEAX@Z",
+            "?defaultTypeFor@QTimer@@CA?AW4TimerType@Qt@@H@Z"
+          ]
+        }
+      ],
       "missing_exports_count": 0,
       "missing_exports_sample": [],
       "architecture_mismatches": [],
       "level3_pe_normal_dll_count": 10,
       "level3_pe_delay_load_dlls": [],
       "bintra_pe_imports_count": 10,
-      "false_missing_actually_in_obs_bin_dir": [],
+      "false_missing_actually_in_obs_bin_dir": [
+        "obs.dll",
+        "obs-frontend-api.dll",
+        "Qt6Widgets.dll",
+        "Qt6Gui.dll",
+        "Qt6Core.dll"
+      ],
       "false_missing_actually_in_obs_plugins_dir": []
     },
     {
       "binary": "droidcam-obs.dll",
-      "elapsed_ms": 3660.93,
-      "verdict": "HEALTHY",
+      "elapsed_ms": 3194.18,
+      "verdict": "DEPENDENCY_INTEGRITY_FAILURE",
       "loader_mode": "Native",
       "total_imports_checked": 9,
-      "resolved_dlls_count": 9,
+      "resolved_dlls_count": 7,
       "api_sets_resolved_count": 0,
-      "missing_dlls_count": 0,
-      "missing_dlls": [],
+      "missing_dlls_count": 2,
+      "missing_dlls": [
+        {
+          "imported_name": "avcodec-61.dll",
+          "resolved_as": "avcodec-61.dll",
+          "is_api_set": false,
+          "is_known_dll": false,
+          "functions_count": 10,
+          "functions_preview": [
+            "avcodec_send_packet",
+            "avcodec_get_hw_config",
+            "av_packet_alloc",
+            "av_packet_free",
+            "avcodec_alloc_context3"
+          ]
+        },
+        {
+          "imported_name": "avutil-59.dll",
+          "resolved_as": "avutil-59.dll",
+          "is_api_set": false,
+          "is_known_dll": false,
+          "functions_count": 12,
+          "functions_preview": [
+            "av_buffer_unref",
+            "av_channel_layout_default",
+            "av_frame_alloc",
+            "av_buffer_ref",
+            "av_frame_free"
+          ]
+        }
+      ],
       "missing_exports_count": 0,
       "missing_exports_sample": [],
       "architecture_mismatches": [],
@@ -104,21 +210,68 @@
     },
     {
       "binary": "win-capture.dll",
-      "elapsed_ms": 2394.14,
-      "verdict": "HEALTHY",
+      "elapsed_ms": 1895.47,
+      "verdict": "DEPENDENCY_INTEGRITY_FAILURE",
       "loader_mode": "Native",
       "total_imports_checked": 16,
-      "resolved_dlls_count": 16,
+      "resolved_dlls_count": 13,
       "api_sets_resolved_count": 7,
-      "missing_dlls_count": 0,
-      "missing_dlls": [],
+      "missing_dlls_count": 3,
+      "missing_dlls": [
+        {
+          "imported_name": "obs.dll",
+          "resolved_as": "obs.dll",
+          "is_api_set": false,
+          "is_known_dll": false,
+          "functions_count": 177,
+          "functions_preview": [
+            "obs_data_array_item",
+            "os_rename",
+            "obs_data_array_release",
+            "text_lookup_destroy",
+            "os_copyfile"
+          ]
+        },
+        {
+          "imported_name": "w32-pthreads.dll",
+          "resolved_as": "w32-pthreads.dll",
+          "is_api_set": false,
+          "is_known_dll": false,
+          "functions_count": 6,
+          "functions_preview": [
+            "pthread_join",
+            "pthread_mutex_init",
+            "pthread_mutex_lock",
+            "pthread_mutex_destroy",
+            "pthread_mutex_unlock"
+          ]
+        },
+        {
+          "imported_name": "libcurl.dll",
+          "resolved_as": "libcurl.dll",
+          "is_api_set": false,
+          "is_known_dll": false,
+          "functions_count": 7,
+          "functions_preview": [
+            "curl_easy_cleanup",
+            "curl_slist_free_all",
+            "curl_slist_append",
+            "curl_easy_init",
+            "curl_easy_getinfo"
+          ]
+        }
+      ],
       "missing_exports_count": 0,
       "missing_exports_sample": [],
       "architecture_mismatches": [],
       "level3_pe_normal_dll_count": 16,
       "level3_pe_delay_load_dlls": [],
       "bintra_pe_imports_count": 16,
-      "false_missing_actually_in_obs_bin_dir": [],
+      "false_missing_actually_in_obs_bin_dir": [
+        "obs.dll",
+        "w32-pthreads.dll",
+        "libcurl.dll"
+      ],
       "false_missing_actually_in_obs_plugins_dir": []
     }
   ]

@@ -512,16 +512,32 @@ class BinaryFormatInspector:
         mask = 0x8000000000000000 if is_64 else 0x80000000
         fmt = "<Q" if is_64 else "<I"
 
+        raw_base = pe_info.get("image_base", 0)
+        image_base = int(raw_base, 16) if isinstance(raw_base, str) else int(raw_base or 0)
+
         while curr + 32 <= max_delay_end and len(modules) < 1024:
             f.seek(curr)
             desc = f.read(32)
             if len(desc) < 32:
                 break
-            attrs, name_rva, hmod_rva, iat_rva, int_rva, bound_iat_rva, unload_iat_rva, timestamp = struct.unpack(
+            attrs, name_addr, hmod_addr, iat_addr, int_addr, bound_iat_addr, unload_iat_addr, timestamp = struct.unpack(
                 "<IIIIIIII", desc
             )
-            if name_rva == 0:
+            if name_addr == 0:
                 break
+
+            # PE spec (ImgDelayDescr): bit 0 of attrs (dlattrRva = 1) indicates RVA mode.
+            # If bit 0 is 0 (legacy MSVC), descriptor fields and thunks are absolute VAs.
+            is_rva = bool(attrs & 1)
+
+            def _to_rva(addr_val: int) -> int:
+                if is_rva or addr_val == 0:
+                    return addr_val
+                if image_base > 0 and addr_val >= image_base:
+                    return addr_val - image_base
+                return addr_val
+
+            name_rva = _to_rva(name_addr)
             name_off = BinaryFormatInspector.rva_to_offset(pe_info, name_rva)
             if name_off is not None and 0 <= name_off < file_size:
                 f.seek(name_off)
@@ -533,7 +549,8 @@ class BinaryFormatInspector:
                     raw_name.extend(ch)
                 mod_name = raw_name.decode("latin-1", errors="ignore")
 
-                thunk_rva = int_rva if int_rva != 0 else iat_rva
+                thunk_addr = int_addr if int_addr != 0 else iat_addr
+                thunk_rva = _to_rva(thunk_addr)
                 thunk_off = BinaryFormatInspector.rva_to_offset(pe_info, thunk_rva)
                 funcs = []
                 if thunk_off is not None and 0 <= thunk_off < file_size:
@@ -549,7 +566,8 @@ class BinaryFormatInspector:
                         if val & mask:
                             funcs.append(f"Ordinal_{val & 0xFFFF}")
                         else:
-                            ibn_off = BinaryFormatInspector.rva_to_offset(pe_info, val)
+                            ibn_rva = _to_rva(val)
+                            ibn_off = BinaryFormatInspector.rva_to_offset(pe_info, ibn_rva)
                             if ibn_off is not None and 0 <= ibn_off + 2 < file_size:
                                 f.seek(ibn_off + 2)
                                 raw_fn = bytearray()

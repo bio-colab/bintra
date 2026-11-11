@@ -503,31 +503,8 @@ class EtwLiveCaptureSession:
             from .event_log_collector import EventLogCollector
             seen_events: "OrderedDict[tuple, bool]" = OrderedDict()
             MAX_SEEN = 5000
-            known_modules: Optional[Dict[str, str]] = None
-
-            if self.target_pid and os.name == "nt":
-                try:
-                    from windows_intelligence.process_intelligence import ModuleInventory
-                    mod_res = ModuleInventory.get_modules_for_process(self.target_pid)
-                    known_modules = {}
-                    now_t = time.time()
-                    for m in mod_res.get("modules", []):
-                        m_name = str(m.get("module_name", ""))
-                        low_name = m_name.lower()
-                        b_addr = str(m.get("base_address", "0x0"))
-                        known_modules[low_name] = b_addr
-                        self.record_event(EtwEventRecord(
-                            timestamp=now_t,
-                            provider_name="Bintra-Toolhelp32-ModuleMonitor",
-                            event_id=5,
-                            pid=self.target_pid,
-                            tid=0,
-                            event_type="IMAGE_LOAD",
-                            details={"image_name": m_name, "base_address": b_addr, "baseline": True},
-                            source="toolhelp_module_baseline",
-                        ))
-                except Exception as mod_err:
-                    self._consumer_errors.append(f"Module baseline failed: {mod_err}")
+            known_modules: Optional[Dict[str, Tuple[str, str]]] = None
+            last_tracked_pid: Optional[int] = None
 
             while not self._stop_event.is_set():
                 try:
@@ -566,28 +543,71 @@ class EtwLiveCaptureSession:
                                 )
                                 self.record_event(rec)
 
-                    # Live Toolhelp32 module delta tracking for targeted PID (non-admin IMAGE_LOAD producer)
-                    if known_modules is not None and self.target_pid and os.name == "nt":
+                    # Dynamic Toolhelp32 module tracking for targeted PID (works if target_pid is set before or after session start)
+                    curr_pid = self.target_pid
+                    if curr_pid and os.name == "nt":
                         from windows_intelligence.process_intelligence import ModuleInventory
-                        mod_res = ModuleInventory.get_modules_for_process(self.target_pid)
-                        current_mods = {
-                            str(m.get("module_name", "")).lower(): (str(m.get("module_name", "")), str(m.get("base_address", "0x0")))
-                            for m in mod_res.get("modules", [])
-                        }
-                        now_t = time.time()
-                        for low_name, (orig_name, base_addr) in current_mods.items():
-                            if low_name not in known_modules:
-                                known_modules[low_name] = base_addr
-                                self.record_event(EtwEventRecord(
-                                    timestamp=now_t,
-                                    provider_name="Bintra-Toolhelp32-ModuleMonitor",
-                                    event_id=5,
-                                    pid=self.target_pid,
-                                    tid=0,
-                                    event_type="IMAGE_LOAD",
-                                    details={"image_name": orig_name, "base_address": base_addr},
-                                    source="toolhelp_module_delta",
-                                ))
+                        if curr_pid != last_tracked_pid or known_modules is None:
+                            last_tracked_pid = curr_pid
+                            known_modules = {}
+                            try:
+                                mod_res = ModuleInventory.get_modules_for_process(curr_pid)
+                                now_t = time.time()
+                                for m in mod_res.get("modules", []):
+                                    m_name = str(m.get("module_name", ""))
+                                    low_name = m_name.lower()
+                                    b_addr = str(m.get("base_address", "0x0"))
+                                    known_modules[low_name] = (m_name, b_addr)
+                                    self.record_event(EtwEventRecord(
+                                        timestamp=now_t,
+                                        provider_name="Bintra-Toolhelp32-ModuleMonitor",
+                                        event_id=5,
+                                        pid=curr_pid,
+                                        tid=0,
+                                        event_type="IMAGE_LOAD",
+                                        details={"image_name": m_name, "base_address": b_addr, "baseline": True},
+                                        source="toolhelp_module_baseline",
+                                    ))
+                            except Exception as mod_err:
+                                self._consumer_errors.append(f"Module baseline failed: {mod_err}")
+                        else:
+                            # Delta tracking: new loads and unloads
+                            try:
+                                mod_res = ModuleInventory.get_modules_for_process(curr_pid)
+                                current_mods = {
+                                    str(m.get("module_name", "")).lower(): (str(m.get("module_name", "")), str(m.get("base_address", "0x0")))
+                                    for m in mod_res.get("modules", [])
+                                }
+                                now_t = time.time()
+                                for low_name, (orig_name, base_addr) in current_mods.items():
+                                    if low_name not in known_modules:
+                                        known_modules[low_name] = (orig_name, base_addr)
+                                        self.record_event(EtwEventRecord(
+                                            timestamp=now_t,
+                                            provider_name="Bintra-Toolhelp32-ModuleMonitor",
+                                            event_id=5,
+                                            pid=curr_pid,
+                                            tid=0,
+                                            event_type="IMAGE_LOAD",
+                                            details={"image_name": orig_name, "base_address": base_addr},
+                                            source="toolhelp_module_delta",
+                                        ))
+                                # Detect unloads
+                                unloaded_names = [k for k in known_modules if k not in current_mods]
+                                for low_name in unloaded_names:
+                                    orig_name, base_addr = known_modules.pop(low_name)
+                                    self.record_event(EtwEventRecord(
+                                        timestamp=now_t,
+                                        provider_name="Bintra-Toolhelp32-ModuleMonitor",
+                                        event_id=6,
+                                        pid=curr_pid,
+                                        tid=0,
+                                        event_type="IMAGE_UNLOAD",
+                                        details={"image_name": orig_name, "base_address": base_addr},
+                                        source="toolhelp_module_delta",
+                                    ))
+                            except Exception as delta_err:
+                                self._consumer_errors.append(f"Module delta failed: {delta_err}")
                 except Exception as exc:
                     self._consumer_errors.append(f"consumer_loop error: {exc}")
                 self._stop_event.wait(0.5)

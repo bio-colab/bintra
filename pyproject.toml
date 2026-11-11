@@ -8,7 +8,7 @@ version = "7.4.0"
 authors = [
   { name="bio-colab", email="contact@bio-colab.org" },
 ]
-description = "Agent-native continuous semantic reverse engineering and binary analysis framework (Fork of REA for Windows PE/DLL binaries with 10-Sense Sensory Cortex)."
+description = "Agent-native continuous semantic reverse engineering and binary analysis framework for Windows PE/DLL binaries with 10-Sense Sensory Cortex and runtime telemetry."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }

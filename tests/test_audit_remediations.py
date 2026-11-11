@@ -833,6 +833,7 @@ class TestAuditRemediations(unittest.TestCase):
             "docs/ROADMAP.md",
             "docs/architecture.md",
             "docs/releases/v7.4.0.md",
+            "pyproject.toml",
         ]
         skills_dir = os.path.join(repo_root, "skills")
         for root, _, files in os.walk(skills_dir):
@@ -845,7 +846,7 @@ class TestAuditRemediations(unittest.TestCase):
             with open(os.path.join(repo_root, rel), "r", encoding="utf-8") as f:
                 texts[rel.replace("\\", "/")] = f.read()
 
-        # 1. Zero foreign branding or commercial game/anti-cheat mentions
+        # 1. Zero foreign branding, fork/upstream lineage claims, or commercial game/anti-cheat mentions
         forbidden_tokens = [
             "diagnose --crash ",
             "original_file_intact",
@@ -859,8 +860,20 @@ class TestAuditRemediations(unittest.TestCase):
             "game.exe",
             '"is_loop_cured"',
         ]
+        forbidden_lower_tokens = [
+            "morluto",
+            "forked from rea",
+            "fork of rea",
+            "upstream foundation",
+            "traditional rea",
+            "classicalrea",
+            "الشوكة الدلالية",
+            "في الشوكة",
+        ]
         for rel, body in texts.items():
-            self.assertNotIn("morluto", body.lower(), f"Found attribution drift in {rel}")
+            lower_body = body.lower()
+            for ltok in forbidden_lower_tokens:
+                self.assertNotIn(ltok, lower_body, f"Found lineage/attribution drift '{ltok}' in {rel}")
             for tok in forbidden_tokens:
                 if tok == "anti-cheat" and rel == ".github/PULL_REQUEST_TEMPLATE.md":
                     continue

@@ -25,7 +25,7 @@
 
 `REA-Neural` is an agent-native, next-generation reverse engineering framework tailored for **Windows compiled software executables and libraries** (`.exe`, `.dll`, PE32, PE32+). 
 
-Forked from **REA (Reverse Engineer Anything)** and augmented with continuous representation theory from recent MIT CSAIL research (*"Sparks of Weight-Space Programming"*, Takehi, Teoh, Zhang, Khattab, 2026), `REA-Neural` overcomes the core vulnerabilities of traditional symbolic reverse engineering engines (Ghidra, Hopper, IDA Pro) when analyzing obfuscated native code on Windows.
+Built as a standalone framework grounded in continuous representation theory from recent MIT CSAIL research (*"Sparks of Weight-Space Programming"*, Takehi, Teoh, Zhang, Khattab, 2026), `REA-Neural` overcomes the core vulnerabilities of traditional symbolic reverse engineering engines (Ghidra, Hopper, IDA Pro) when analyzing obfuscated native code on Windows.
 
 ---
 
@@ -384,7 +384,6 @@ We warmly welcome contributions from the binary analysis, systems research, and 
 - **Roadmap:** Track ongoing priorities (ETW live telemetry, Event Log native API, NTAPI phnt) in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Citation, References & Verification
-- **Upstream Foundation:** Inspired by the **REA (Reverse Engineer Anything)** paradigm for deterministic static/runtime reverse engineering.
 - **Academic Research Reference:** Inspired by *"Sparks of Weight-Space Programming: LLMs can natively read & write neural network weights"*, by Rikiya Takehi, Jayden Teoh, Alex Zhang, and Omar Khattab (MIT CSAIL, November 2026).
   - [alphaXiv Preprint Discussion](https://www.alphaxiv.org/abs/2611.weight-space-programming)
   - [Official MIT CSAIL Replication Logs & Prompts Repository](https://github.com/RikiyaT/lm_understand-logs)

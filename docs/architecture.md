@@ -36,10 +36,10 @@ graph TD
         B2["Embedded Logic / Hybrid Assets (.rsrc / .rodata)"]
     end
 
-    subgraph ClassicalREA["طبقة REA الكلاسيكية"]
-        R1["Ghidra / Cutter / Objdump Disassembler"]
-        R2["Static PE/ELF Metadata & Imports/Exports"]
-        R3["Frida Dynamic Runtime Hooking"]
+    subgraph ClassicalSymbolic["طبقة التحليل الرمزي الكلاسيكية"]
+        R1["Ghidra / Objdump Disassembler & High P-Code"]
+        R2["Static PE Metadata & Imports/Exports"]
+        R3["Win32 Native ETW / VAD / MiniDump Telemetry"]
     end
 
     subgraph NeuralBinaryCore["محرك REA-Neural للبرمجيات التنفيذية"]
@@ -55,9 +55,9 @@ graph TD
         O3["Patched Binary with Guaranteed Stack Stability"]
     end
 
-    InputBinary --> ClassicalREA
+    InputBinary --> ClassicalSymbolic
     InputBinary --> NeuralBinaryCore
-    ClassicalREA <--> NeuralBinaryCore
+    ClassicalSymbolic <--> NeuralBinaryCore
     NeuralBinaryCore --> VerifiedOutput
 ```
 
@@ -130,23 +130,23 @@ graph TD
 
 ---
 
-## 4. المقارنة المعيارية: REA التقليدي مقابل REA-Neural للبرمجيات
+## 4. المقارنة المعيارية: أدوات الهندسة العكسية التقليدية مقابل REA-Neural
 
-| وجه المقارنة | REA التقليدي (Traditional REA) | REA-Neural (الشوكة الدلالية) |
+| وجه المقارنة | الأدوات الرمزية التقليدية (Traditional RE Tools) | REA-Neural (المحرك الدلالي المستمر) |
 | :--- | :--- | :--- |
 | **طبيعة التحليل** | رمزي حرفي سطحي (Syntactic / Opcodes). | دلالي مستمر قائم على فضاء السلوك (Semantic Latent Space). |
-| **مقاومة التعمية (Obfuscation)** | عاجز أمام Flattening و Opaque Predicates. | يختزل التعمية تلقائياً بمطابقة تغيرات الحالة الصافية. |
-| **مطابقة الدوال عبر المعماريات** | تفشل إذا تغير المترجم أو المعمارية. | دقة مطابقة تتجاوز 90% بين x86 و ARM ومستويات التحسين. |
-| **أمان الترقيع الثنائي (Patching)** | ترقيع يدوي معرض لكسر الـ Stack والـ Alignment. | ترقيع مقيد رياضياً بأقل تشويه ممكن ومعاد موازنته آلياً. |
-| **البرمجيات الهجينة (Hybrid Apps)** | يهمل المنطق المدمج ويعامله كـ بقعة بيانات غامضة (Raw Blob). | يفكك الرابط بين كود الآلة والمنطق التنبؤي المدمج كلياً. |
+| **مقاومة التعمية (Obfuscation)** | تتعطل أو تنهار أمام Flattening و Opaque Predicates. | تختزل التعمية تلقائياً بمطابقة تغيرات الحالة الصافية وإلغاء المسارات الميتة. |
+| **مطابقة الدوال عبر المعماريات** | تتأثر بتغير المترجم أو المعمارية. | مطابقة متجهية عبر المعماريات (64-D High P-Code عند عتبة `MATCH_THRESHOLD = 0.90`). |
+| **أمان الترقيع الثنائي (Patching)** | ترقيع يدوي معرض لكسر الـ Stack والـ Alignment. | ترقيع مقيد بعزل المخرجات وحساب PE Checksum والتحقق من توازن المكدس. |
+| **البرمجيات الهجينة (Hybrid Apps)** | تهمل المنطق المدمج وتعامله ككتلة بيانات غامضة (Raw Blob). | تفكك الرابط بين كود الآلة وأصول الاستدلال المدمجة وتدقق الأوزان. |
 
 ---
 
-## 5. خطة تفعيل أدوات البرمجيات في الشوكة
+## 5. ركائز منظومة البرمجيات التنفيذية في REA-Neural
 
-1. **تحديث مواصفة المهارة:** اعتماد [`SKILL.md`](../skills/reverse-engineer-anything/SKILL.md) ليركز بالكامل على الملفات التنفيذية (PE/ELF/Mach-O).
-2. **محرك البايثون التنفيذي:** تزويد [`rea_neural_engine.py`](../src/binary_neural_engine.py) بدوال فحص ملفات البرامج، وكشف الشروط الصماء، والترقيع الجراحي للبرامج الثنائية، وكشف الهياكل الهجينة.
-3. **تطبيق تجريبي حي:** اختبار المحرك على ملف تنفيذي وإثبات قدرته على الترقيع وفك التعمية.
+1. **مواصفة المهارة الرئيسية والمهارات التخصصية:** اعتماد [`SKILL.md`](../skills/reverse-engineer-anything/SKILL.md) كموجه موحد يغطي تحليل PE وواجهات ويندوز والقياس الحي.
+2. **محرك البايثون التنفيذي:** تزويد [`binary_neural_engine.py`](../src/binary_neural_engine.py) و[`rea_neural_engine.py`](../src/rea_neural_engine.py) بقدرات فحص الملفات التنفيذية، وكشف الشروط الصماء، والترقيع الجراحي، وتحليل الأوزان الهجينة.
+3. **التحقق التلقائي العابر للمنصات:** التحقق من المحركات عبر حزمة اختبارات شاملة (`195` اختباراً) على ويندوز ولينكس.
 
 ---
 

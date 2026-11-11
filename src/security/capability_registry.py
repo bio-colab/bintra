@@ -25,6 +25,7 @@ class Capability(str, Enum):
     # Workspace Capabilities (Controlled Write)
     WORKSPACE_WRITE = "cap.workspace.write"
     WORKSPACE_TEMP_CLEAN = "cap.workspace.temp_clean"
+    TEMPDIR_MARKER_WRITE = "cap.tempdir.marker.write"
 
     # Gated Subprocess Capabilities
     SUBPROCESS_CATALOG_EXEC = "cap.subprocess.catalog_exec"
@@ -80,7 +81,7 @@ class CapabilityRegistry:
         "registry_reader": {Capability.REGISTRY_READ},
         "event_collector": {Capability.EVENT_LOG_READ},
         "etw_capture_engine": {Capability.EVENT_LOG_READ},
-        "ghidra_live_bridge": {Capability.FILE_READ, Capability.WORKSPACE_WRITE},
+        "ghidra_live_bridge": {Capability.FILE_READ, Capability.WORKSPACE_WRITE, Capability.TEMPDIR_MARKER_WRITE},
         "minidump_parser": {Capability.MINIDUMP_READ, Capability.FILE_READ},
         "crash_rca_engine": {Capability.MINIDUMP_READ, Capability.FILE_READ},
         "command_executor": {Capability.SUBPROCESS_CATALOG_EXEC},

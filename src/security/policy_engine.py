@@ -86,6 +86,36 @@ class PolicyEngine:
 
         # Rule 4: Target binary and target directory write protection
         if mode in ("WRITE", "DELETE", "MODIFY"):
+            # Dedicated strictly scoped capability for Ghidra bridge discovery marker in tempdir
+            if mode == "WRITE" and cap == Capability.TEMPDIR_MARKER_WRITE:
+                import os
+                import tempfile
+                if comp != "ghidra_live_bridge" or request.operation != "write_tempdir_discovery_marker":
+                    return AccessDecision(
+                        verdict="DENY",
+                        reason=f"CAPABILITY_MISMATCH: TEMPDIR_MARKER_WRITE is reserved exclusively for ghidra_live_bridge marker publication.",
+                        capability=cap
+                    )
+                expected_temp_marker = os.path.join(tempfile.gettempdir(), ".rea_bridge.json")
+                if not PathIdentity.is_same_file(target, expected_temp_marker):
+                    return AccessDecision(
+                        verdict="DENY",
+                        reason=f"TEMPDIR_PATH_FORBIDDEN: TEMPDIR_MARKER_WRITE may target only '{expected_temp_marker}', got '{target}'.",
+                        capability=cap
+                    )
+                if scope and (scope.is_target_file(target) or scope.is_target_directory(target)):
+                    return AccessDecision(
+                        verdict="DENY",
+                        reason=f"TARGET_WRITE_FORBIDDEN: Marker path '{target}' conflicts with protected target scope.",
+                        capability=cap
+                    )
+                return AccessDecision(
+                    verdict="ALLOW_SCOPED",
+                    reason=f"Authorized bridge discovery marker write in tempdir: '{target}'.",
+                    capability=cap,
+                    side_effects=["tempdir_marker_write"]
+                )
+
             # Enforce capability matching
             if mode in ("WRITE", "MODIFY") and cap != Capability.WORKSPACE_WRITE:
                 return AccessDecision(

@@ -63,9 +63,9 @@ flowchart TD
 |:---|:---|:---|:---|
 | **PE Anatomy & Mitigations** | `rea_inspect_binary` | `file_path`: string | Extracts PE32/PE32+ architecture, ASLR, DEP, CFG, sections, Shannon entropy. |
 | **Opaque Predicates & CFF** | `rea_deobfuscate_binary` | `code_hex`: string, `file_path` (opt), `offset` (opt) | Identifies dead conditional jumps, algebraic zeroing, and recovers canonical control flow. |
-| **Raw Bytes at Offset** | `rea_dump_bytes` | `file_path`: string, `offset`: int, `length`: int | Extracts hex preview and ASCII rendering without manual seeking. |
-| **Cross-Arch Matching** | `rea_match_functions` | `func1_hex`: string, `func2_hex`: string | Vector cosine similarity matching across x86-64 and ARM64 ($>90\%$). |
-| **P-Code Semantic Match** | `rea_match_pcode` | `func1_pcode`: array, `func2_pcode`: array | Architecture- and compiler-invariant High P-Code IR matching ($>95\%$). |
+| **Raw Bytes at Offset** | `rea_dump_bytes` | `file_path`: string, `offset`: int\|hex-str, `length`: int (opt, default 64) | Extracts hex preview and ASCII rendering without manual seeking. |
+| **Cross-Arch Matching** | `rea_match_functions` | `func1_hex`: string, `func2_hex`: string | 16-D opcode/transition histogram matching across x86-64 and ARM64 (heuristic threshold $\ge 0.90$ with scale guard $\ge 0.60$). |
+| **P-Code Semantic Match** | `rea_match_pcode` | `func1_pcode`: array, `func2_pcode`: array | 64-D Ghidra High P-Code IR cosine matching (`MATCH_THRESHOLD = 0.90`; see `rea-neural-assessment/EVALUATION.md` for corpus evaluation caveats). |
 | **Embedded AI Asset Scan** | `rea_scan_hybrid` | `file_path`: string | Scans PE `.rsrc`/`.rodata` for embedded DirectML, ONNX, GGUF, or Safetensors. |
 | **10 Senses Cybernetic Audit**| `rea_sensory_audit` | `file_path`: string (or `code_hex`: string) | Holistic 10-Sense evaluation returning unified telemetry. |
 
@@ -84,7 +84,7 @@ rea-neural match `
   --func2 "55 48 89 e5 8d 47 01 5d c3"
 
 # 4. Embedded AI Container Scan
-rea-neural scan-hybrid --file "C:\path\to\game.exe"
+rea-neural scan-hybrid --file "C:\path\to\target.exe"
 
 # 5. Holistic 10-Sense Evaluation
 rea-neural sense --file "C:\path\to\target.exe" --hex "55 48 89 e5 5d c3"

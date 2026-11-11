@@ -11,7 +11,7 @@ Based on MIT CSAIL research (*"Sparks of Weight-Space Programming: LLMs can nati
 >
 > While the original MIT CSAIL paper explores LLMs directly reading and writing parameters of small toy models, **REA-Neural adapts these mathematical and algorithmic breakthroughs to solve real binary analysis, deobfuscation, and security auditing problems in native Windows software**:
 >
-> 1. **Inspecting Embedded Neural Runtimes:** Modern Windows executables (games, anti-cheat, multimedia engines, endpoint agents) embed neural weights in `.rsrc` or `.rodata` sections. REA-Neural inspects, extracts, and analyzes these models without running unsafe host binaries.
+> 1. **Inspecting Embedded Neural Runtimes:** Modern Windows executables (multimedia suites, simulation engines, endpoint agents) embed neural weights in `.rsrc` or `.rodata` sections. REA-Neural inspects, extracts, and analyzes these models without running unsafe host binaries.
 > 2. **Auditing Without Evaluation (Security & Backdoors):** Detecting hidden Trojan triggers, abnormal rank-1 spikes, and unauthorized decision paths in embedded models prior to execution.
 > 3. **Zero-Gradient Surgical Intervention:** Performing precision modifications on linear projection tables, heuristic matrices, and embedded weights (e.g. `column_direction_subtract` editing 0.016% of weights) without requiring full retraining datasets or compilation toolchains.
 > 4. **Cross-Architecture & Continuous Semantic Representation:** Transferring the continuous representation concepts (SVD decomposition, effective rank, behavioral trajectory modeling) to native machine code instructions (x86-64 / ARM64).
@@ -21,7 +21,7 @@ Based on MIT CSAIL research (*"Sparks of Weight-Space Programming: LLMs can nati
 ## 1. The Three Pillars of Weight-Space Programming in Hybrid Binary Analysis
 
 1. **Reading Neural Weights Directly (Zero-Execution Static Inspection):**
-   - **Spatial Input Receptive Fields (Exp 1):** Mapping input channels to discover the functional domain of embedded models (e.g. detecting image sensors, audio streams, or game controller coordinate layouts).
+   - **Spatial Input Receptive Fields (Exp 1):** Mapping input channels to discover the functional domain of embedded models (e.g. detecting image sensors, audio streams, or spatial input-channel coordinate layouts).
    - **Geometric Output Contours (Exp 2):** Reading final layer weights to reconstruct geometric decision boundaries and output classification topologies without forward passes.
    - **Cross-Layer Matrix Multiplication & Effective Rank (Exp 3):** Identifying copying/induction structures across layers ($W_{QK}^{(l_2)} W_{OV}^{(l_1)}$), and computing Roy-Vetterli Effective Rank & Participation Ratio to infer data complexity and alphabet entropy.
    - **Attention-Only Contrastive Probing (Exp 7):** Contrastive attention inspection to isolate routing biases and factual token alignment when static weight diffing alone is inconclusive.

@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 REA-Neural Ghidra Live Bidirectional IPC Bridge.
-Establishes a real-time, authenticated JSON-RPC 2.0 communication channel
-between REA-Neural's diagnostic engine and Ghidra Decompiler.
-Enables real-time pushing of Crash RCA annotations, VAD memory blocks,
-and P-Code deobfuscation plans into Ghidra's Program Database without file polling.
-Strictly localhost (127.0.0.1); governed by ExecutionGuard and Capability.WORKSPACE_WRITE.
+Establishes a multithreaded, localhost-bound, authenticated JSON-RPC 2.0 channel
+between REA-Neural's diagnostic engine and Ghidra. Queues Crash RCA annotations,
+VAD summaries, P-Code plans, and heuristic structure/pointer artifacts for the
+Ghidra-side service script to poll (default 1.0 s) and commit in database transactions.
+Strictly localhost (127.0.0.1); governed by ExecutionGuard, Capability.WORKSPACE_WRITE,
+and Capability.TEMPDIR_MARKER_WRITE (when publishing discovery marker to temp).
 """
 
 import os
@@ -14,8 +15,10 @@ import json
 import time
 import uuid
 import socket
+import socketserver
 import tempfile
 import threading
+from collections import OrderedDict
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Any, List, Optional, Tuple, Callable
 
@@ -25,18 +28,53 @@ from ghidra_pcode_vectorizer import PcodeDeobfuscator, PcodeVectorizer, PcodeFun
 
 
 DEFAULT_BRIDGE_PORT = 41718
+MAX_BRIDGE_BODY_BYTES = 2 * 1024 * 1024  # 2 MB hard ceiling
 
 
 class GhidraBridgeRequestHandler(BaseHTTPRequestHandler):
-    """JSON-RPC 2.0 handler for the localhost Ghidra Bridge."""
+    """Multithreaded JSON-RPC 2.0 handler for the localhost Ghidra Bridge."""
+
+    def setup(self):
+        super().setup()
+        try:
+            self.request.settimeout(5.0)
+        except Exception:
+            pass
 
     def log_message(self, format, *args):
         # Suppress standard HTTP request logging to keep CLI output clean
         pass
 
     def do_POST(self):
-        content_len = int(self.headers.get("Content-Length", 0))
-        post_data = self.rfile.read(content_len)
+        raw_cl = self.headers.get("Content-Length", "0")
+        try:
+            content_len = int(raw_cl)
+        except (ValueError, TypeError):
+            self._send_json_error(None, -32600, "Invalid Content-Length header", http_status=400)
+            return
+
+        if content_len < 0:
+            self._send_json_error(None, -32600, "Negative Content-Length not permitted", http_status=400)
+            return
+
+        if content_len > MAX_BRIDGE_BODY_BYTES:
+            self._send_json_error(
+                None,
+                -32002,
+                f"Payload too large ({content_len} bytes exceeds {MAX_BRIDGE_BODY_BYTES} byte limit)",
+                http_status=413,
+            )
+            return
+
+        try:
+            post_data = self.rfile.read(content_len)
+        except (socket.timeout, TimeoutError, OSError):
+            self._send_json_error(None, -32700, "Request body read timed out or closed", http_status=408)
+            return
+
+        if len(post_data) != content_len:
+            self._send_json_error(None, -32700, "Incomplete request body", http_status=400)
+            return
 
         try:
             req = json.loads(post_data.decode("utf-8"))
@@ -63,31 +101,25 @@ class GhidraBridgeRequestHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json_error(req_id, -32603, f"Internal error: {str(e)}")
 
-    def _send_json_response(self, req_id: Any, result: Any):
-        payload = {
-            "jsonrpc": "2.0",
-            "result": result,
-            "id": req_id
-        }
+    def _safe_write_json(self, payload: Dict[str, Any], http_status: int = 200):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(http_status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            pass
 
-    def _send_json_error(self, req_id: Any, code: int, message: str):
-        payload = {
-            "jsonrpc": "2.0",
-            "error": {"code": code, "message": message},
-            "id": req_id
-        }
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+    def _send_json_response(self, req_id: Any, result: Any):
+        self._safe_write_json({"jsonrpc": "2.0", "result": result, "id": req_id}, http_status=200)
+
+    def _send_json_error(self, req_id: Any, code: int, message: str, http_status: int = 200):
+        self._safe_write_json(
+            {"jsonrpc": "2.0", "error": {"code": code, "message": message}, "id": req_id},
+            http_status=http_status,
+        )
 
 
 class GhidraLiveBridgeServer:
@@ -107,15 +139,30 @@ class GhidraLiveBridgeServer:
         self.client_metadata: Optional[Dict[str, Any]] = None
         self.last_client_heartbeat: Optional[float] = None
 
-        # Command queues for Ghidra to consume
+        # Command queues for Ghidra to consume (bounded ring semantics)
+        self._max_queue_size = 2000
+        self._queue_overflow_count = 0
         self._command_queue: List[Dict[str, Any]] = []
         self._queue_lock = threading.Lock()
 
-        # Cache of decompiled functions pushed by Ghidra
-        self._decompiled_functions: Dict[str, Dict[str, Any]] = {}
+        # Bounded LRU cache of decompiled functions pushed by Ghidra
+        self._max_cached_functions = 1000
+        self._decompiled_functions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 
-    def start(self, marker_path: Optional[str] = None) -> Dict[str, Any]:
-        """Starts the bridge server in a background thread."""
+    @staticmethod
+    def _write_marker_secure(path: str, payload: Dict[str, Any]) -> bool:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        try:
+            os.chmod(path, 0o600)
+        except Exception:
+            pass
+        return True
+
+    def start(self, marker_path: Optional[str] = None, publish_temp_marker: bool = True) -> Dict[str, Any]:
+        """Starts the multithreaded localhost bridge server in a background thread."""
         scope = ExecutionGuard.get_current_scope()
         ws_dir = scope.workspace_dir if scope else os.path.abspath(".")
         target_marker = marker_path or os.path.join(ws_dir, ".rea_bridge.json")
@@ -128,8 +175,9 @@ class GhidraLiveBridgeServer:
             access_mode="WRITE"
         )
 
-        class ThreadingHttpServer(HTTPServer):
-            pass
+        class ThreadingHttpServer(socketserver.ThreadingMixIn, HTTPServer):
+            daemon_threads = True
+            allow_reuse_address = True
 
         self.httpd = ThreadingHttpServer((self.host, self.port), GhidraBridgeRequestHandler)
         self.httpd.bridge_server = self  # type: ignore
@@ -139,27 +187,36 @@ class GhidraLiveBridgeServer:
         self.server_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.server_thread.start()
 
-        # Write discovery marker
+        # Write discovery marker inside authorized workspace
         self._marker_path = target_marker
-        self._temp_marker_path = os.path.join(tempfile.gettempdir(), ".rea_bridge.json")
+        self._temp_marker_path = None
         marker_payload = {
             "host": self.host,
             "port": self.port,
             "auth_token": self.auth_token,
             "url": f"http://{self.host}:{self.port}"
         }
-        for m_path in (target_marker, self._temp_marker_path):
-            try:
-                flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
-                fd = os.open(m_path, flags, 0o600)
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump(marker_payload, f, indent=2)
+        try:
+            self._write_marker_secure(target_marker, marker_payload)
+        except Exception as err:
+            sys.stderr.write(f"[REA-Bridge] Warning writing workspace marker '{target_marker}': {err}\n")
+
+        # Explicitly mediate optional tempdir marker write under Capability.TEMPDIR_MARKER_WRITE
+        if publish_temp_marker:
+            temp_candidate = os.path.join(tempfile.gettempdir(), ".rea_bridge.json")
+            if os.path.abspath(temp_candidate) != os.path.abspath(target_marker):
+                ExecutionGuard.request_access(
+                    component="ghidra_live_bridge",
+                    operation="write_tempdir_discovery_marker",
+                    target=temp_candidate,
+                    capability=Capability.TEMPDIR_MARKER_WRITE,
+                    access_mode="WRITE",
+                )
+                self._temp_marker_path = temp_candidate
                 try:
-                    os.chmod(m_path, 0o600)
-                except Exception:
-                    pass
-            except Exception:
-                pass
+                    self._write_marker_secure(temp_candidate, marker_payload)
+                except Exception as err:
+                    sys.stderr.write(f"[REA-Bridge] Warning writing tempdir marker '{temp_candidate}': {err}\n")
 
         return {
             "status": "running",
@@ -167,7 +224,8 @@ class GhidraLiveBridgeServer:
             "port": self.port,
             "auth_token": self.auth_token,
             "bridge_url": f"http://{self.host}:{self.port}",
-            "marker_file": target_marker
+            "marker_file": target_marker,
+            "tempdir_marker_published": bool(self._temp_marker_path),
         }
 
     def stop(self) -> Dict[str, Any]:
@@ -198,13 +256,18 @@ class GhidraLiveBridgeServer:
             return {"status": "ok", "timestamp": time.time(), "bridge_version": "7.4.0"}
 
         elif method == "get_status":
+            with self._queue_lock:
+                q_count = len(self._command_queue)
+                q_overflow = self._queue_overflow_count
             return {
                 "is_running": self.is_running,
                 "port": self.port,
                 "auth_token": self.auth_token,
                 "client_connected": self.is_client_connected(),
                 "client_metadata": self.client_metadata,
-                "queued_commands_count": len(self._command_queue),
+                "queued_commands_count": q_count,
+                "max_queue_size": self._max_queue_size,
+                "queue_overflow_count": q_overflow,
                 "cached_functions_count": len(self._decompiled_functions)
             }
 
@@ -228,7 +291,10 @@ class GhidraLiveBridgeServer:
 
         elif method == "ghidra.push_pcode":
             fn_name = params.get("name", "sub_unknown")
+            while len(self._decompiled_functions) >= self._max_cached_functions:
+                self._decompiled_functions.popitem(last=False)
             self._decompiled_functions[fn_name] = params
+            self._decompiled_functions.move_to_end(fn_name)
             return {"status": "cached", "function": fn_name}
 
         elif method == "rea.deobfuscate_function":
@@ -282,8 +348,11 @@ class GhidraLiveBridgeServer:
         return (time.time() - self.last_client_heartbeat) < 15.0
 
     def queue_command(self, action: str, details: Dict[str, Any]) -> None:
-        """Pushes an annotation or mutation command into the queue for Ghidra to apply."""
+        """Pushes an annotation or mutation command into the bounded queue for Ghidra to poll."""
         with self._queue_lock:
+            if len(self._command_queue) >= self._max_queue_size:
+                self._command_queue.pop(0)
+                self._queue_overflow_count += 1
             self._command_queue.append({
                 "action": action,
                 "timestamp": time.time(),
@@ -317,15 +386,17 @@ class GhidraLiveBridgeServer:
 
         full_comment = "\n".join(comment_lines)
 
-        # 1. Queue Plate Comment
+        # 1. Queue Plate Comment (Crash RCA fault_rva is explicitly module RVA)
         self.queue_command("SET_PLATE_COMMENT", {
             "address": fault_rva,
+            "address_space": "rva",
             "comment": full_comment
         })
 
         # 2. Queue Bookmark
         self.queue_command("CREATE_BOOKMARK", {
             "address": fault_rva,
+            "address_space": "rva",
             "category": "REA_CRASH_FAULT",
             "description": f"{root_cause} on target {target_addr}"
         })
@@ -386,20 +457,25 @@ class GhidraLiveBridgeServer:
         clean_addr = str(base_addr).lower().replace("0x", "").lstrip("0") or "0"
         struct_name = struct_report.get("structure_name") or f"Reconstructed_0x{clean_addr.upper()}"
 
+        addr_space = struct_report.get("address_space", "va")
+
         # 1. Queue APPLY_DATA_STRUCTURE
         self.queue_command("APPLY_DATA_STRUCTURE", {
             "address": base_addr,
+            "address_space": addr_space,
             "name": struct_name,
             "c_declaration": c_decl,
             "fields": fields,
-            "size": size
+            "size": size,
+            "heuristic": bool(struct_report.get("heuristic", True)),
         })
 
         # 2. Queue Bookmark
         self.queue_command("CREATE_BOOKMARK", {
             "address": base_addr,
+            "address_space": addr_space,
             "category": "REA_STRUCT_DISSECTION",
-            "description": f"Reconstructed struct {struct_name} ({len(fields)} fields, {size} bytes)"
+            "description": f"Reconstructed struct {struct_name} ({len(fields)} fields, {size} bytes, heuristic)"
         })
 
         # 3. Queue Program Note
@@ -444,12 +520,16 @@ class GhidraLiveBridgeServer:
             # 1. Queue Plate comment at static base RVA
             self.queue_command("SET_PLATE_COMMENT", {
                 "address": rva,
+                "address_space": "rva",
+                "module": mod,
                 "comment": f"[REA Pointer Root]: Points to target {target_addr}\nExpression: {expr}\nModule: {mod}"
             })
 
             # 2. Queue Bookmark at static base RVA
             self.queue_command("CREATE_BOOKMARK", {
                 "address": rva,
+                "address_space": "rva",
+                "module": mod,
                 "category": "REA_POINTER_ROOT",
                 "description": f"Root for {target_addr} via {expr}"
             })
@@ -538,12 +618,16 @@ class GhidraLiveBridgeClient:
 _GLOBAL_BRIDGE_SERVER: Optional[GhidraLiveBridgeServer] = None
 
 
-def get_or_create_bridge(port: int = DEFAULT_BRIDGE_PORT, auth_token: Optional[str] = None) -> GhidraLiveBridgeServer:
+def get_or_create_bridge(
+    port: int = DEFAULT_BRIDGE_PORT,
+    auth_token: Optional[str] = None,
+    publish_temp_marker: bool = True,
+) -> GhidraLiveBridgeServer:
     """Returns the active bridge server instance, or creates and starts a new one."""
     global _GLOBAL_BRIDGE_SERVER
     if _GLOBAL_BRIDGE_SERVER is None or not _GLOBAL_BRIDGE_SERVER.is_running:
         _GLOBAL_BRIDGE_SERVER = GhidraLiveBridgeServer(port=port, auth_token=auth_token)
-        _GLOBAL_BRIDGE_SERVER.start()
+        _GLOBAL_BRIDGE_SERVER.start(publish_temp_marker=publish_temp_marker)
     return _GLOBAL_BRIDGE_SERVER
 
 

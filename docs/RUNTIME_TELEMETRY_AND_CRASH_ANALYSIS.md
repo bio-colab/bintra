@@ -8,10 +8,10 @@
 يقدم هذا التوثيق البنية المعمارية الشاملة لمنظومة **القياس الحي عن بُعد (Runtime Telemetry)** والتحليل الجنائي للانهيارات البرمجية والربط التفاعلي المباشر مع بيئات فك التجميع الساكنة (Ghidra Decompiler) في مشروع `REA-Neural` (الإصدار `v7.4.0+`).
 
 تتكامل المنظومة عبر 4 مراحل هندسية متعاقبة ومترابطة رياضياً وتطبيقياً:
-1. **المرحلة الأولى (Phase 1):** فحص وتصنيف بنية الذاكرة الافتراضية للعمليات الحية والـ VAD بدون تدخل (`VirtualMemoryInspector`).
-2. **المرحلة الثانية (Phase 2):** محرك التحليل الجنائي المؤتمت للانهيارات وتحديد السبب الجذري قطيعاً (`CrashRootCauseAnalyzer`).
-3. **المرحلة الثالثة (Phase 3):** الالتقاط الحي لمسارات ETW وتحليل التسلسل الزمني والسببي المسبق للعطل (`EtwLiveCaptureSession`, `EtwTimelineCorrelator`).
-4. **المرحلة الرابعة (Phase 4):** جسر الاتصال التفاعلي الحي ثنائي الاتجاه مع Ghidra عبر JSON-RPC محلي وموثق (`GhidraLiveBridgeServer`, `ReaLiveBridgeService.py`).
+1. **المرحلة الأولى (Phase 1):** فحص وتصنيف بنية الذاكرة الافتراضية للعمليات الحية، وقراءة القيم سلبياً (`PROCESS_VM_READ`)، والبحث الأولي/اللاحق، ومسح سلاسل المؤشرات، واستنتاج بنى البيانات (`VirtualMemoryInspector`, `ProcessMemoryScanner`).
+2. **المرحلة الثانية (Phase 2):** محرك التحليل الجنائي المؤتمت للانهيارات مع ربط فحص VAD وتطبيع حقول `MiniDump` (`CrashRootCauseAnalyzer`).
+3. **المرحلة الثالثة (Phase 3):** الالتقاط الهجين لأحداث ويندوز عبر ETW الأصلي (`OpenTraceW`/`ProcessTrace`) أو مسارات البديل غير المرفوع (`WEVTAPI`/`CreateToolhelp32Snapshot`)، وتحليل التسلسل الزمني والسببي (`EtwLiveCaptureSession`, `EtwTimelineCorrelator`).
+4. **المرحلة الرابعة (Phase 4):** جسر الاتصال المحلي الموثق القائم على الطابور والاستطلاع الدوري (`Queued-Poll JSON-RPC 2.0`) مع Ghidra (`GhidraLiveBridgeServer`, `ReaLiveBridgeService.py`).
 
 ```mermaid
 flowchart TD
@@ -49,89 +49,65 @@ flowchart TD
 
 ## 2. الأسس النظرية والخوارزمية للمراحل الأربعة
 
-### المرحلة الأولى: فحص وتصنيف الذاكرة الافتراضية (`VirtualMemoryInspector`)
+### المرحلة الأولى: فحص وتصنيف الذاكرة الافتراضية والمسح السلبي (`VirtualMemoryInspector`, `ProcessMemoryScanner`)
 
-- **المسار البرمجي:** [`src/windows_intelligence/runtime_telemetry/virtual_memory_inspector.py`](file:///D:/rea-neural/src/windows_intelligence/runtime_telemetry/virtual_memory_inspector.py)
-- **مبدأ الأمان:** وصول سلبي وقراءة استعلامية فقط عبر `PROCESS_QUERY_INFORMATION` دون أي حقن أو كتابة أو تعديل لسمات الصفحات.
-- **خوارزمية المسح الحيزي:**
-  - الاستعلام عبر دالة `VirtualQueryEx` المتكررة ابتداءً من العنوان `0x0` وحتى سقف العناوين المتوافقة مع بنية المعالج:
-    $$V_{\max} = 0x00007FFFFFFFFFFF \quad (\text{x86-64})$$
-    $$V_{\max} = 0x7FFFFFFF \quad (\text{x86-32})$$
-  - تصنيف المناطق المسترجعة بدقة تامة:
-    - `NULL_PAGE_TRAP`: النطاق الحرج $[0x0, 0x10000]$ (أول 64 كيلوبايت) المخصص بنواة ويندوز لحبس أخطاء المؤشرات الفارغة.
-    - `IMAGE_TEXT`: أقسام التعليمات التنفيذية للوحدات المحملة مع التحقق من علامة `MEM_IMAGE` و `PAGE_EXECUTE_READ`.
-    - `IMAGE_DATA`: أقسام البيانات الثابتة والموارد (`.rdata`, `.data`, `.rsrc`).
-    - `HEAP`: كتل الذاكرة المخصصة ديناميكياً (`MEM_PRIVATE` مع حماية `PAGE_READWRITE`).
-    - `STACK`: كتل المكدس لخيوط المعالجة المفحوصة بصفحات الحراسة (`PAGE_GUARD`).
-    - `KERNEL_SPACE`: محاولات الوصول لما فوق سقف المستخدم ($> V_{\max}$) والممنوعة بعتاد المعالج (Ring 0).
+- **المسار البرمجي:** [`src/windows_intelligence/runtime_telemetry/virtual_memory_inspector.py`](../src/windows_intelligence/runtime_telemetry/virtual_memory_inspector.py)
+- **مبدأ الأمان:** وصول سلبي واستعلامي فقط عبر `PROCESS_QUERY_INFORMATION | PROCESS_VM_READ` دون أي حقن أو استدعاء `WriteProcessMemory` أو تعديل لسمات الصفحات، مع إلزامية عزل ملف الجلسة داخل مساحة العمل (`--session-file` / `session_id`).
+- **خوارزمية المسح الحيزي والتصنيف الفعلي:**
+  - الكشف الديناميكي عن معمارية العملية المستهدفة (WOW64 عبر `IsWow64Process2` أو بنية النظام الأصلي) قبل الاستعلام عبر `VirtualQueryEx` ابتداءً من العنوان `0x0` وحتى السقف المناسب:
+    $$V_{\max} = 0x00007FFFFFFFFFFF \quad (\text{x86-64}), \qquad V_{\max} = 0x7FFFFFFF \quad (\text{x86-32 / WOW64})$$
+  - تحليل جدول أقسام PE الفعلي في الذاكرة/القرص لتسمية أقسام `MEM_IMAGE` (`.text`, `.rdata`, `.data`, `.rsrc`) وفق عناوين RVA الحقيقية لا التخمين بالصلاحيات فقط، وتمييز مكدس الخيوط الحقيقي (`STACK`) بالاعتماد على صفحات الحراسة (`PAGE_GUARD`) والترابط الحيزي بدلاً من خلطه بكتل الكومة (`HEAP`).
+  - المسح الكمي للقيم (First Scan / Next Scan بمختلف الأنواع `int32`/`int64`/`float`/`double`/`bytes`/`string`)، وتعقب مسارات المؤشرات متعددة المستويات (`pointer_scan`)، واستنتاج بنى البيانات (`dissect_struct`) على القراءة المقيدة بالمهلة (`PROCESS_VM_READ`).
 - **تدقيق سياسة $W \oplus X$ (Write XOR Execute):**
-  - فحص أي صفحة ذاكرة تجمع بين إمكانية الكتابة والتنفيذ في آن واحد (`PAGE_EXECUTE_READWRITE` أو `PAGE_EXECUTE_WRITECOPY`) وإطلاق تنبيه أمني بشأنها.
+  - رصد أي صفحة ذاكرة تجمع بين الكتابة والتنفيذ (`PAGE_EXECUTE_READWRITE` أو `PAGE_EXECUTE_WRITECOPY`).
 - **الفحص الفارق بين لقطتين (`diff_snapshots`):**
-  - تتبع التغيرات الحيزية بين لحظتين زمنيتين:
-    $$\Delta \text{Commit} = \sum \text{Commit}(t_2) - \sum \text{Commit}(t_1)$$
-  - رصد تخصيصات الذاكرة الجديدة، والمناطق المحررة، والصفحات التي تغيرت أذوناتها الأمنية.
+  - مقارنة اللقطات حيزياً مع تتبع تغيّر الحجم والنوع والحالة والصلاحيات وحساب صافي التغير $\Delta \text{Commit}$.
 
 ---
 
 ### المرحلة الثانية: محرك التحليل الجنائي المؤتمت للانهيارات (`CrashRootCauseAnalyzer`)
 
-- **المسار البرمجي:** [`src/windows_intelligence/runtime_telemetry/crash_rca_engine.py`](file:///D:/rea-neural/src/windows_intelligence/runtime_telemetry/crash_rca_engine.py)
-- **استخراج السياق الكامل لسجلات المعالج (16 General-Purpose Registers):**
-  - ترقية [`minidump_parser.py`](file:///D:/rea-neural/src/windows_intelligence/runtime_telemetry/minidump_parser.py) لاستخراج كافة سجلات x64:
-    $$\mathtt{RAX, RBX, RCX, RDX, RSI, RDI, RBP, RSP, R8, R9, R10, R11, R12, R13, R14, R15, RIP}$$
-- **الإثبات الرياضي للمؤشر الفارغ (Deterministic Null Dereference Proof):**
-  - فحص تعليمة الانهيار المفككة بواسطة Capstone عبر نافذة محيطة (32 بايت قبل RVA العطل و 48 بايت بعده):
-    $$\mathtt{mov\ rax,\ [rcx + 0x18]}$$
-  - التحقق من معادلة العنوان المستهدف المنتهك $\mathtt{TargetAddr}$:
-    $$\mathtt{TargetAddr} = \mathtt{Reg}_{\mathrm{culprit}} + \mathtt{Displacement}$$
-  - إذا كان $\mathtt{Reg}_{\mathrm{culprit}} = 0x0$ و $\mathtt{Displacement} = \mathtt{TargetAddr}$، ينتقل التقييم إلى **إثبات حتمي قطعي بنسبة 100%**:
-    $$\text{Classification} = \mathtt{NULL\_POINTER\_DEREFERENCE} \quad (\text{Confidence: VERY\_HIGH})$$
+- **المسار البرمجي:** [`src/windows_intelligence/runtime_telemetry/crash_rca_engine.py`](../src/windows_intelligence/runtime_telemetry/crash_rca_engine.py)
+- **تكامل السجلات، تطبيع الحقول، وفحص VAD:**
+  - ترقية [`minidump_parser.py`](../src/windows_intelligence/runtime_telemetry/minidump_parser.py) لاستخراج سجلات x64 الستة عشر، وتطبيع حقلي `operation` و `access_type` (`READ` / `WRITE` / `EXECUTE`) حتى لا تُفقد نوعية الوصول أثناء تمرير مخرجات `.dmp` الحقيقية إلى محرك RCA.
+  - الاستعلام الفعلي من `VirtualMemoryInspector` داخل مسار التحليل للتحقق مما إذا كان عنوان الوصول يقع ضمن منطقة كومة أو مكدس أو ملف ذاكرة صالحة أو خارج النطاقات المخصصة.
+- **التحليل الإرشادي للمؤشر الفارغ وتفكيك التعليمات:**
+  - تفكيك نافذة التعليمات المحيطة بالعطل بواسطة Capstone مع التحقق من محاذاة حدود التعليمة المسببة ومحدوديته الحالية على معمارية `x86`/`x64`.
+  - التحقق من المعادلة $\mathtt{TargetAddr} = \mathtt{Reg}_{\mathrm{culprit}} + \mathtt{Displacement}$ وعند مطابقتها مع $\mathtt{Reg}_{\mathrm{culprit}} = 0x0$ يرفع المحرك التصنيف إلى `NULL_POINTER_DEREFERENCE` بمستوى ثقة مرتفع مدعوم بالأدلة (دون ادعاء إثبات رياضي مطلق في غياب سياق التعليمات الكامل).
 - **اكتشاف أنماط تسميم الذاكرة (Poison Patterns & UAF):**
   - كشف أنماط تخصيص المترجمات وذاكرة ويندوز المهيأة أو المحررة:
-    - `0xDDDDDDDDDDDDDDDD`: كتلة محررة في مكدس/كومة MSVC Debug CRT (`MSVC_DEAD_FREED_HEAP_BLOCK`).
+    - `0xDDDDDDDDDDDDDDDD`: كتلة محررة في MSVC Debug CRT (`MSVC_DEAD_FREED_HEAP_BLOCK`).
     - `0xCCCCCCCCCCCCCCCC`: متغير مكدس غير مهيأ (`MSVC_UNINITIALIZED_STACK_VARIABLE`).
-    - `0xFEEEFEEEFEEEFEEE`: كتلة محررة في كومة نظام التشغيل NT Heap.
-    - `0xBAADF00DBAADF00D`: كتلة غير مهيأة في كومة نظام التشغيل.
-- **توليد التوجيهات البرمجية الدقيقة للمطور (Remediation Advice):**
-  - اقتراح فحص دفاعي مباشر ومحدد باسم السجل وعنوان الدالة:
-    `if (rcx == nullptr) { return / handle_error(); }`
+    - `0xFEEEFEEEFEEEFEEE`: كتلة محررة في NT Heap.
+    - `0xBAADF00DBAADF00D`: كتلة غير مهيأة في NT Heap.
+- **توليد التوجيهات البرمجية للمطور (Remediation Advice):**
+  - اقتراح فحص دفاعي محدد باسم السجل وموضع الدالة المتأثرة.
 
 ---
 
-### المرحلة الثالثة: الالتقاط الحي والسببية الزمنية (`EtwLiveCaptureSession`, `EtwTimelineCorrelator`)
+### المرحلة الثالثة: الالتقاط الهجين للأحداث والسببية الزمنية (`EtwLiveCaptureSession`, `EtwTimelineCorrelator`)
 
-- **المسار البرمجي:** [`src/windows_intelligence/runtime_telemetry/etw_capture_engine.py`](file:///D:/rea-neural/src/windows_intelligence/runtime_telemetry/etw_capture_engine.py)
-- **بنية التخزين الدائرية المحدودة (In-Memory Ring Buffer FIFO):**
-  - الاحتفاظ بأحدث $N$ حدثاً في الذاكرة لتجنب أي استهلاك غير منضبط لموارد النظام، مع دعم التصفية المباشرة بناءً على معرف العملية المستهدفة (PID).
-- **تحليل تذبذب الذاكرة الزمني (Temporal Memory Churn):**
-  - مراقبة نداءات `VIRTUAL_FREE` السابقة للانهيار:
-    $$\Delta t = t_{\mathrm{crash}} - t_{\mathrm{free}} \le 500\,\text{ms}$$
-  - إذا تم تحرير مساحة ذاكرة تتقاطع حيزياً أو تسبق الانهيار بلحظات وجيزة، يحدد المحرك النتيجة:
-    $$\mathtt{TEMPORAL\_MEMORY\_CHURN\_DETECTED}$$
-- **رصد حقن المكتبات المتأخر (Late DLL Injection):**
-  - رصد أي عملية تحميل لمكتبة خارجية (`IMAGE_LOAD`) خلال النافذة الزمنية القريبة من العطل لتحديد ما إذا كانت التبعيات الخارجية سبباً في عدم الاستقرار.
-- **المرونة وانعدام الامتيازات (Non-Elevated Fallback):**
-  - إذا تم تشغيل الأداة دون صلاحيات إدارية (Non-Elevated)، تعود الجلسة بسلاسة إلى تتبع الجلسات العامة والاستعلام عن سجلات النظام دون إيقاف البرنامج.
+- **المسار البرمجي:** [`src/windows_intelligence/runtime_telemetry/etw_capture_engine.py`](../src/windows_intelligence/runtime_telemetry/etw_capture_engine.py)
+- **استهلاك ETW الأصلي والمسار الهجين (Hybrid Native + Non-Elevated Fallbacks):**
+  - استدعاء `StartTraceW`, `EnableTraceEx2`, `OpenTraceW`, `ProcessTrace` عبر Win32 `advapi32.dll` لقراءة أحداث Kernel/Image Load/VirtualAlloc/Free الحقيقية مع احترام ملكية الجلسات وعدم إيقاف جلسات خارجية لم ينشئها المحرك.
+  - تصنيف الأحداث وتصدير حقلي التتبع **`event_sources`** و **`has_native_etw_events`** لإعلان المصدر الحقيقي لكل حدث (مثل `IMAGE_LOAD`, `VIRTUAL_FREE`, `APPLICATION_ERROR`, `WER_REPORT`, `APPLICATION_HANG`, `KERNEL_POWER_OR_BUGCHECK`, `RESTART_MANAGER_LOCK`) وتقارير الارتباط مثل `GRAPHICS_TDR_DEVICE_REMOVAL`.
+- **التخزين الدائري والسببية الزمنية:**
+  - الاحتفاظ بأحدث $N$ حدثاً في مخزن دائري محدود في الذاكرة مع التصفية بحسب معرف العملية (PID) والتسلسل الزمني قبل الانهيار (مثل `VIRTUAL_FREE` أو `IMAGE_LOAD` المتأخر خلال $\Delta t \le 500\,\text{ms}$).
+- **المرونة في الجلسات غير المرفوعة (Non-Elevated Windows Fallbacks):**
+  - نظراً لاشتراط جلسات Kernel ETW الحية صلاحيات **Administrator** أو عضوية مجموعة **Performance Log Users**، ينتقل المحرك تلقائياً دون استثناء في الجلسات الاعتيادية إلى التقاط لقطات الوحدات عبر `CreateToolhelp32Snapshot` وقراءة قنوات `WEVTAPI` (`Application`, `System`, `WER`) مع تمييز ذلك صراحة في النتائج عبر `has_native_etw_events: false`.
 
 ---
 
-### المرحلة الرابعة: جسر الاتصال التفاعلي الحي مع Ghidra (`GhidraLiveBridgeServer`, `ReaLiveBridgeService.py`)
+### المرحلة الرابعة: جسر الاتصال المحلي القائم على الطابور مع Ghidra (`GhidraLiveBridgeServer`, `ReaLiveBridgeService.py`)
 
-- **المسار البرمجي:** [`src/ghidra_live_bridge.py`](file:///D:/rea-neural/src/ghidra_live_bridge.py) و [`ghidra_scripts/ReaLiveBridgeService.py`](file:///D:/rea-neural/ghidra_scripts/ReaLiveBridgeService.py)
-- **ميثاق الاتصال المحلي (Authenticated Localhost JSON-RPC 2.0):**
-  - الاستماع حصراً على عنوان الحلقة المحلية `127.0.0.1:41718`.
-  - توليد رمز تفويض مشفر (UUID Token) وحفظه في ملف علامة محلي داخل مساحة العمل `.rea_bridge.json`.
-  - رفض أي طلب يفتقر إلى الرمز أو يحمل رمزاً غير مطابق برمز الخطأ القياسي `-32001`.
-- **سكربت غيدرا ثنائي التوافق (Jython 2.7 & PyGhidra 3.x):**
-  - يعمل مباشرة كـ `GhidraScript` من قائمة `Tools -> REA-Neural -> Start Live Bridge Service`.
-  - يتصل بالخادم ويسجل بيانات الملف التنفيذي المفتوح (`ghidra.register_client`).
-- **تطبيق التعديلات الحية داخل معاملات قاعدة البيانات (Database Transactions):**
-  - تنفيذ كافة التعديلات داخل معاملة رسمية تضمن عدم تلف قاعدة بيانات غيدرا:
-    `tx = currentProgram.startTransaction("REA-Neural Live Mutations")`
-  - **Plate Comments:** وضع تعليق تحليلي بارز فوق تعليمة الانهيار يوضح نوع الخطأ والسجل المسبب والتوصية البرمجية.
-  - **Bookmarks:** إضافة علامة مرجعية مصنفة ضمن `REA_CRASH_FAULT`.
-  - **Program Notes:** تدوين لقطة الذاكرة الافتراضية والجدول الزمني لأحداث ETW عند قاعدة البرنامج (`Image Base`).
-  - **Function Renaming:** إعادة تسمية الدوال المسببة للعطل الحتمي إلى `FAULT_<NAME>`.
+- **المسار البرمجي:** [`src/ghidra_live_bridge.py`](../src/ghidra_live_bridge.py) و [`ghidra_scripts/ReaLiveBridgeService.py`](../ghidra_scripts/ReaLiveBridgeService.py)
+- **معمارية الطابور والاستطلاع المؤقت (`Queued-Poll JSON-RPC 2.0`):**
+  - خادم HTTP متعدد الخيوط (`ThreadingMixIn`) يستمع حصراً على عنوان الحلقة المحلية `127.0.0.1:41718`.
+  - يضع المحلل طلبات التحليل في طابور آمن خيطياً، بينما يقوم السكربت داخل غيدرا (`ReaLiveBridgeService.py`, متوافق مع Jython 2.7 و PyGhidra 3.x) بالاستطلاع كل **`1.0s`** وتطبيق المعاملات على `currentProgram` داخل خيط غيدرا.
+  - فرض توثيق الرمز السري على كافة مسارات التعديل (`AUTH_REQUIRED` / `-32001`)، وإدارة ملف علامة الاكتشاف المؤقت ضمن صلاحية **`cap.tempdir.marker.write`** (مع إمكانية تعطيله كلياً عبر `--no-temp-marker` أو `publish_temp_marker=false`).
+  - تطبيع صريح بين الإزاحة النسبية `rva` والعنوان الافتراضي المطلق `va` وفق `Image Base` المفتوحة في غيدرا لمنع إزاحة التعليقات والعلامات عند إعادة تمركز ASLR.
+- **تطبيق التعديلات داخل معاملات قاعدة البيانات (`Database Transactions`):**
+  - تنفيذ الإضافات (Plate Comments، وعلامات `REA_CRASH_FAULT`، وملاحظات VAD/ETW، وهياكل C في `DataTypeManager`، وإعادة التسمية) عبر `currentProgram.startTransaction(...)` ككتابات صريحة في قاعدة بيانات غيدرا دون المساس بالملف التنفيذي الأصلي.
 
 ---
 
@@ -139,32 +115,36 @@ flowchart TD
 
 | الأداة في واجهة CLI | اسم أداة خادم MCP | رقم الأداة | المرحلة | الوظيفة الأساسية |
 |---|---|---|---|---|
-| `rea vad-inspect` | `rea_vad_inspect` | **31** | Phase 1 | مسح الذاكرة الافتراضية، تصنيف العناوين، تدقيق حماية $W \oplus X$، وتتبع الفارق الحيزي. |
-| `rea crash-rca` | `rea_crash_rca` | **29** | Phase 2 | تحليل ملفات MiniDump، تفكيك نافذة الانهيار، وإثبات خطأ المؤشر الفارغ أو الذاكرة المسمومة. |
-| `rea etw-capture` | `rea_etw_capture` | **30** | Phase 3 | بدء جلسة تتبع ETW حية، تصفية الأحداث، واكتشاف تذبذب الذاكرة وحقن المكتبات. |
-| `rea ghidra-bridge` | `rea_ghidra_live_bridge` | **31** | Phase 4 | تشغيل خادم الاتصال المحلي الموثق وربط أدوات التحليل مباشرة ببيئة Ghidra. |
+| `rea-neural vad-inspect` | `rea_vad_inspect` | **23** | Phase 1 | مسح الذاكرة الافتراضية، تصنيف أقسام PE والـ STACK/HEAP، تدقيق $W \oplus X$، والفارق الحيزي. |
+| `rea-neural mem-scan` | `rea_memory_scan` | **24** | Phase 1.5 | قراءة الذاكرة الحية عبر `PROCESS_VM_READ`، والبحث الأولي واللاحق (`first`/`next`) داخل جلسات معزولة. |
+| `rea-neural ptr-scan` | `rea_pointer_scan` | **25** | Phase 1.5 | استكشاف سلاسل المؤشرات متعددة المستويات حتى العناوين الثابتة للوحدات (`Base+Offsets`). |
+| `rea-neural struct-dissect` | `rea_struct_dissect` | **26** | Phase 1.5 | تشريح كتل الذاكرة الحية تلقائياً وتوليد تعريفات هياكل C قابلة للحقن في غيدرا. |
+| `rea-neural crash-rca` | `rea_crash_rca` | **27** | Phase 2 | تحليل ملفات MiniDump، ربط فحص VAD، تفكيك نافذة الانهيار، وإرجاع فرضيات السبب الجذري. |
+| `rea-neural etw-capture` | `rea_etw_capture` | **28** | Phase 3 | تشغيل التقاط ETW الهجين (`OpenTraceW` + بديل `WEVTAPI`/Toolhelp32) والارتباط الزمني السببي. |
+| `rea-neural ghidra-bridge` | `rea_ghidra_live_bridge` | **29** | Phase 4 | تشغيل خادم JSON-RPC الموثق على الحلقة المحلية مع دعم `--daemon` و `--no-temp-marker`. |
 
 > [!NOTE]
-> يبلغ إجمالي عدد أدوات خادم MCP الآن **31 أداة متخصصة**، جميعها تخضع لوساطة مرجع الأمان `ExecutionGuard` بنموذج الفشل المغلق (Fail-Closed).
+> يبلغ إجمالي عدد أدوات خادم MCP الآن **34 أداة متخصصة**، جميعها تخضع لوساطة مرجع الأمان `ExecutionGuard` والتحقق الصارم من المخطط (`_validate_tool_arguments`) بنموذج الفشل المغلق (Fail-Closed).
 
 ---
 
 ## 4. نتائج التدقيق والاختبارات الشاملة (Verification Matrix)
 
-تم تشغيل حزم الاختبارات المؤتمتة عبر كافة المكونات، وسجلت نجاحاً بنسبة **100%**:
+تم التحقق من كافة المكونات عبر حزمة الاختبارات المؤتمتة الكاملة على ويندوز (Python 3.12) بنجاح تام (`0 FAIL`, `0 SKIP`):
 
 ```text
 ======================================================================
 REA-Neural Test Suites Verification Summary:
-- test_suite.py (Core Binary & Neural Engines):        123 Tests  [PASS]
-- test_security_remediation.py (31 MCP Tools Guard):   16 Tests   [PASS]
-- test_virtual_memory_inspector.py (Phase 1 VAD):       5 Tests   [PASS]
-- test_crash_rca_engine.py (Phase 2 Crash RCA):          4 Tests   [PASS]
-- test_etw_capture_engine.py (Phase 3 ETW Timeline):     6 Tests   [PASS]
-- test_ghidra_live_bridge.py (Phase 4 Ghidra IPC):       5 Tests   [PASS]
-- test_runtime_telemetry_pipeline.py (Phase 5 E2E):      1 Test    [PASS]
+- test_suite.py (Core Binary & Neural Engines):         123 Tests  [PASS]
+- test_security_remediation.py (MCP Guard & Schema):     16 Tests  [PASS]
+- test_audit_remediations.py (Audit, CLI, Bridge & Docs): 10 Tests [PASS]
+- test_virtual_memory_inspector.py (Phase 1 VAD & Scan):  14 Tests [PASS]
+- test_etw_capture_engine.py (Phase 3 Hybrid ETW):        13 Tests [PASS]
+- test_ghidra_live_bridge.py (Phase 4 Ghidra Bridge):     14 Tests [PASS]
+- test_crash_rca_engine.py (Phase 2 Crash RCA):            4 Tests [PASS]
+- test_runtime_telemetry_pipeline.py (Phase 5 E2E):        1 Test  [PASS]
 ----------------------------------------------------------------------
-TOTAL VERIFIED TESTS:                                  160 Tests  [100% PASS - 0 FAIL]
+TOTAL VERIFIED TESTS:                                    195 Tests [PASS]
 ======================================================================
 ```
 
@@ -172,7 +152,16 @@ TOTAL VERIFIED TESTS:                                  160 Tests  [100% PASS - 0
 
 ## 5. ميثاق الأمان والحياد الهندسي (Strict Security Invariants)
 
-1. **حظر الكتابة على الذاكرة:** يُمنع منعاً باتاً استدعاء `WriteProcessMemory` أو `VirtualProtectEx` على العمليات الخارجية لتغيير حالتها البرمجية.
-2. **غياب كود الحقن والتعديل:** المحرك خالٍ تماماً من حقن DLLs، وتوليد Shellcode، وتجاوز آليات مكافحة التلاعب، أو برامج تشغيل النواة المارقة.
-3. **العزل المحلي:** خادم غيدرا يعمل فقط على `127.0.0.1` ويشترط رمز توثيق فريداً لكل جلسة لضمان عدم تعرضه لأي استغلال شبكي.
-4. **السرية والنقاء التوثيقي:** عدم إدراج أي أسماء لبرمجيات تلاعب أو ألعاب تجارية في التوثيق أو سجلات Git أو رسائل الالتزام، مع إبقاء مسار العمل محلياً حتى إتمام المراجعة الكاملة.
+1. **حظر الكتابة على ذاكرة العمليات:** يُمنع منعاً باتاً استدعاء `WriteProcessMemory` أو `VirtualProtectEx` على العمليات الحية؛ يقتصر المسح على `PROCESS_VM_READ | PROCESS_QUERY_INFORMATION` فقط.
+2. **غياب كود الحقن والتعديل:** المحرك خالٍ تماماً من حقن DLLs أو توليد Shellcode أو برامج تشغيل النواة المخصصة.
+3. **العزل المحلي والتوثيق:** خادم غيدرا يرتبط بـ `127.0.0.1` فقط، ويشترط رمز توثيق فريداً (`AUTH_REQUIRED`) للكتابة في قاعدة بيانات غيدرا، ويُبلغ عن صلاحية علامة الدليل المؤقت `cap.tempdir.marker.write`.
+4. **ثبات الملفات المستهدفة وسجلات التدقيق:** أوامر الترقيع والتحديث (`patch`, `patch-binary`, `patch-weights`, `update --yes`) تفرض تهيئة `AuditLogger` بنمط الفشل المغلق (`AUDIT_INIT_FAILED`)، بينما تفصح أوامر القراءة عن أي تدهور عبر `"audit_degraded": true`.
+
+---
+
+## 6. القيود المعروفة وضمانات الأمانة الهندسية (Known Limitations & Integrity Guarantees)
+
+- **صلاحيات ETW الحية على ويندوز:** يتطلب استهلاك مزودات النواة الفعلي عبر `OpenTraceW` و `ProcessTrace` صلاحيات إدارية (Administrator أو Performance Log Users)؛ في الجلسات غير المرفوعة، يتحول المحرك تلقائياً إلى `WEVTAPI` و `CreateToolhelp32Snapshot` ويوثق ذلك صراحة عبر `has_native_etw_events: false` و `event_sources` بدلاً من الادعاء بالتقاط نواة حي.
+- **محدودية تفكيك التعليمات في Crash RCA:** تفكيك نافذة `-32/+48` بايت حول تعليمة العطل يدعم حالياً معمارية `x86`/`x64` عبر Capstone، وقد لا يصادف بداية التعليمة المثلى قبل العطل إذا سبقته تعليمات متغيرة الطول غير محاذاة، لذا تُعرض النتائج كتشخيص مدعوم بالأدلة لا كبرهان حتمي مطلق.
+- **عزل مسارات المسح الذاكري:** تتطلب عمليات مسح القيم (`mem-scan`, `rea_memory_scan`) حفظ الجلسات حصراً داخل مساحة العمل عبر `ExecutionGuard`؛ أي مسار جلسة خارج النطاق يُرفض تلقائياً برمز `OutOfScopeError`.
+- **طبيعة جسر Ghidra غير المتزامنة:** يستخدم الجسر آلية وضع الطلبات في طابور مع استطلاع دوري من داخل غيدرا كل `1.0s`؛ قد يلاحظ استغراقاً بحدود ثانية واحدة قبل ظهور التعليقات أو الهياكل داخل `CodeBrowser`.

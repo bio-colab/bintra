@@ -10,15 +10,18 @@ metadata:
     - rea-safe-binary-patching
     - rea-windows-troubleshooter
     - rea-neural-weight-security
+    - rea-live-runtime-analysis
+    - rea-etw-telemetry
+    - rea-ghidra-integration
 ---
 
 # Reverse Engineer Anything (REA-Neural Master Skill)
 
-`REA-Neural` is an agent-native, next-generation reverse engineering and Windows system forensics framework. It combines deterministic PE disassembly, continuous semantic representations (MIT CSAIL Weight-Space Programming), and fail-closed Reference Monitoring via the **Safety Kernel**.
+`REA-Neural` is an agent-native, next-generation reverse engineering and Windows system forensics framework. It combines deterministic PE disassembly, continuous semantic representations (MIT CSAIL Weight-Space Programming), read-only process telemetry, and fail-closed Reference Monitoring via the **Safety Kernel**.
 
 ---
 
-## 1. The 4 Specialized Sub-Skills
+## 1. The 7 Specialized Sub-Skills
 
 Depending on what the user asks for in natural language, navigate to the specialized sub-skill:
 
@@ -28,6 +31,15 @@ Depending on what the user asks for in natural language, navigate to the special
 | **Surgical Binary Patching** | [`rea-safe-binary-patching`](../rea-safe-binary-patching/SKILL.md) | Safe byte patching, stack frame balance proprioception ($\Delta RSP/RBP$ guard), automated PE checksum recalculation, strict workspace isolation. |
 | **Windows System Forensics** | [`rea-windows-troubleshooter`](../rea-windows-troubleshooter/SKILL.md) | File locks diagnosis via Windows Restart Manager, 0xc0000005 crash & MiniDump (.dmp) inspection, missing DLL/API-Set resolution, PnP driver problem codes (`CM_PROB_*`). |
 | **Weight-Space & Safetensors Security** | [`rea-neural-weight-security`](../rea-neural-weight-security/SKILL.md) | Zero-execution Safetensors auditing, backdoor/trojan outlier neurons ($>4.5\sigma$), spectral effective rank, selective column direction subtraction without training. |
+| **Live Runtime Memory & Crash RCA** | [`rea-live-runtime-analysis`](../rea-live-runtime-analysis/SKILL.md) | Passive VAD mapping, read-only `PROCESS_VM_READ` First/Next scans, depth 1-3 pointer resolution, 4-byte-granularity struct dissection, Crash RCA. |
+| **ETW Telemetry & Causality** | [`rea-etw-telemetry`](../rea-etw-telemetry/SKILL.md) | Native Advapi32 `OpenTraceW`/`ProcessTrace` ETW consumption (elevated), `WEVTAPI` Event Log polling + Toolhelp32 module-delta fallback, temporal crash correlation. |
+| **Ghidra P-Code & Live Bridge** | [`rea-ghidra-integration`](../rea-ghidra-integration/SKILL.md) | 64-D High P-Code vector matching, headless analyzer automation, authenticated localhost JSON-RPC queue+poll bridge (`cap.tempdir.marker.write`, explicit `rva`/`va`). |
+
+**Architecture & Theoretical Reference Guides:**
+- [`weight-space-programming.md`](references/weight-space-programming.md)
+- [`neural-binary-patching.md`](references/neural-binary-patching.md)
+- [`neural-circuit-decompilation.md`](references/neural-circuit-decompilation.md)
+- [`ghidra-bridge-status.md`](references/ghidra-bridge-status.md)
 
 ---
 
@@ -106,4 +118,12 @@ rea-neural dmp-inspect --file <path>
 rea-neural wsp-audit --model <model.safetensors>
 rea-neural patch-weights --source <in> --output <out> --tensor <name> --num-columns 64
 rea-neural sense --hex "55 48 89 e5 90 5d c3"
+rea-neural diagnose --binary <path> [--crash-json <crash.json>] [--ghidra-json <pcode.json>]
+rea-neural vad-inspect --pid <pid> [--address 0x...]
+rea-neural mem-scan --pid <pid> --type float --mode exact --value 100.0 --session-file .\workspace\scan.json
+rea-neural pointer-scan --pid <pid> --target 0x... --max-depth 2
+rea-neural dissect-struct --pid <pid> --address 0x... --size 64
+rea-neural crash-rca --dmp <crash.dmp> [--binary <path>]
+rea-neural etw-capture --session-name REA_Diagnostic_Trace --pid <pid> --duration 2.0
+rea-neural ghidra-bridge --start --port 41718 --no-temp-marker
 ```

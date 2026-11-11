@@ -16,13 +16,13 @@ Use this skill whenever a user reports that a Windows program is crashing, freez
 ## 1. When to Activate This Skill
 
 Activate this skill when the user asks:
-- *"Why is my application / game crashing on launch?"*
+- *"Why is this desktop application crashing on launch?"*
 - *"I am getting error `0xc0000005` (Access Violation). What does it mean and where is it crashing?"*
 - *"This file / DLL is locked and cannot be replaced or deleted. Which process is locking it?"*
 - *"Check this crash dump (`.dmp`) file."*
 - *"Why can't Windows find this DLL or API-Set (`api-ms-win-*`)?"*
 - *"Why is this device driver failing with Code 43, Code 10, or Code 28?"*
-- *"Show me which processes are currently hosting `d3d11.dll` or `steam_api64.dll`."*
+- *"Show me which processes are currently hosting `d3d11.dll` or `app_plugin64.dll`."*
 
 ---
 
@@ -87,12 +87,17 @@ Instead of using brute-force tools, REA-Neural leverages the native **Windows Re
 rea-neural file-locks --file "C:\Program Files\App\resource.dll"
 ```
 
-**Output Telemetry:**
-- `is_actively_executing`: True if running as the main process executable.
-- `is_loaded_as_dll`: True if loaded into process address spaces as a module.
-- `has_restart_manager_handle`: True if an application holds an open file handle.
-- `has_exclusive_lock`: True if locked with exclusive access.
-- `locking_processes`: List of `{process_id, application_name, service_name, is_restartable}`.
+**Output Keys (`usage_breakdown` & `locking_processes`):**
+- `is_locked`, `resource_state`, `usage_classifications`, `locking_processes_count`.
+- Inside `usage_breakdown`: `is_actively_executing`, `is_loaded_as_dll`, `has_restart_manager_handle`, `has_exclusive_lock`.
+- Inside each entry of `locking_processes`: `process_id`, `application_name`, `service_name`, `is_restartable`.
+
+**All 5 Supported `rea_process_resource_audit` Actions:**
+- `find_file_locks` (requires `file_path`)
+- `find_module_holders` (requires `module_query`; CLI: `rea-neural proc-modules --module <dll>`)
+- `process_tree` (full running process inventory and parent-child hierarchy)
+- `service_process_map` (maps running SCM services to host PIDs)
+- `audit_process` (detailed process inspection for `pid`)
 
 ---
 
@@ -133,9 +138,9 @@ rea-neural proc-modules --module d3d12.dll
 rea-neural dmp-inspect --file "C:\path\to\crash.dmp"
 ```
 
-**How to Interpret the Root Cause for the User:**
-- `is_null_pointer_dereference`: The app attempted to read/write address `< 0x10000` (e.g. `[rax+0x18]` where `rax=0`). Tell the user it is an uninitialized pointer or missing null-check.
-- `is_dep_violation`: The CPU attempted to execute machine code from a non-executable page (`PAGE_READWRITE`). Tell the user it was blocked by Data Execution Prevention (DEP).
+**How to Interpret the Root Cause for the User (`exception_info`):**
+- `exception_info.is_null_pointer_dereference`: The app attempted to read/write address `< 0x10000` (e.g. `[rax+0x18]` where `rax=0`). Inspect `access_type` / `operation` and `exception_address`.
+- `exception_info.access_type` (and `operation`): When `0xc0000005` shows `"EXECUTE"` on a non-executable address or unmapped/data page, invoke `rea_crash_rca` (which inspects disassembly, registers, and VAD/protection semantics) to assess DEP or invalid branch faults via `root_cause_classification`.
 
 ---
 
@@ -178,4 +183,24 @@ Resolves required imported DLLs, handles `api-ms-win-*` API-Sets, and verifies i
 rea-neural dev-match --problems-only
 ```
 
-Exposes PnP device instance IDs, active problem codes (`CM_PROB_FAILED_START`, `CM_PROB_CODE_43`), and candidate driver packages in Driver Store.
+Exposes PnP device instance IDs, active problem codes (`CM_PROB_FAILED_START`, `CM_PROB_CODE_43`), and candidate driver packages in Driver Store with `estimated_driver_rank` (`is_cryptographically_verified_whql: false`, heuristic INF match ranking rather than OS catalog signature verification).
+
+---
+
+### Task F: Correlating Failure Dossiers & Deep OS Audits
+
+- **Evidence Correlation (`rea_correlate_failure_evidence` / `diagnose`):**
+  ```powershell
+  # Pass a JSON crash record (--crash-json), NOT a raw .dmp file (use dmp-inspect / crash-rca for .dmp):
+  rea-neural diagnose --binary "C:\path\to\app.exe" [--crash-json .\crash_record.json] [--ghidra-json .\pcode.json]
+  ```
+  Returns `verdict`, `severity`, `epistemic_classification` (`facts`, `observations`, `hypotheses`, `unknowns`), `root_cause_summary`, `binary_mapping`, `evidence_graph`, and `mermaid_diagram`.
+- **Registry, Hardware, Drivers, Services, & Read-Only Catalog Commands:**
+  - `rea_registry_audit` (`reg-audit [--domain ...]`)
+  - `rea_hardware_audit` (`hw-audit [--problems-only]`)
+  - `rea_driver_audit` (`driver-audit`)
+  - `rea_service_audit` (`service-audit`)
+  - `rea_win_catalog_cmd` (`win-cmd [command_id]`)
+
+> [!NOTE]
+> **Platform Caveat:** All Windows NT introspection engines degrade fail-closed on non-Windows hosts (Linux/macOS CI), returning `status: "not_applicable"` with clear explanatory notes rather than raising platform errors.

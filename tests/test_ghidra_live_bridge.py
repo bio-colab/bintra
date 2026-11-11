@@ -415,6 +415,110 @@ class TestGhidraLiveBridge(unittest.TestCase):
                 "arguments": {"action": "stop"}
             })
 
+    def test_multithreaded_concurrent_ping_under_stalled_connections(self):
+        """Verifies bridge handles concurrent pings without blocking on stalled partial clients."""
+        import socket
+        server = GhidraLiveBridgeServer(port=0, auth_token="tok-conc-1")
+        server.start(publish_temp_marker=False)
+        stalled_sockets = []
+        try:
+            for _ in range(5):
+                sock = socket.create_connection(("127.0.0.1", server.port), timeout=2.0)
+                sock.sendall(b"POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 100\r\n\r\npartial")
+                stalled_sockets.append(sock)
+
+            client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{server.port}", auth_token="tok-conc-1")
+            t0 = time.perf_counter()
+            ping_res = client.ping()
+            elapsed = time.perf_counter() - t0
+            self.assertEqual(ping_res["status"], "ok")
+            self.assertLess(elapsed, 0.75)
+        finally:
+            for s in stalled_sockets:
+                try:
+                    s.close()
+                except Exception:
+                    pass
+            server.stop()
+
+    def test_payload_size_limit_returns_413(self):
+        """Verifies POST payloads claiming Content-Length > MAX_BRIDGE_BODY_BYTES fail fast with HTTP 413."""
+        import http.client
+        server = GhidraLiveBridgeServer(port=0, auth_token="tok-limit-1")
+        server.start(publish_temp_marker=False)
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", server.port, timeout=3.0)
+            conn.putrequest("POST", "/")
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", str(5 * 1024 * 1024))
+            conn.endheaders()
+            resp = conn.getresponse()
+            self.assertEqual(resp.status, 413)
+            body = json.loads(resp.read().decode("utf-8"))
+            self.assertEqual(body["error"]["code"], -32002)
+            conn.close()
+        finally:
+            server.stop()
+
+    def test_command_queue_bounded_and_overflow_tracked(self):
+        """Verifies bridge command queue enforces max size and tracks evicted commands cleanly."""
+        server = GhidraLiveBridgeServer(port=0, auth_token="tok-q-1")
+        server.start(publish_temp_marker=False)
+        try:
+            for i in range(server._max_queue_size + 50):
+                server.queue_command("SET_PROGRAM_NOTE", {"title": f"N_{i}", "content": "x"})
+            st = server.dispatch_rpc_method("get_status", {})
+            self.assertEqual(st["queued_commands_count"], server._max_queue_size)
+            self.assertEqual(st["queue_overflow_count"], 50)
+        finally:
+            server.stop()
+
+    def test_tempdir_marker_mediation_and_address_space_metadata(self):
+        """Verifies tempdir discovery marker is workspace-isolated when opted out and explicitly audited when enabled."""
+        from security import AuditLogger
+        temp_marker = os.path.join(tempfile.gettempdir(), ".rea_bridge.json")
+        if os.path.exists(temp_marker):
+            os.remove(temp_marker)
+
+        server = GhidraLiveBridgeServer(port=0, auth_token="tok-med-1")
+        st_no_tmp = server.start(publish_temp_marker=False)
+        try:
+            self.assertFalse(st_no_tmp["tempdir_marker_published"])
+            self.assertFalse(os.path.exists(temp_marker))
+        finally:
+            server.stop()
+
+        server2 = GhidraLiveBridgeServer(port=0, auth_token="tok-med-2")
+        st_with_tmp = server2.start(publish_temp_marker=True)
+        try:
+            self.assertTrue(st_with_tmp["tempdir_marker_published"])
+            self.assertTrue(os.path.exists(temp_marker))
+            with AuditLogger._lock:
+                entries = list(AuditLogger._journal)[-20:]
+            self.assertTrue(
+                any(
+                    e.get("requested_capability") == "cap.tempdir.marker.write"
+                    and e.get("operation") == "write_tempdir_discovery_marker"
+                    for e in entries
+                )
+            )
+
+            # Verify address_space provenance on injections
+            server2.inject_structure_dissection({
+                "base_address": "0x0000018A4B100000",
+                "structure_name": "HeapEntity",
+                "fields": [],
+                "heuristic": True,
+            })
+            server2.inject_crash_rca({"fault_rva": "0x1234", "exception_name": "AV"})
+            cmds = server2.dispatch_rpc_method("ghidra.poll_commands", {})["commands"]
+            apply_cmd = [c for c in cmds if c["action"] == "APPLY_DATA_STRUCTURE"][0]
+            self.assertEqual(apply_cmd["details"]["address_space"], "va")
+            rca_cmd = [c for c in cmds if c["action"] == "SET_PLATE_COMMENT"][0]
+            self.assertEqual(rca_cmd["details"]["address_space"], "rva")
+        finally:
+            server2.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

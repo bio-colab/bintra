@@ -2,7 +2,7 @@
 
 ## Overview
 REA-Neural provides two complementary integration architectures with Ghidra (target 12.1.x / 11.x):
-1. **Live Bidirectional IPC Bridge (`ghidra_live_bridge.py` & `ReaLiveBridgeService.py`):** Real-time, authenticated localhost JSON-RPC 2.0 communication daemon at `127.0.0.1:41718`. Continuously injects Crash RCA root-cause attributions, VAD memory maps, reconstructed C data structures, multi-level pointer scan paths, and ETW temporal causality timelines directly into an open Ghidra session.
+1. **Asynchronous Localhost IPC Bridge (`ghidra_live_bridge.py` & `ReaLiveBridgeService.py`):** Authenticated localhost JSON-RPC 2.0 server at `127.0.0.1:41718` (`ThreadingMixIn` concurrent HTTP, 5.0s socket timeout, 2 MiB body limit returning HTTP 413, bounded command queue capped at 2000 entries with `queue_overflow_count`). Enqueues Crash RCA attributions, VAD memory maps, reconstructed C data structures (`address_space: "va"`), multi-level pointer scan paths (`address_space: "va"`), and ETW timelines for atomic commit when `ReaLiveBridgeService.py` polls `ghidra.poll_commands` inside Ghidra (~1.0s loop) using `currentProgram.startTransaction(...)`. Workspace markers use confined `.rea_bridge.json`, while optional system temp markers are mediated via `Capability.TEMPDIR_MARKER_WRITE` (disable with `--no-temp-marker` or `"publish_temp_marker": false`).
 2. **File-Exchange + Headless Orchestration (`ReaNeuralGhidraBridge.java` & `cli.py ghidra-headless`):** Automates offline batch deobfuscation, High P-Code extraction, and mutation plan generation via Ghidra's `analyzeHeadless.bat`.
 
 ---
@@ -53,13 +53,13 @@ sequenceDiagram
 
 | Component | File Path | Description |
 |:---|:---|:---|
-| **Live Bridge Daemon** | [`src/ghidra_live_bridge.py`](file:///D:/rea-neural/src/ghidra_live_bridge.py) | Localhost JSON-RPC 2.0 bridge server and client with token authentication and auto-discovery. |
-| **Ghidra Live Service** | [`ghidra_scripts/ReaLiveBridgeService.py`](file:///D:/rea-neural/ghidra_scripts/ReaLiveBridgeService.py) | Python/PyGhidra background script polling the bridge and committing atomic Ghidra transactions. |
-| **Native Java Bridge** | [`ghidra_scripts/ReaNeuralGhidraBridge.java`](file:///D:/rea-neural/ghidra_scripts/ReaNeuralGhidraBridge.java) | Zero-external-dependency Java `GhidraScript` for offline P-Code extraction and batch mutation. |
-| **Python / PyGhidra Bridge** | [`ghidra_scripts/rea_extract_pcode.py`](file:///D:/rea-neural/ghidra_scripts/rea_extract_pcode.py) | Python variant for Jython / PyGhidra headless environments. |
+| **Live Bridge Daemon** | [`src/ghidra_live_bridge.py`](../../../src/ghidra_live_bridge.py) | Multithreaded localhost JSON-RPC 2.0 bridge server and client with token authentication and mediated discovery markers. |
+| **Ghidra Live Service** | [`ghidra_scripts/ReaLiveBridgeService.py`](../../../ghidra_scripts/ReaLiveBridgeService.py) | Python/PyGhidra background script polling the bridge (~1.0s) and committing atomic Ghidra transactions with explicit `rva`/`va` resolution. |
+| **Native Java Bridge** | [`ghidra_scripts/ReaNeuralGhidraBridge.java`](../../../ghidra_scripts/ReaNeuralGhidraBridge.java) | Zero-external-dependency Java `GhidraScript` for offline P-Code extraction and batch mutation. |
+| **Python / PyGhidra Bridge** | [`ghidra_scripts/rea_extract_pcode.py`](../../../ghidra_scripts/rea_extract_pcode.py) | Python variant for Jython / PyGhidra headless environments. |
 | **CLI Analysis Engine** | `python src/cli.py ghidra-analyze` | Batch-processes exported Ghidra JSON files, runs algebraic deobfuscation, and outputs mutation plans. |
 | **Headless CLI Orchestrator** | `python src/cli.py ghidra-headless` | Wraps Ghidra's `analyzeHeadless.bat` into a single, automated REA command for Windows. |
-| **Bridge CLI Controller** | `python src/cli.py ghidra-bridge` | Manages bridge daemon (`--start`, `--daemon`, `--stop`, `--status`) and diagnostic injection. |
+| **Bridge CLI Controller** | `python src/cli.py ghidra-bridge` | Manages bridge daemon (`--start`, `--daemon`, `--stop`, `--status`, `--no-temp-marker`) and queued diagnostic injections. |
 
 ---
 

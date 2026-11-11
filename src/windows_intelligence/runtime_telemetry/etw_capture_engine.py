@@ -14,7 +14,7 @@ import ctypes
 import threading
 from ctypes import wintypes
 from typing import Dict, Any, List, Optional, Tuple, Callable
-from collections import deque
+from collections import deque, OrderedDict
 
 from security.execution_guard import ExecutionGuard
 from security.capability_registry import Capability
@@ -43,7 +43,7 @@ KNOWN_PROVIDER_GUIDS = {
 
 
 class EtwEventRecord:
-    """Represents a discrete diagnostic event captured from an active ETW stream."""
+    """Represents a discrete diagnostic event captured from ETW, EventLog, module deltas, or manual injection."""
 
     def __init__(
         self,
@@ -54,7 +54,8 @@ class EtwEventRecord:
         tid: int,
         event_type: str,
         opcode: int = 0,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
+        source: str = "synthetic_manual",
     ):
         self.timestamp = timestamp
         self.provider_name = provider_name
@@ -64,6 +65,7 @@ class EtwEventRecord:
         self.event_type = event_type
         self.opcode = opcode
         self.details = details or {}
+        self.source = source
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -75,6 +77,7 @@ class EtwEventRecord:
             "tid": self.tid,
             "event_type": self.event_type,
             "opcode": self.opcode,
+            "source": self.source,
             "details": self.details
         }
 
@@ -100,7 +103,12 @@ class EtwLiveCaptureSession:
         self.status_description = "INITIALIZED"
         self.start_time: Optional[float] = None
         self._owns_session = False
+        self._native_consumer_active = False
+        self._native_trace_handle: Optional[int] = None
+        self._native_consumer_thread: Optional[threading.Thread] = None
+        self._native_callback_ref = None
         self._consumer_thread: Optional[threading.Thread] = None
+        self._consumer_errors: deque = deque(maxlen=25)
         self._stop_event = threading.Event()
 
     def start_session(self, providers: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -170,18 +178,24 @@ class EtwLiveCaptureSession:
                     if self._enable_provider_native(p_name):
                         enabled.append(p_name)
 
-                # Start background event consumer
+                # Start background event consumer (attaches OpenTraceW/ProcessTrace when session owned)
                 self._start_event_consumer()
+                native_active = bool(self._native_consumer_active)
+                self.status_description = "NATIVE_ETW_ACTIVE" if native_active else "ACTIVE_SESSION_EVENTLOG_POLLING"
 
                 return {
                     "status": "success",
                     "session_name": self.session_name,
-                    "mode": "WIN32_SESSION_EVENTLOG_POLLING",
+                    "mode": "NATIVE_REALTIME_ETW" if native_active else "WIN32_SESSION_EVENTLOG_POLLING",
                     "is_simulated": False,
-                    "source": "live_win32_session_with_eventlog_polling",
-                    "etw_native_consumer_active": False,
-                    "event_consumption_backend": "WEVTAPI_EVENT_LOG_POLLING",
-                    "consumer_note": "Trace session opened via StartTraceW; background consumer polls Event Log channels rather than native OpenTraceW/ProcessTrace callbacks.",
+                    "source": "live_win32_etw_native" if native_active else "live_win32_session_with_eventlog_polling",
+                    "etw_native_consumer_active": native_active,
+                    "event_consumption_backend": "ADVAPI32_OPENTRACE_PROCESSTRACE+WEVTAPI" if native_active else "WEVTAPI_EVENT_LOG_POLLING",
+                    "consumer_note": (
+                        "Trace session opened via StartTraceW and consuming real-time EVENT_RECORD frames via OpenTraceW/ProcessTrace."
+                        if native_active else
+                        "Trace session opened via StartTraceW; OpenTraceW unavailable, polling Event Log / module deltas."
+                    ),
                     "enabled_providers": enabled,
                     "target_pid": self.target_pid
                 }
@@ -270,38 +284,263 @@ class EtwLiveCaptureSession:
         except Exception:
             return False
 
+    @staticmethod
+    def _classify_event_log_record(channel: str, ev_id: int, default_level: str) -> str:
+        """Maps Windows Event Log channel + Event ID to canonical telemetry category without branch shadowing."""
+        if channel == "System" and ev_id in (41, 1001):
+            return "KERNEL_POWER_OR_BUGCHECK"
+        if ev_id == 1000:
+            return "APPLICATION_ERROR"
+        if ev_id == 1001:
+            return "WER_REPORT"
+        if ev_id == 1002:
+            return "APPLICATION_HANG"
+        if ev_id in (10000, 10001):
+            return "RESTART_MANAGER_LOCK"
+        return default_level or "INFO"
+
+    def _start_native_etw_consumer(self) -> bool:
+        """
+        Attaches a genuine Win32 OpenTraceW / ProcessTrace EVENT_RECORD consumer
+        when the session owns an active kernel ETW trace session.
+        """
+        if os.name != "nt" or not self._owns_session:
+            return False
+        try:
+            advapi32 = ctypes.windll.advapi32
+            ole32 = ctypes.windll.ole32
+
+            class _GUID(ctypes.Structure):
+                _fields_ = [
+                    ("Data1", wintypes.DWORD),
+                    ("Data2", wintypes.WORD),
+                    ("Data3", wintypes.WORD),
+                    ("Data4", ctypes.c_ubyte * 8),
+                ]
+
+            class _SYSTEMTIME(ctypes.Structure):
+                _fields_ = [
+                    ("wYear", wintypes.WORD), ("wMonth", wintypes.WORD), ("wDayOfWeek", wintypes.WORD),
+                    ("wDay", wintypes.WORD), ("wHour", wintypes.WORD), ("wMinute", wintypes.WORD),
+                    ("wSecond", wintypes.WORD), ("wMilliseconds", wintypes.WORD),
+                ]
+
+            class _TZ_INFO(ctypes.Structure):
+                _fields_ = [
+                    ("Bias", wintypes.LONG), ("StandardName", wintypes.WCHAR * 32), ("StandardDate", _SYSTEMTIME),
+                    ("StandardBias", wintypes.LONG), ("DaylightName", wintypes.WCHAR * 32),
+                    ("DaylightDate", _SYSTEMTIME), ("DaylightBias", wintypes.LONG),
+                ]
+
+            class _ET_HDR(ctypes.Structure):
+                _fields_ = [
+                    ("Size", wintypes.USHORT), ("HeaderType", ctypes.c_ubyte), ("MarkerFlags", ctypes.c_ubyte),
+                    ("Version", ctypes.c_ubyte * 4), ("ThreadId", wintypes.ULONG), ("ProcessId", wintypes.ULONG),
+                    ("TimeStamp", ctypes.c_int64), ("Guid", _GUID), ("ClientContext", wintypes.ULONG),
+                    ("Flags", wintypes.ULONG),
+                ]
+
+            class _BUF_CTX(ctypes.Structure):
+                _fields_ = [("ProcessorNumber", ctypes.c_ubyte), ("Alignment", ctypes.c_ubyte), ("LoggerId", wintypes.USHORT)]
+
+            class _ET(ctypes.Structure):
+                _fields_ = [
+                    ("Header", _ET_HDR), ("InstanceId", wintypes.ULONG), ("ParentInstanceId", wintypes.ULONG),
+                    ("ParentGuid", _GUID), ("MofData", ctypes.c_void_p), ("MofLength", wintypes.ULONG),
+                    ("BufferContext", _BUF_CTX),
+                ]
+
+            class _TL_HDR(ctypes.Structure):
+                _fields_ = [
+                    ("BufferSize", wintypes.ULONG), ("Version", wintypes.ULONG), ("ProviderVersion", wintypes.ULONG),
+                    ("NumberOfProcessors", wintypes.ULONG), ("EndTime", ctypes.c_int64), ("TimerResolution", wintypes.ULONG),
+                    ("MaximumFileSize", wintypes.ULONG), ("LogFileMode", wintypes.ULONG), ("BuffersWritten", wintypes.ULONG),
+                    ("LogInstanceGuid", _GUID), ("LoggerName", wintypes.LPWSTR), ("LogFileName", wintypes.LPWSTR),
+                    ("TimeZone", _TZ_INFO), ("BootTime", ctypes.c_int64), ("PerfFreq", ctypes.c_int64),
+                    ("StartTime", ctypes.c_int64), ("ReservedFlags", wintypes.ULONG), ("BuffersLost", wintypes.ULONG),
+                ]
+
+            class _EVENT_TRACE_LOGFILEW(ctypes.Structure):
+                _fields_ = [
+                    ("LogFileName", wintypes.LPWSTR), ("LoggerName", wintypes.LPWSTR), ("CurrentTime", ctypes.c_int64),
+                    ("BuffersRead", wintypes.ULONG), ("ProcessTraceMode", wintypes.ULONG),
+                    ("CurrentEvent", _ET), ("LogfileHeader", _TL_HDR),
+                    ("BufferCallback", ctypes.c_void_p), ("BufferSize", wintypes.ULONG),
+                    ("Filled", wintypes.ULONG), ("EventsLost", wintypes.ULONG),
+                    ("EventRecordCallback", ctypes.c_void_p), ("IsKernelTrace", wintypes.ULONG),
+                    ("Context", ctypes.c_void_p),
+                ]
+
+            class _EVENT_DESCRIPTOR(ctypes.Structure):
+                _fields_ = [
+                    ("Id", wintypes.USHORT), ("Version", ctypes.c_ubyte), ("Channel", ctypes.c_ubyte),
+                    ("Level", ctypes.c_ubyte), ("Opcode", ctypes.c_ubyte), ("Task", wintypes.USHORT),
+                    ("Keyword", ctypes.c_uint64),
+                ]
+
+            class _EVENT_HEADER(ctypes.Structure):
+                _fields_ = [
+                    ("Size", wintypes.USHORT), ("HeaderType", wintypes.USHORT), ("Flags", wintypes.USHORT),
+                    ("EventProperty", wintypes.USHORT), ("ThreadId", wintypes.ULONG), ("ProcessId", wintypes.ULONG),
+                    ("TimeStamp", ctypes.c_int64), ("ProviderId", _GUID),
+                    ("EventDescriptor", _EVENT_DESCRIPTOR), ("ProcessorTime", ctypes.c_uint64),
+                    ("ActivityId", _GUID),
+                ]
+
+            class _EVENT_RECORD(ctypes.Structure):
+                _fields_ = [
+                    ("EventHeader", _EVENT_HEADER), ("BufferContext", _BUF_CTX),
+                    ("ExtendedDataCount", wintypes.USHORT), ("UserDataLength", wintypes.USHORT),
+                    ("ExtendedData", ctypes.c_void_p), ("UserData", ctypes.c_void_p),
+                    ("UserContext", ctypes.c_void_p),
+                ]
+
+            # Build normalized GUID -> provider name lookup map
+            guid_to_name: Dict[Tuple[int, int, int, Tuple[int, ...]], str] = {}
+            for p_name, g_str in KNOWN_PROVIDER_GUIDS.items():
+                g = _GUID()
+                if ole32.CLSIDFromString(ctypes.c_wchar_p(g_str), ctypes.byref(g)) == 0:
+                    guid_to_name[(g.Data1, g.Data2, g.Data3, tuple(g.Data4))] = p_name
+
+            def _on_event_record(rec_ptr):
+                if self._stop_event.is_set() or not rec_ptr:
+                    return
+                try:
+                    hdr = rec_ptr.contents.EventHeader
+                    ev_pid = int(hdr.ProcessId)
+                    ev_tid = int(hdr.ThreadId)
+                    if self.target_pid is not None and ev_pid != self.target_pid:
+                        return
+                    ev_id = int(hdr.EventDescriptor.Id)
+                    opcode = int(hdr.EventDescriptor.Opcode)
+                    g = hdr.ProviderId
+                    p_name = guid_to_name.get(
+                        (g.Data1, g.Data2, g.Data3, tuple(g.Data4)),
+                        f"{{{g.Data1:08X}-{g.Data2:04X}-{g.Data3:04X}}}",
+                    )
+                    # Convert FILETIME (100ns since 1601) when valid, otherwise wall-clock epoch
+                    raw_ts = int(hdr.TimeStamp)
+                    if 125_000_000_000_000_000 <= raw_ts <= 160_000_000_000_000_000:
+                        ts = (raw_ts - 116_444_736_000_000_000) / 10_000_000.0
+                    else:
+                        ts = time.time()
+
+                    ev_type = f"ETW_EVENT_{ev_id}"
+                    if p_name == "Microsoft-Windows-Kernel-Process":
+                        ev_type = {
+                            1: "PROCESS_START",
+                            2: "PROCESS_STOP",
+                            3: "THREAD_START",
+                            4: "THREAD_STOP",
+                            5: "IMAGE_LOAD",
+                            6: "IMAGE_UNLOAD",
+                        }.get(ev_id, f"KERNEL_PROCESS_{ev_id}")
+                    elif p_name == "Microsoft-Windows-Kernel-Memory":
+                        ev_type = "VIRTUAL_FREE" if (ev_id in (2, 10) or opcode == 2) else "VIRTUAL_ALLOC"
+                    elif p_name in ("Microsoft-Windows-Direct3D11", "Microsoft-Windows-DXGI"):
+                        if hdr.EventDescriptor.Level <= 2:
+                            ev_type = "DEVICE_REMOVED" if ev_id in (10, 11, 20) else "ERROR"
+
+                    self.record_event(EtwEventRecord(
+                        timestamp=ts,
+                        provider_name=p_name,
+                        event_id=ev_id,
+                        pid=ev_pid,
+                        tid=ev_tid,
+                        event_type=ev_type,
+                        opcode=opcode,
+                        details={"native_etw": True, "user_data_length": int(rec_ptr.contents.UserDataLength)},
+                        source="etw_native",
+                    ))
+                except Exception as cb_err:
+                    self._consumer_errors.append(f"etw_callback_error: {cb_err}")
+
+            CB_TYPE = ctypes.WINFUNCTYPE(None, ctypes.POINTER(_EVENT_RECORD))
+            cb_inst = CB_TYPE(_on_event_record)
+
+            logfile = _EVENT_TRACE_LOGFILEW()
+            logfile.LoggerName = ctypes.c_wchar_p(self.session_name)
+            # PROCESS_TRACE_MODE_REAL_TIME (0x100) | PROCESS_TRACE_MODE_EVENT_RECORD (0x10000000)
+            logfile.ProcessTraceMode = 0x00000100 | 0x10000000
+            logfile.EventRecordCallback = ctypes.cast(cb_inst, ctypes.c_void_p)
+
+            advapi32.OpenTraceW.argtypes = [ctypes.POINTER(_EVENT_TRACE_LOGFILEW)]
+            advapi32.OpenTraceW.restype = ctypes.c_uint64
+            advapi32.ProcessTrace.argtypes = [
+                ctypes.POINTER(ctypes.c_uint64), wintypes.ULONG, ctypes.c_void_p, ctypes.c_void_p
+            ]
+            advapi32.ProcessTrace.restype = wintypes.ULONG
+
+            h_trace = int(advapi32.OpenTraceW(ctypes.byref(logfile)))
+            INVALID_HANDLE = 0xFFFFFFFFFFFFFFFF
+            if h_trace == 0 or h_trace == INVALID_HANDLE:
+                return False
+
+            self._native_callback_ref = cb_inst
+            self._native_trace_handle = h_trace
+            self._native_consumer_active = True
+
+            def _pump_process_trace():
+                try:
+                    arr = (ctypes.c_uint64 * 1)(h_trace)
+                    advapi32.ProcessTrace(arr, 1, None, None)
+                except Exception as pt_err:
+                    self._consumer_errors.append(f"ProcessTrace error: {pt_err}")
+
+            self._native_consumer_thread = threading.Thread(target=_pump_process_trace, daemon=True)
+            self._native_consumer_thread.start()
+            return True
+        except Exception as err:
+            self._consumer_errors.append(f"OpenTraceW setup failed: {err}")
+            return False
+
     def _start_event_consumer(self) -> None:
-        """Starts asynchronous thread consuming system and diagnostic events."""
+        """Starts native OpenTraceW/ProcessTrace consumer (when elevated) plus EventLog & module delta monitor."""
+        if os.name == "nt" and self._owns_session:
+            self._start_native_etw_consumer()
+
         def _consumer_loop():
             from .event_log_collector import EventLogCollector
-            seen_events = set()
+            seen_events: "OrderedDict[tuple, bool]" = OrderedDict()
+            MAX_SEEN = 5000
+            known_modules: Optional[Dict[str, str]] = None
+
+            if self.target_pid and os.name == "nt":
+                try:
+                    from windows_intelligence.process_intelligence import ModuleInventory
+                    mod_res = ModuleInventory.get_modules_for_process(self.target_pid)
+                    known_modules = {
+                        str(m.get("module_name", "")).lower(): str(m.get("base_address", "0x0"))
+                        for m in mod_res.get("modules", [])
+                    }
+                except Exception as mod_err:
+                    self._consumer_errors.append(f"Module baseline failed: {mod_err}")
+
             while not self._stop_event.is_set():
                 try:
                     for channel in ("Application", "System"):
                         evs = EventLogCollector.query_events(channel, limit=15)
                         for ev in evs:
                             ev_pid = ev.get("process_id", 0)
-                            key = (ev.get("provider_name"), ev.get("event_id"), ev.get("time_created"), ev_pid, ev.get("thread_id"))
+                            key = (
+                                ev.get("provider_name"),
+                                ev.get("event_id"),
+                                ev.get("time_created"),
+                                ev_pid,
+                                ev.get("thread_id"),
+                            )
                             if key in seen_events:
+                                seen_events.move_to_end(key)
                                 continue
-                            seen_events.add(key)
-                            if len(seen_events) > 5000:
-                                seen_events.clear()
+                            seen_events[key] = True
+                            while len(seen_events) > MAX_SEEN:
+                                seen_events.popitem(last=False)
 
-                            if self.target_pid is None or ev_pid == 0 or ev_pid == self.target_pid:
+                            # Exclude PID=0 global EventLog noise when monitoring a specific PID
+                            admit = (self.target_pid is None) or (ev_pid == self.target_pid)
+                            if admit:
                                 ev_id = ev.get("event_id", 0)
-                                ev_type = ev.get("level", "INFO")
-                                if ev_id == 1000:
-                                    ev_type = "APPLICATION_ERROR"
-                                elif ev_id == 1001:
-                                    ev_type = "WER_REPORT"
-                                elif ev_id == 1002:
-                                    ev_type = "APPLICATION_HANG"
-                                elif ev_id in (10000, 10001):
-                                    ev_type = "RESTART_MANAGER_LOCK"
-                                elif ev_id in (41, 1001) and channel == "System":
-                                    ev_type = "KERNEL_POWER_OR_BUGCHECK"
-
+                                ev_type = self._classify_event_log_record(channel, ev_id, ev.get("level", "INFO"))
                                 rec = EtwEventRecord(
                                     timestamp=ev.get("time_created", time.time()),
                                     provider_name=ev.get("provider_name", channel),
@@ -309,30 +548,72 @@ class EtwLiveCaptureSession:
                                     pid=ev_pid,
                                     tid=ev.get("thread_id", 0),
                                     event_type=ev_type,
-                                    details={"message": ev.get("message", "")[:120], **ev.get("details", {})}
+                                    details={"message": ev.get("message", "")[:120], **ev.get("details", {})},
+                                    source="event_log_polling",
                                 )
                                 self.record_event(rec)
-                except Exception:
-                    pass
-                time.sleep(0.5)
+
+                    # Live Toolhelp32 module delta tracking for targeted PID (non-admin IMAGE_LOAD producer)
+                    if known_modules is not None and self.target_pid and os.name == "nt":
+                        from windows_intelligence.process_intelligence import ModuleInventory
+                        mod_res = ModuleInventory.get_modules_for_process(self.target_pid)
+                        current_mods = {
+                            str(m.get("module_name", "")).lower(): (str(m.get("module_name", "")), str(m.get("base_address", "0x0")))
+                            for m in mod_res.get("modules", [])
+                        }
+                        now_t = time.time()
+                        for low_name, (orig_name, base_addr) in current_mods.items():
+                            if low_name not in known_modules:
+                                known_modules[low_name] = base_addr
+                                self.record_event(EtwEventRecord(
+                                    timestamp=now_t,
+                                    provider_name="REA-Toolhelp32-ModuleMonitor",
+                                    event_id=5,
+                                    pid=self.target_pid,
+                                    tid=0,
+                                    event_type="IMAGE_LOAD",
+                                    details={"image_name": orig_name, "base_address": base_addr},
+                                    source="toolhelp_module_delta",
+                                ))
+                except Exception as exc:
+                    self._consumer_errors.append(f"consumer_loop error: {exc}")
+                self._stop_event.wait(0.5)
 
         self._consumer_thread = threading.Thread(target=_consumer_loop, daemon=True)
         self._consumer_thread.start()
 
     def stop_session(self) -> Dict[str, Any]:
-        """Stops the real-time ETW trace session and releases kernel handles."""
+        """Stops the real-time ETW trace session and releases kernel and consumer handles."""
         self.is_running = False
         self._stop_event.set()
         duration = round(time.time() - (self.start_time or time.time()), 3)
 
+        if os.name == "nt" and self._native_trace_handle:
+            try:
+                advapi32 = ctypes.windll.advapi32
+                advapi32.CloseTrace.argtypes = [ctypes.c_uint64]
+                advapi32.CloseTrace.restype = wintypes.ULONG
+                advapi32.CloseTrace(self._native_trace_handle)
+            except Exception as err:
+                self._consumer_errors.append(f"CloseTrace error: {err}")
+            finally:
+                self._native_trace_handle = None
+                self._native_consumer_active = False
+
         if os.name == "nt":
             self._stop_session_native()
+
+        for t in (self._native_consumer_thread, self._consumer_thread):
+            if t and t.is_alive():
+                t.join(timeout=1.0)
 
         return {
             "status": "stopped",
             "session_name": self.session_name,
             "duration_seconds": duration,
-            "captured_events_buffered": len(self.events_buffer)
+            "captured_events_buffered": len(self.events_buffer),
+            "consumer_errors_count": len(self._consumer_errors),
+            "consumer_errors": list(self._consumer_errors),
         }
 
     def _register_atexit_cleanup(self) -> None:
@@ -380,12 +661,25 @@ class EtwLiveCaptureSession:
             return
         self.events_buffer.append(event)
 
-    def get_timeline(self, pid: Optional[int] = None, limit: int = 100) -> List[Dict[str, Any]]:
-        """Extracts ordered chronological event timeline from the buffer."""
-        target = pid or self.target_pid
+    def get_timeline(
+        self,
+        pid: Optional[int] = None,
+        limit: int = 100,
+        include_global: Optional[bool] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Extracts ordered chronological event timeline from the buffer.
+        When an explicit pid is passed, pid==0 global events are excluded by default
+        (set include_global=True to include them).
+        """
+        target = pid if pid is not None else self.target_pid
         events = list(self.events_buffer)
-        if target:
-            events = [e for e in events if e.pid == target or e.pid == 0]
+        if target is not None:
+            allow_zero = include_global if include_global is not None else (pid is None)
+            if allow_zero:
+                events = [e for e in events if e.pid == target or e.pid == 0]
+            else:
+                events = [e for e in events if e.pid == target]
         # Sort by timestamp
         events.sort(key=lambda x: x.timestamp)
         return [e.to_dict() for e in events[-limit:]]
@@ -482,13 +776,30 @@ class EtwTimelineCorrelator:
                 "description": f"{len(gpu_resets)} Graphics/DirectX driver reset event(s) detected."
             })
 
-        # 6. Overall verdict
+        # 6. Look for Kernel-Power / BugCheck events (System ID 41/1001)
+        bugchecks = [e for e in timeline_events if e.get("event_type") == "KERNEL_POWER_OR_BUGCHECK"]
+        if bugchecks:
+            findings.append({
+                "category": "KERNEL_POWER_OR_BUGCHECK",
+                "significance": "CRITICAL",
+                "description": f"{len(bugchecks)} System BugCheck/Kernel-Power unexpected termination event(s) detected."
+            })
+
+        # 7. Event provenance accounting
+        event_sources: Dict[str, int] = {}
+        for ev in timeline_events:
+            src = ev.get("source", "unknown")
+            event_sources[src] = event_sources.get(src, 0) + 1
+
+        # 8. Overall verdict
         if any(f["category"] == "MEMORY_DEALLOCATION" for f in findings):
             verdict = "TEMPORAL_MEMORY_CHURN_DETECTED"
         elif recent_dll_loads:
             verdict = "LATE_MODULE_INJECTION_DETECTED"
         elif gpu_resets:
             verdict = "GRAPHICS_PIPELINE_RESET_DETECTED"
+        elif bugchecks:
+            verdict = "KERNEL_BUGCHECK_RECORDED"
         elif rm_events:
             verdict = "FILE_LOCK_CONTENTION_DETECTED"
         elif prev_faults:
@@ -498,6 +809,8 @@ class EtwTimelineCorrelator:
 
         return {
             "events_count": len(timeline_events),
+            "event_sources": event_sources,
+            "has_native_etw_events": event_sources.get("etw_native", 0) > 0,
             "reference_crash_timestamp": ref_time,
             "temporal_verdict": verdict,
             "causality_findings": findings,

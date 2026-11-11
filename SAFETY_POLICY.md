@@ -21,7 +21,10 @@
 2. **Default Deny:** Any operation, path, registry key, process handle, or command flag not explicitly recognized and whitelisted is rejected.
 3. **Target Read-Only Scope:** The target binary, its directory, system binaries, running processes, PnP devices, and SCM services are strictly immutable.
 4. **Workspace-Only Controlled Writes:** Writes are strictly quarantined to designated REA workspace paths (reports, temporary session scratchpads). Analysis outputs must never be written into the target executable's directory.
-5. **Complete Mediation & Audit:** Every OS interaction is inspected, evaluated, and recorded by the central Safety Kernel (`ExecutionGuard`). Both permitted and denied operations produce tamper-evident audit logs.
+5. **Complete Mediation & Audit:** Every OS interaction is inspected, evaluated, and recorded by the central Safety Kernel (`ExecutionGuard`). Both permitted and denied operations produce hash-chained, tamper-evident audit logs.
+   - **Strict Mutation Fail-Closed:** Mutating CLI paths (`patch-binary`, `patch-weights`, confirmed `update --yes`) refuse execution (`AUDIT_INIT_FAILED`) if the persistent audit log cannot be initialized, verified, or written.
+   - **Explicit Degradation Telemetry:** Read-only diagnostic runs surface audit persistence failures via `"audit_degraded": true` and `stderr` warnings rather than failing silently.
+   - **Scoped Operational Exceptions:** Explicitly documented exceptions outside the catalog/workspace envelope are self-update (`update --yes`), `ghidra-bridge --daemon` launch + `Capability.TEMPDIR_MARKER_WRITE` marker (opt-out via `--no-temp-marker`), `ghidra-headless`, `~/.rea_neural/logs/audit.jsonl`, and non-writing Restart Manager handle probes; none weaken target binary immutability (see `SECURITY.md`).
 
 ---
 
@@ -30,9 +33,9 @@
 | Operation Category | Permitted Access | Strictly Forbidden |
 |:---|:---|:---|
 | **File Access (Target)** | `GENERIC_READ`, non-exclusive sharing (`FILE_SHARE_READ \| FILE_SHARE_WRITE \| FILE_SHARE_DELETE`) | `GENERIC_WRITE`, file truncation, file deletion, file replacement |
-| **File Access (Workspace)** | `GENERIC_WRITE` within verified `workspace_dir` | Writes outside workspace; writes adjacent to target binary |
+| **File Access (Workspace)** | `GENERIC_WRITE` within verified `workspace_dir` (plus mediated `cap.tempdir.marker.write` opt-in) | Writes outside workspace; writes adjacent to target binary |
 | **Windows Registry** | `KEY_READ \| KEY_WOW64_64KEY` | `KEY_WRITE`, `KEY_SET_VALUE`, `KEY_CREATE_SUB_KEY`, `RegDeleteKey` |
-| **Process Inspection** | `PROCESS_QUERY_LIMITED_INFORMATION`, `TH32CS_SNAPPROCESS` | `PROCESS_TERMINATE`, `PROCESS_VM_WRITE`, `PROCESS_CREATE_THREAD`, code injection |
+| **Process Inspection** | `PROCESS_QUERY_LIMITED_INFORMATION`, `PROCESS_VM_READ` (`ReadProcessMemory`), `TH32CS_SNAPPROCESS` | `PROCESS_TERMINATE`, `PROCESS_VM_WRITE` (`WriteProcessMemory`), `VirtualProtectEx`, `PROCESS_CREATE_THREAD`, code injection |
 | **Service & Driver Inspection** | `EnumServicesStatusEx`, `QueryServiceConfig`, `SetupDiGetClassDevs` | `StartService`, `StopService`, `pnputil /delete-driver`, hardware state alteration |
 | **Subprocess Execution** | Whitelisted catalog commands, strict argument whitelisting, `shell=False` | Arbitrary shell execution (`cmd /c`, `powershell -c`), unwhitelisted flags |
 | **Process Privileges** | Medium integrity (standard user); graceful `ACCESS_DENIED` reporting | Automatic UAC elevation, token manipulation, privilege escalation |

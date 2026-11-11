@@ -85,8 +85,8 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                     "description": "Optional path to executable file to deobfuscate (analyzes entry point if offset omitted)"
                 },
                 "offset": {
-                    "type": "integer",
-                    "description": "Optional file offset to start analysis at (defaults to entry point)"
+                    "type": ["integer", "string"],
+                    "description": "Optional file offset (int or hex string) to start analysis at (defaults to entry point)"
                 },
                 "length": {
                     "type": "integer",
@@ -106,8 +106,8 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                     "description": "Path to binary executable on disk"
                 },
                 "offset": {
-                    "type": "integer",
-                    "description": "Byte offset in file to read from (e.g. 0x4e0778)"
+                    "type": ["integer", "string"],
+                    "description": "Byte offset in file to read from (int or hex string, e.g. '0x4e0778')"
                 },
                 "length": {
                     "type": "integer",
@@ -146,8 +146,8 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                     "description": "Path to binary file to patch"
                 },
                 "offset": {
-                    "type": "integer",
-                    "description": "0-based file byte offset where patch begins"
+                    "type": ["integer", "string"],
+                    "description": "0-based file byte offset where patch begins (int or hex string)"
                 },
                 "patch_hex": {
                     "type": "string",
@@ -481,21 +481,35 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
     },
     {
         "name": "rea_memory_scan",
-        "description": "Performs read-only virtual memory scanning across a target Windows process (First Scan / Next Scan) to locate addresses matching specific values (int8..int64, float, double, bytes, string) and conditions (exact, between, changed, unchanged, increased, decreased).",
+        "description": "Performs read-only virtual memory scanning across a target Windows process (First Scan / Next Scan) to locate addresses matching specific values (int8..uint64, float, double, bytes, string) and conditions (exact, between, unknown, changed, unchanged, increased, decreased).",
         "inputSchema": {
             "type": "object",
+            "additionalProperties": False,
             "properties": {
                 "pid": {
                     "type": "integer",
                     "description": "Target process ID (PID) to scan"
                 },
+                "session_id": {
+                    "type": "string",
+                    "description": "Optional scan session ID returned by an initial First Scan to filter via Next Scan"
+                },
                 "value_type": {
                     "type": "string",
+                    "enum": [
+                        "int8", "uint8", "int16", "uint16",
+                        "int32", "uint32", "int64", "uint64",
+                        "float", "double", "bytes", "string"
+                    ],
                     "description": "Value type: 'int8', 'uint8', 'int16', 'uint16', 'int32', 'uint32', 'int64', 'uint64', 'float', 'double', 'bytes', 'string'",
                     "default": "int32"
                 },
                 "scan_mode": {
                     "type": "string",
+                    "enum": [
+                        "exact", "between", "unknown",
+                        "increased", "decreased", "changed", "unchanged"
+                    ],
                     "description": "Scan mode: 'exact', 'between', 'unknown', 'increased', 'decreased', 'changed', 'unchanged'",
                     "default": "exact"
                 },
@@ -508,7 +522,16 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                 "candidate_addresses": {
                     "type": "array",
                     "items": {"type": "integer"},
-                    "description": "Optional list of candidate addresses from a previous scan pass to filter via Next Scan"
+                    "description": "Optional list of candidate integer addresses for stateless exact/between Next Scan filtering"
+                },
+                "alignment": {
+                    "type": "integer",
+                    "description": "Scan byte stride alignment (default: natural type size; use 1 for unaligned hits)"
+                },
+                "writable_only": {
+                    "type": "boolean",
+                    "description": "Restrict First Scan to writable committed regions (default: true)",
+                    "default": True
                 },
                 "max_results": {
                     "type": "integer",
@@ -524,6 +547,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         "description": "Resolves multi-level static module base pointer chains pointing to a target dynamic address ([Module.dll + RVA] + Offset1 + Offset2 -> Target).",
         "inputSchema": {
             "type": "object",
+            "additionalProperties": False,
             "properties": {
                 "pid": {
                     "type": "integer",
@@ -547,6 +571,11 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                     "type": "integer",
                     "description": "Maximum number of pointer paths to return (default: 20)",
                     "default": 20
+                },
+                "alignment": {
+                    "type": "integer",
+                    "description": "Pointer slot byte alignment stride (default: 4)",
+                    "default": 4
                 }
             },
             "required": ["pid", "target_address"]
@@ -661,6 +690,10 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                 "timeline_report": {
                     "type": "object",
                     "description": "Optional timeline report dictionary for 'inject_etw'"
+                },
+                "publish_temp_marker": {
+                    "type": "boolean",
+                    "description": "For 'start': whether to publish a discovery marker in the system temp dir (default: true; mediated by cap.tempdir.marker.write)"
                 }
             },
             "required": ["action"]
@@ -870,8 +903,28 @@ class ReaMcpServer:
             f"UNTRUSTED_WORKSPACE_OVERRIDE: Client-supplied workspace '{client_ws}' is not authorized by host MCP configuration."
         )
 
+    @staticmethod
+    def _matches_json_type(val: Any, json_type: Any) -> bool:
+        types = json_type if isinstance(json_type, (list, tuple)) else [json_type]
+        for t in types:
+            if t == "string" and isinstance(val, str):
+                return True
+            if t == "integer" and isinstance(val, int) and not isinstance(val, bool):
+                return True
+            if t == "number" and isinstance(val, (int, float)) and not isinstance(val, bool):
+                return True
+            if t == "boolean" and isinstance(val, bool):
+                return True
+            if t == "array" and isinstance(val, list):
+                return True
+            if t == "object" and isinstance(val, dict):
+                return True
+            if t == "null" and val is None:
+                return True
+        return False
+
     def _validate_tool_arguments(self, tool_name: str, args: Any) -> None:
-        """Validates tool arguments against the declared JSON inputSchema."""
+        """Validates tool arguments strictly against declared JSON inputSchema (required, types, enums, and no unknown fields)."""
         if args is None:
             args = {}
         if not isinstance(args, dict):
@@ -886,14 +939,35 @@ class ReaMcpServer:
                 f"Missing required parameter(s) for '{tool_name}': {', '.join(missing)}."
             )
         props = schema.get("properties", {})
+        unknown = [k for k in args.keys() if k not in props and k != "workspace_dir"]
+        if unknown:
+            raise ValueError(
+                f"Unknown parameter(s) for '{tool_name}': {', '.join(sorted(unknown))}."
+            )
         for key, val in args.items():
-            if key in props and val is not None:
-                allowed = props[key].get("enum")
-                if allowed and val not in allowed:
-                    raise ValueError(
-                        f"Invalid value for parameter '{key}' in '{tool_name}': "
-                        f"expected one of {allowed}, got {val!r}."
-                    )
+            if key not in props or val is None:
+                continue
+            spec = props[key]
+            expected_type = spec.get("type")
+            if expected_type and not self._matches_json_type(val, expected_type):
+                raise ValueError(
+                    f"Invalid type for parameter '{key}' in '{tool_name}': "
+                    f"expected {expected_type}, got {type(val).__name__}."
+                )
+            if expected_type == "array" and isinstance(spec.get("items"), dict) and spec["items"].get("type"):
+                item_type = spec["items"]["type"]
+                for idx, elem in enumerate(val):
+                    if not self._matches_json_type(elem, item_type):
+                        raise ValueError(
+                            f"Invalid item type at '{key}[{idx}]' in '{tool_name}': "
+                            f"expected {item_type}, got {type(elem).__name__}."
+                        )
+            allowed = spec.get("enum")
+            if allowed and val not in allowed:
+                raise ValueError(
+                    f"Invalid value for parameter '{key}' in '{tool_name}': "
+                    f"expected one of {allowed}, got {val!r}."
+                )
 
     def handle_initialize(self, params: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -1280,7 +1354,11 @@ class ReaMcpServer:
             token = args.get("auth_token")
 
             if act == "start":
-                server = get_or_create_bridge(port=port, auth_token=token)
+                server = get_or_create_bridge(
+                    port=port,
+                    auth_token=token,
+                    publish_temp_marker=bool(args.get("publish_temp_marker", True)),
+                )
                 st = server.dispatch_rpc_method("get_status", {})
                 st["marker_file"] = getattr(server, "_marker_path", None)
                 return st
@@ -1382,8 +1460,15 @@ class ReaMcpServer:
             if pid <= 0:
                 raise ValueError("Valid 'pid' (> 0) is required.")
             from windows_intelligence import ProcessMemoryScanner
-            val_type = args.get("value_type", "int32")
-            mode = args.get("scan_mode", "exact")
+            val_type = str(args.get("value_type", "int32")).lower()
+            valid_types = {
+                "int8", "uint8", "int16", "uint16",
+                "int32", "uint32", "int64", "uint64",
+                "float", "double", "bytes", "string",
+            }
+            if val_type not in valid_types:
+                raise ValueError(f"Unsupported value_type '{val_type}'.")
+            mode = str(args.get("scan_mode", "exact")).lower()
             mode_map = {
                 "exact": "EXACT_VALUE",
                 "between": "VALUE_BETWEEN",
@@ -1393,32 +1478,47 @@ class ReaMcpServer:
                 "changed": "CHANGED_VALUE",
                 "unchanged": "UNCHANGED_VALUE",
             }
-            scan_mode = mode_map.get(mode, "EXACT_VALUE")
+            if mode not in mode_map:
+                raise ValueError(f"Unsupported scan_mode '{mode}'. Allowed: {sorted(mode_map.keys())}")
+            scan_mode = mode_map[mode]
             val = args.get("target_value")
             high_val = args.get("high_value")
+            int_types = ("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64")
             if val is not None:
-                if val_type in ("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64") and isinstance(val, str):
+                if val_type in int_types and isinstance(val, str):
                     val = int(val, 0)
                 elif val_type in ("float", "double") and isinstance(val, str):
                     val = float(val)
                 elif val_type == "bytes" and isinstance(val, str):
-                    val = bytes.fromhex(val.replace(" ", "").replace("0x", ""))
+                    val = bytes.fromhex(val.replace(" ", "").replace("0x", "").replace("0X", ""))
             if high_val is not None:
-                if val_type in ("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64") and isinstance(high_val, str):
+                if val_type in int_types and isinstance(high_val, str):
                     high_val = int(high_val, 0)
                 elif val_type in ("float", "double") and isinstance(high_val, str):
                     high_val = float(high_val)
 
             sid = args.get("session_id")
+            cand_addrs = args.get("candidate_addresses")
             if sid:
                 return ProcessMemoryScanner.next_scan(
                     session_id=sid,
                     scan_type=scan_mode,
                     value=val,
                     min_val=val,
-                    max_val=high_val
+                    max_val=high_val,
+                )
+            elif cand_addrs is not None:
+                return ProcessMemoryScanner.next_scan(
+                    pid=pid,
+                    data_type=val_type,
+                    candidate_addresses=cand_addrs,
+                    scan_type=scan_mode,
+                    value=val,
+                    min_val=val,
+                    max_val=high_val,
                 )
             else:
+                alignment = args.get("alignment")
                 return ProcessMemoryScanner.first_scan(
                     pid=pid,
                     data_type=val_type,
@@ -1426,7 +1526,9 @@ class ReaMcpServer:
                     value=val,
                     min_val=val,
                     max_val=high_val,
-                    max_candidates=int(args.get("max_results", 50000))
+                    writable_only=bool(args.get("writable_only", True)),
+                    max_candidates=int(args.get("max_results", 50000)),
+                    alignment=int(alignment) if alignment is not None else None,
                 )
 
         elif name == "rea_pointer_scan":
@@ -1438,15 +1540,17 @@ class ReaMcpServer:
                 raise ValueError("'target_address' is required.")
             target_addr = int(target_str, 0) if isinstance(target_str, str) else int(target_str)
             from windows_intelligence import PointerScanner
-            depth = min(3, max(1, int(args.get("max_depth", 2))))
+            depth = int(args.get("max_depth", 2))
             offset = int(args.get("max_offset", 4096))
             max_r = int(args.get("max_results", 20))
+            align = int(args.get("alignment", 4))
             return PointerScanner.find_pointer_paths(
                 pid=pid,
                 target_address=target_addr,
                 max_depth=depth,
                 max_offset=offset,
-                max_results=max_r
+                max_results=max_r,
+                alignment=align,
             )
 
         elif name == "rea_struct_dissect":
@@ -1458,8 +1562,9 @@ class ReaMcpServer:
                 raise ValueError("'address' is required.")
             addr = int(addr_str, 0) if isinstance(addr_str, str) else int(addr_str)
             size = min(4096, max(8, int(args.get("size", 64))))
+            s_name = args.get("struct_name")
             from windows_intelligence import StructureDissector
-            return StructureDissector.dissect(pid=pid, base_address=addr, size=size)
+            return StructureDissector.dissect(pid=pid, base_address=addr, size=size, struct_name=s_name)
 
         elif name == "rea_crash_rca":
             dmp_p = args.get("dmp_path")

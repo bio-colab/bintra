@@ -263,7 +263,7 @@ class TestVirtualMemoryInspector(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_structure_dissector_inferred_types(self):
-        """Verifies runtime structure dissection and C struct generation."""
+        """Verifies runtime structure dissection splits 32-bit fields accurately and emits C struct layout."""
         import ctypes
         class DummyEntity(ctypes.Structure):
             _fields_ = [
@@ -277,9 +277,180 @@ class TestVirtualMemoryInspector(unittest.TestCase):
 
         report = StructureDissector.dissect(pid=self.pid, base_address=entity_addr, size=24)
         self.assertEqual(report["status"], "success")
-        self.assertEqual(report["fields_count"], 3)
+        self.assertTrue(report["heuristic"])
+        self.assertNotEqual(report["fields_count"], 3)
+        self.assertEqual(report["fields_count"], 4)
+        offsets = [f["offset_bytes"] for f in report["fields"]]
+        types = [f["inferred_type"] for f in report["fields"]]
+        self.assertEqual(offsets, [0, 4, 8, 16])
+        self.assertEqual(types, ["int32_t", "float", "uint64_t", "uint64_t"])
+        for f in report["fields"]:
+            self.assertIn("confidence", f)
+            self.assertIn("alternatives", f)
         self.assertIn("struct Reconstructed_", report["c_struct_definition"])
         self.assertIn("field_0x0", report["c_struct_definition"])
+        self.assertIn("field_0x4", report["c_struct_definition"])
+
+    def test_read_process_memory_no_zero_padding_on_partial_failure(self):
+        """Verifies ReadProcessMemory never fabricates zero bytes on short or mid-range failed reads."""
+        from unittest.mock import patch, MagicMock
+        import ctypes
+
+        # Simulate reading 96 KB across two chunks where chunk 1 succeeds fully (64 KB of 0xAA)
+        # and chunk 2 returns a short read of 4096 bytes of 0xBB then stops (unmapped boundary).
+        class FakeKernel32:
+            def __init__(self):
+                self.OpenProcess = MagicMock(return_value=1234)
+                self.CloseHandle = MagicMock(return_value=1)
+
+                def _rpm(h_proc, lp_addr, lp_buf, n_size, lp_read):
+                    addr_int = lp_addr.value if hasattr(lp_addr, "value") else int(lp_addr)
+                    if addr_int == 0x500000:
+                        payload = b"\xAA" * n_size
+                    elif addr_int == 0x510000:
+                        payload = b"\xBB" * 4096
+                    else:
+                        ctypes.cast(lp_read, ctypes.POINTER(ctypes.c_size_t)).contents.value = 0
+                        return 0
+                    ctypes.memmove(lp_buf, payload, len(payload))
+                    ctypes.cast(lp_read, ctypes.POINTER(ctypes.c_size_t)).contents.value = len(payload)
+                    return 1
+
+                self.ReadProcessMemory = MagicMock(side_effect=_rpm)
+
+        fake_k32 = FakeKernel32()
+        with patch.object(VirtualMemoryInspector, "_is_windows", return_value=True), \
+             patch.object(ctypes, "windll", MagicMock(kernel32=fake_k32), create=True):
+            checked = VirtualMemoryInspector.read_process_memory_checked(
+                pid=self.pid, address=0x500000, size=98304, allow_partial=True
+            )
+            self.assertEqual(checked["status"], "partial")
+            self.assertTrue(checked["is_partial"])
+            self.assertEqual(checked["bytes_requested"], 98304)
+            self.assertEqual(checked["bytes_read"], 65536 + 4096)
+            self.assertEqual(checked["first_failed_address"], f"0x{0x510000 + 4096:X}")
+            self.assertEqual(len(checked["data"]), 65536 + 4096)
+            self.assertNotIn(b"\x00", checked["data"])
+
+            raw = VirtualMemoryInspector.read_process_memory(pid=self.pid, address=0x500000, size=98304)
+            self.assertEqual(len(raw), 65536 + 4096)
+            self.assertEqual(raw[-1], 0xBB)
+
+            aborted = VirtualMemoryInspector.read_process_memory_checked(
+                pid=self.pid, address=0x500000, size=98304, allow_partial=False
+            )
+            self.assertEqual(aborted["status"], "partial_aborted")
+            self.assertIsNone(aborted["data"])
+
+    @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
+    def test_next_scan_bytes_string_and_small_types(self):
+        """Verifies string/bytes next_scan re-verification and int8/unaligned numeric scanning."""
+        import ctypes
+        buf = (ctypes.c_char * 32)(*b"A_REA_TAG_V1\x00" + b"\x00" * 19)
+        buf_addr = ctypes.addressof(buf)
+
+        # 1. String scan -> mutated string -> CHANGED_VALUE / EXACT_VALUE
+        res_str = ProcessMemoryScanner.first_scan(
+            pid=self.pid, data_type="string", scan_type="EXACT_VALUE", value="A_REA_TAG_V1"
+        )
+        sid = res_str["session_id"]
+        self.assertGreaterEqual(res_str["total_candidates"], 1)
+        self.assertEqual(len(sid), 16)
+
+        with self.assertRaises(ValueError):
+            ProcessMemoryScanner.next_scan(session_id=sid, scan_type="INCREASED_VALUE")
+
+        ctypes.memmove(buf_addr, b"A_REA_TAG_V2\x00", 13)
+        res_changed = ProcessMemoryScanner.next_scan(session_id=sid, scan_type="CHANGED_VALUE")
+        self.assertGreaterEqual(res_changed["surviving_count"], 1)
+        self.assertIn(buf_addr, [c["address_int"] for c in res_changed["candidates_sample"]])
+
+        res_exact = ProcessMemoryScanner.next_scan(
+            session_id=sid, scan_type="EXACT_VALUE", value="A_REA_TAG_V2"
+        )
+        self.assertGreaterEqual(res_exact["surviving_count"], 1)
+
+        # 2. Unaligned int32 scan at addr % 4 != 0
+        # Bytes for 0x5A3C1E79 LE at offset +1
+        raw_arr = (ctypes.c_ubyte * 16)(0, 0x79, 0x1E, 0x3C, 0x5A, *([0] * 11))
+        unaligned_addr = ctypes.addressof(raw_arr) + 1
+        res_unaligned = ProcessMemoryScanner.first_scan(
+            pid=self.pid, data_type="int32", scan_type="EXACT_VALUE", value=0x5A3C1E79, alignment=1, max_candidates=2000
+        )
+        self.assertGreaterEqual(res_unaligned["total_candidates"], 1)
+        self.assertIn(unaligned_addr, [c["address_int"] for c in res_unaligned["candidates_sample"]])
+
+    def test_first_scan_mode_validation_and_session_eviction(self):
+        """Verifies invalid first_scan modes fail closed and _ACTIVE_SESSIONS obeys bounded LRU eviction."""
+        from unittest.mock import patch
+
+        with self.assertRaises(ValueError):
+            ProcessMemoryScanner.first_scan(pid=self.pid, data_type="int32", scan_type="INCREASED_VALUE")
+
+        sim_snap = ProcessMemoryMapSnapshot(pid=self.pid, process_name="sim.exe", is_simulated=True)
+        with patch.object(VirtualMemoryInspector, "inspect_process", return_value=sim_snap):
+            cap = ProcessMemoryScanner._MAX_SESSIONS
+            for _ in range(cap + 10):
+                ProcessMemoryScanner.first_scan(pid=self.pid, data_type="int8", scan_type="EXACT_VALUE", value=7)
+            self.assertLessEqual(len(ProcessMemoryScanner._ACTIVE_SESSIONS), cap)
+
+    def test_pointer_scanner_unaligned_depth3_and_self_verification(self):
+        """Verifies PointerScanner enforces depth bounds, supports depth 3 with 4-byte alignment, and verifies chains."""
+        import struct
+        from unittest.mock import patch
+
+        with self.assertRaises(ValueError):
+            PointerScanner.find_pointer_paths(pid=self.pid, target_address=0x30000000, max_depth=4)
+
+        snap = ProcessMemoryMapSnapshot(pid=self.pid, process_name="ptr_test.exe", architecture="x86-64")
+        snap.add_region(ProcessMemoryRegion(0x140001000, 0x140000000, 0x100, MEM_COMMIT, PAGE_READWRITE, PAGE_READWRITE, MEM_IMAGE, "IMAGE_DATA", "ptr_test.exe"))
+        snap.add_region(ProcessMemoryRegion(0x20000000, 0x20000000, 0x100, MEM_COMMIT, PAGE_READWRITE, PAGE_READWRITE, MEM_PRIVATE, "HEAP"))
+        snap.add_region(ProcessMemoryRegion(0x30000000, 0x30000000, 0x100, MEM_COMMIT, PAGE_READWRITE, PAGE_READWRITE, MEM_PRIVATE, "HEAP"))
+
+        # Chain (with unaligned 4-mod-8 slot in heap1 at 0x20000004!):
+        # static[0x14000100C] -> 0x20000000 (+0x04 -> 0x20000004)
+        # heap1[0x20000004]   -> 0x30000008 (+0x08 -> 0x30000010)
+        # heap2[0x30000010]   -> 0x40000100 (+0x10 -> 0x40000110)
+        static_buf = bytearray(0x100)
+        struct.pack_into("<Q", static_buf, 0x0C, 0x20000000)
+
+        heap1_buf = bytearray(0x100)
+        struct.pack_into("<Q", heap1_buf, 0x04, 0x30000008)
+
+        heap2_buf = bytearray(0x100)
+        struct.pack_into("<Q", heap2_buf, 0x10, 0x40000100)
+
+        target_addr = 0x40000110
+
+        def fake_read(pid, addr, size, allow_partial=True):
+            if 0x140001000 <= addr < 0x140001100:
+                off = addr - 0x140001000
+                data = bytes(static_buf[off:off + size])
+            elif 0x20000000 <= addr < 0x20000100:
+                off = addr - 0x20000000
+                data = bytes(heap1_buf[off:off + size])
+            elif 0x30000000 <= addr < 0x30000100:
+                off = addr - 0x30000000
+                data = bytes(heap2_buf[off:off + size])
+            else:
+                return {"status": "error", "data": None, "bytes_requested": size, "bytes_read": 0, "is_partial": False}
+            return {"status": "success", "data": data, "bytes_requested": size, "bytes_read": len(data), "is_partial": False}
+
+        with patch.object(VirtualMemoryInspector, "inspect_process", return_value=snap), \
+             patch.object(VirtualMemoryInspector, "_read_memory_internal", side_effect=fake_read):
+            res = PointerScanner.find_pointer_paths(
+                pid=self.pid,
+                target_address=target_addr,
+                max_depth=3,
+                max_offset=0x100,
+                alignment=4,
+            )
+            self.assertTrue(res["heuristic"])
+            self.assertGreaterEqual(res["paths_count"], 1)
+            d3_paths = [p for p in res["paths"] if p["depth"] == 3]
+            self.assertGreaterEqual(len(d3_paths), 1)
+            self.assertTrue(all(p["verified"] is True for p in d3_paths))
+            self.assertEqual(d3_paths[0]["offsets"], ["0x4", "0x8", "0x10"])
 
     def test_diff_snapshots_mutations(self):
         """Verifies diff_snapshots tracking of region resizing, type mutations, and protection."""

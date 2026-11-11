@@ -22,9 +22,10 @@ $$W_{new}(i, j) = \begin{cases}
 W_{old}(i, j) & \text{otherwise} 
 \end{cases}$$
 
-### 2.3 Subspace Projection Steering (`subspace_steer`)
-Used to boost desirable features (e.g. math reasoning steps) by amplifying orthogonal singular vectors:
-$$W_{new} = W_{old} + \beta \cdot u_{math} v_{math}^T$$
+### 2.3 Selective Column Direction Subtraction (`column_direction_subtract`) & Additive/Subspace Edits
+Used to cure localized attractor loops by subtracting the dominant loop direction from only the top-$K$ columns most aligned with it, plus full-mode zeroing (`subspace_zero`) or targeted steering (`vector_add`):
+$$W_{new}[:, S_K] = W_{old}[:, S_K] - \alpha \cdot u_0 (u_0^T W_{old}[:, S_K])$$
+Where $S_K$ indexes the top-$K$ columns (`num_columns`, default 64) and `WeightPatcher.apply_patch` supports `rank_1_nullify`, `sparse_clamp`, `subspace_zero`, `vector_add`, and `column_direction_subtract`.
 
 ---
 

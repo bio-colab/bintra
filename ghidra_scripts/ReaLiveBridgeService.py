@@ -105,26 +105,28 @@ def apply_command(prog, cmd):
     addr_factory = prog.getAddressFactory()
     image_base = prog.getImageBase()
 
-    def _resolve_addr(addr_val):
+    def _resolve_addr(addr_val, address_space="auto"):
         if not addr_val:
             return None
         addr_str = str(addr_val).strip()
-        # Direct lookup
-        a = addr_factory.getAddress(addr_str)
-        if a is not None:
-            return a
-        # Numerical conversion
+        mode = str(address_space or "auto").lower()
+        # Numerical parsing first when explicit address space is declared
         try:
             val = int(addr_str, 16) if addr_str.lower().startswith("0x") else int(addr_str)
-            # If val is an RVA relative to image base
-            if val < image_base.getOffset():
+            if mode == "rva":
+                return image_base.add(val)
+            if mode == "va":
+                return addr_factory.getDefaultAddressSpace().getAddress(val)
+            # Legacy auto fallback: avoid misclassifying full 64-bit VAs below high ASLR image bases as RVAs
+            if val < 0x10000000 and val < image_base.getOffset():
                 return image_base.add(val)
             return addr_factory.getDefaultAddressSpace().getAddress(val)
         except Exception:
-            return None
+            a = addr_factory.getAddress(addr_str)
+            return a
 
     if action == "SET_PLATE_COMMENT":
-        addr = _resolve_addr(details.get("address"))
+        addr = _resolve_addr(details.get("address"), details.get("address_space", "auto"))
         comment = details.get("comment", "")
         if addr:
             cu = listing.getCodeUnitAt(addr)
@@ -136,7 +138,7 @@ def apply_command(prog, cmd):
                 log_msg(f"Target code unit not found at {addr.toString()} for plate comment.")
 
     elif action == "CREATE_BOOKMARK":
-        addr = _resolve_addr(details.get("address"))
+        addr = _resolve_addr(details.get("address"), details.get("address_space", "auto"))
         cat = details.get("category", "REA_CRASH_FAULT")
         desc = details.get("description", "")
         if addr:
@@ -157,7 +159,7 @@ def apply_command(prog, cmd):
             log_msg(f"Applied Program Note '{title}' at image base {image_base.toString()}")
 
     elif action == "RENAME_FUNCTION":
-        addr = _resolve_addr(details.get("address"))
+        addr = _resolve_addr(details.get("address"), details.get("address_space", "auto"))
         new_name = details.get("new_name")
         if addr and new_name:
             func = prog.getFunctionManager().getFunctionAt(addr)
@@ -171,7 +173,7 @@ def apply_command(prog, cmd):
                 log_msg(f"No function found containing {addr.toString()} to rename.")
 
     elif action == "APPLY_DATA_STRUCTURE":
-        addr = _resolve_addr(details.get("address"))
+        addr = _resolve_addr(details.get("address"), details.get("address_space", "va"))
         struct_name = details.get("name", "ReaReconstructedStruct")
         c_decl = details.get("c_declaration", "")
         fields = details.get("fields", [])
@@ -219,7 +221,7 @@ def apply_command(prog, cmd):
             log_msg(f"DataTypeManager notice (running headless/fallback): {dt_err}")
 
     elif action == "SET_POINTER_CHAIN":
-        addr = _resolve_addr(details.get("address"))
+        addr = _resolve_addr(details.get("address"), details.get("address_space", "auto"))
         comment = details.get("comment", "")
         if addr:
             cu = listing.getCodeUnitAt(addr)

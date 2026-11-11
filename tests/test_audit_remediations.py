@@ -611,6 +611,301 @@ class TestAuditRemediations(unittest.TestCase):
                         cli_mod._dispatch_cli()
             self.assertFalse(os.path.exists(foreign_sess))
 
+    def test_mcp_all_34_tools_schema_strict_validation_and_memscan_parity(self):
+        """Validates strict schema enforcement across all 34 MCP tools and rea_memory_scan parity."""
+        import inspect
+        import numpy as np
+        import mcp_server as mcp_mod
+
+        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 34)
+        dispatch_src = inspect.getsource(mcp_mod.ReaMcpServer.dispatch_tool)
+
+        with tempfile.TemporaryDirectory() as td:
+            ws_dir = os.path.join(td, "ws")
+            target_dir = os.path.join(td, "targets")
+            os.makedirs(ws_dir, exist_ok=True)
+            os.makedirs(target_dir, exist_ok=True)
+
+            dummy_pe = os.path.join(target_dir, "target.exe")
+            with open(dummy_pe, "wb") as f:
+                f.write(_build_minimal_pe64())
+
+            dummy_st = os.path.join(target_dir, "weights.safetensors")
+            _save_safetensors(dummy_st, "w", np.eye(4, dtype=np.float32))
+
+            dummy_dmp = os.path.join(target_dir, "crash.dmp")
+            with open(dummy_dmp, "wb") as f:
+                f.write(b"MDMP" + b"\x00" * 64)
+
+            server = mcp_mod.ReaMcpServer(workspace_root=ws_dir)
+
+            def _base_args_for(tool_name, schema):
+                props = schema.get("properties", {})
+                args = {}
+                for req in schema.get("required", []):
+                    spec = props.get(req, {})
+                    if req in ("file_path", "binary_path", "input_file"):
+                        args[req] = dummy_pe
+                    elif req in ("model_path", "source_path"):
+                        args[req] = dummy_st
+                    elif req == "dmp_path":
+                        args[req] = dummy_dmp
+                    elif req == "output_path":
+                        ext = "safetensors" if tool_name == "rea_patch_weights" else "exe"
+                        args[req] = os.path.join(ws_dir, f"out_{tool_name}.{ext}")
+                    elif req == "offset":
+                        args[req] = "0x10"
+                    elif req == "patch_hex":
+                        args[req] = "90"
+                    elif req == "tensor_name":
+                        args[req] = "w"
+                    elif req in ("func1_hex", "func2_hex"):
+                        args[req] = "90c3"
+                    elif req in ("func1_pcode", "func2_pcode", "pcode_ops"):
+                        args[req] = [{"mnemonic": "INT_ADD"}]
+                    elif req == "command_id":
+                        args[req] = "os_ver"
+                    elif req == "pid":
+                        args[req] = os.getpid()
+                    elif req in ("address", "target_address"):
+                        args[req] = "0x1000"
+                    elif req == "action" and spec.get("enum"):
+                        args[req] = spec["enum"][0]
+                    elif spec.get("type") == "integer":
+                        args[req] = 1
+                    elif spec.get("type") == "boolean":
+                        args[req] = False
+                    elif spec.get("type") == "array":
+                        args[req] = []
+                    elif spec.get("type") == "object":
+                        args[req] = {}
+                    else:
+                        args[req] = "val"
+                # Populate target path needed by ExecutionGuard before _validate_tool_arguments
+                if tool_name == "rea_patch_binary":
+                    args.setdefault("file_path", dummy_pe)
+                elif tool_name == "rea_patch_weights":
+                    args.setdefault("source_path", dummy_st)
+                elif tool_name == "rea_win_catalog_cmd":
+                    args["command_id"] = "os_ver"
+                return args
+
+            for tool in mcp_mod.TOOLS_REGISTRY:
+                tname = tool["name"]
+                schema = tool["inputSchema"]
+                props = schema.get("properties", {})
+                base = _base_args_for(tname, schema)
+
+                # 1. Unknown parameter rejection
+                res_unknown = server.handle_tools_call({
+                    "name": tname,
+                    "arguments": {**base, "__unknown_param__": 1}
+                })
+                self.assertTrue(res_unknown["isError"], f"{tname} should reject unknown param")
+                err_unknown = json.loads(res_unknown["content"][0]["text"])["error"]
+                self.assertIn("Unknown parameter", err_unknown, f"{tname}: {err_unknown}")
+
+                # 2. Type & enum rejection across declared constrained fields
+                for prop_name, spec in props.items():
+                    ptype = spec.get("type")
+                    if ptype == "integer":
+                        bad_val = "bad_int"
+                    elif ptype == "boolean":
+                        bad_val = "yes"
+                    elif ptype == "array":
+                        bad_val = "not_a_list"
+                    elif isinstance(spec.get("enum"), list):
+                        bad_val = "__INVALID_ENUM__"
+                    elif isinstance(ptype, list) and "integer" in ptype and "string" in ptype:
+                        bad_val = True
+                    else:
+                        continue
+                    bad_args = {**base, prop_name: bad_val}
+                    res_bad = server.handle_tools_call({"name": tname, "arguments": bad_args})
+                    self.assertTrue(res_bad["isError"], f"{tname}.{prop_name} should reject {bad_val!r}")
+                    err_bad = json.loads(res_bad["content"][0]["text"])["error"]
+                    self.assertTrue(
+                        "Invalid type" in err_bad or "Invalid value" in err_bad,
+                        f"{tname}.{prop_name} unexpected error: {err_bad}"
+                    )
+
+            # 3. Verify rea_memory_scan schema-dispatch parity and optional parameter acceptance
+            mem_schema = next(t["inputSchema"] for t in mcp_mod.TOOLS_REGISTRY if t["name"] == "rea_memory_scan")
+            for prop in mem_schema["properties"]:
+                self.assertIn(prop, dispatch_src, f"rea_memory_scan property '{prop}' missing from dispatch_tool")
+
+            # Valid optional params pass _validate_tool_arguments without error
+            server._validate_tool_arguments("rea_memory_scan", {
+                "pid": os.getpid(),
+                "session_id": "scan_alpha",
+                "value_type": "int32",
+                "scan_mode": "changed",
+                "target_value": 100,
+                "candidate_addresses": [0x1000, 0x2000],
+                "alignment": 4,
+                "writable_only": True,
+                "max_results": 10,
+            })
+
+            res_bad_items = server.handle_tools_call({
+                "name": "rea_memory_scan",
+                "arguments": {"pid": os.getpid(), "candidate_addresses": ["bad_addr"]}
+            })
+            self.assertTrue(res_bad_items["isError"])
+            self.assertIn("Invalid item type", json.loads(res_bad_items["content"][0]["text"])["error"])
+
+            for bad_field, bad_val in [("value_type", "int128"), ("scan_mode", "fuzzy")]:
+                res_mem_bad = server.handle_tools_call({
+                    "name": "rea_memory_scan",
+                    "arguments": {"pid": os.getpid(), bad_field: bad_val}
+                })
+                self.assertTrue(res_mem_bad["isError"])
+                self.assertIn("Invalid value", json.loads(res_mem_bad["content"][0]["text"])["error"])
+
+    def test_cli_audit_init_fail_closed_and_degraded_signaling(self):
+        """Mutating CLI commands fail-closed when audit dir cannot initialize; reads surface audit_degraded."""
+        cli_path = os.path.join(SRC_DIR, "cli.py")
+        with tempfile.TemporaryDirectory() as td:
+            home_dir = os.path.join(td, "blocked_home")
+            ws_dir = os.path.join(td, "ws")
+            target_dir = os.path.join(td, "targets")
+            os.makedirs(os.path.join(home_dir, ".rea_neural"), exist_ok=True)
+            os.makedirs(ws_dir, exist_ok=True)
+            os.makedirs(target_dir, exist_ok=True)
+
+            # Regular file at ~/.rea_neural/logs blocks directory/log creation portably on Windows & POSIX
+            with open(os.path.join(home_dir, ".rea_neural", "logs"), "w", encoding="utf-8") as f:
+                f.write("unwritable_log_blocker")
+
+            dummy_pe = os.path.join(target_dir, "sample.exe")
+            with open(dummy_pe, "wb") as f:
+                f.write(_build_minimal_pe64())
+
+            env = os.environ.copy()
+            env["HOME"] = home_dir
+            env["USERPROFILE"] = home_dir
+
+            out_bin = os.path.join(ws_dir, "patched.exe")
+            mut_proc = subprocess.run(
+                [
+                    sys.executable, cli_path, "patch-binary",
+                    "--file", dummy_pe, "--output", out_bin,
+                    "--offset", "0x10", "--patch-hex", "90",
+                    "--workspace", ws_dir,
+                ],
+                env=env, capture_output=True, text=True
+            )
+            self.assertNotEqual(mut_proc.returncode, 0, mut_proc.stdout + mut_proc.stderr)
+            mut_payload = json.loads(mut_proc.stdout)
+            self.assertTrue(mut_payload.get("audit_degraded"), mut_payload)
+            self.assertIn("AUDIT_INIT_FAILED", mut_payload.get("error", ""))
+            self.assertFalse(os.path.exists(out_bin))
+
+            read_proc = subprocess.run(
+                [
+                    sys.executable, cli_path, "resolve-deps",
+                    "--binary", dummy_pe, "--workspace", ws_dir,
+                ],
+                env=env, capture_output=True, text=True
+            )
+            self.assertEqual(read_proc.returncode, 0, read_proc.stdout + read_proc.stderr)
+            read_payload = json.loads(read_proc.stdout)
+            self.assertTrue(read_payload.get("audit_degraded"), read_payload)
+            self.assertTrue(read_payload.get("audit_degraded_reason"), read_payload)
+
+    def test_docs_and_skills_consistency_guards(self):
+        """Enforces consistency between code counts, ETW categories, docs, and agent skills."""
+        import mcp_server as mcp_mod
+
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 34)
+
+        discovered_count = unittest.defaultTestLoader.discover(
+            os.path.join(repo_root, "tests"), pattern="test_*.py"
+        ).countTestCases()
+        self.assertEqual(discovered_count, 195)
+
+        doc_paths = [
+            "README.md",
+            "AGENTS.md",
+            ".github/PULL_REQUEST_TEMPLATE.md",
+            "docs/RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md",
+            "docs/ROADMAP.md",
+            "docs/architecture.md",
+            "docs/releases/v7.4.0.md",
+        ]
+        skills_dir = os.path.join(repo_root, "skills")
+        for root, _, files in os.walk(skills_dir):
+            for fname in sorted(files):
+                if fname.endswith(".md"):
+                    doc_paths.append(os.path.relpath(os.path.join(root, fname), repo_root))
+
+        texts = {}
+        for rel in doc_paths:
+            with open(os.path.join(repo_root, rel), "r", encoding="utf-8") as f:
+                texts[rel.replace("\\", "/")] = f.read()
+
+        # 1. Zero foreign branding or commercial game/anti-cheat mentions
+        forbidden_tokens = [
+            "diagnose --crash ",
+            "original_file_intact",
+            "output_location",
+            "is_dep_violation",
+            "dormant_backdoors_detected",
+            "frobenius_norm_delta",
+            "subspace_steer",
+            "file:///D:/",
+            "anti-cheat",
+            "game.exe",
+            '"is_loop_cured"',
+        ]
+        for rel, body in texts.items():
+            self.assertNotIn("morluto", body.lower(), f"Found attribution drift in {rel}")
+            for tok in forbidden_tokens:
+                if tok == "anti-cheat" and rel == ".github/PULL_REQUEST_TEMPLATE.md":
+                    continue
+                self.assertNotIn(tok, body, f"Found stale/forbidden token '{tok}' in {rel}")
+
+        # 2. 34 MCP tool count synchronized everywhere
+        for rel in (
+            "AGENTS.md",
+            "README.md",
+            "skills/reverse-engineer-anything/SKILL.md",
+            "docs/RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md",
+        ):
+            self.assertIn("34", texts[rel], f"Expected '34' tool count in {rel}")
+            self.assertNotIn("31 أداة", texts[rel])
+            self.assertNotIn("31 MCP", texts[rel])
+
+        # 3. 195 test count synchronized across primary docs & PR template
+        for rel in (
+            "README.md",
+            "docs/RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md",
+            "docs/ROADMAP.md",
+            "docs/releases/v7.4.0.md",
+            ".github/PULL_REQUEST_TEMPLATE.md",
+        ):
+            self.assertIn("195", texts[rel], f"Expected '195' test count in {rel}")
+            self.assertNotIn("160 Tests", texts[rel])
+
+        # 4. EtwTimelineCorrelator canonical event categories exist in source
+        etw_src_path = os.path.join(
+            repo_root, "src", "windows_intelligence", "runtime_telemetry", "etw_capture_engine.py"
+        )
+        with open(etw_src_path, "r", encoding="utf-8") as f:
+            etw_src = f.read()
+        for cat in (
+            "IMAGE_LOAD",
+            "VIRTUAL_FREE",
+            "APPLICATION_ERROR",
+            "WER_REPORT",
+            "APPLICATION_HANG",
+            "KERNEL_POWER_OR_BUGCHECK",
+            "RESTART_MANAGER_LOCK",
+            "GRAPHICS_TDR_DEVICE_REMOVAL",
+        ):
+            self.assertIn(cat, etw_src, f"Missing ETW event category '{cat}' in etw_capture_engine.py")
+
 
 if __name__ == "__main__":
     unittest.main()

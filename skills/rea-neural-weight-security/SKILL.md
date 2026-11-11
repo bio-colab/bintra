@@ -110,10 +110,11 @@ rea-neural scan-hybrid --file "C:\path\to\application.exe"
 rea-neural wsp-audit --model "C:\path\to\model.safetensors"
 ```
 
-**Key Diagnostic Metrics:**
-- `effective_rank`: Spectral entropy measure of weight diversity.
-- `dormant_backdoors_detected`: Boolean flag indicating if outlier neurons ($> 4.5\sigma$) exist.
-- `amenability`: Assesses whether the model is amenable to weight surgery without degradation.
+**Key Diagnostic Output Keys (`rea_wsp_audit` / `wsp-audit`):**
+- `effective_rank_analysis.effective_rank` (plus `.participation_ratio`, `.max_possible_rank`, `.inferred_domain_profile`): Spectral entropy measure of weight diversity.
+- `zero_eval_security_audit.potential_backdoor_detected` (plus `.max_neuron_norm_zscore`, `.suspect_trigger_neurons`): Heuristic flag checking two conditions ($> 4.5\sigma$ row/neuron norm outlier **and** elevated spike concentration); benign dense outliers in normalization/outlier channels can elevate z-scores and require inspecting `suspect_trigger_neurons` before concluding malicious compromise.
+- `surgical_amenability.is_amenable_to_weight_surgery` (plus `.wsp_prognosis`, `.recommended_num_columns`, `.spectral_dominance_ratio`): Assesses whether the model is amenable to localized column intervention vs capability deficit.
+- `cross_layer_induction.copying_heads_detected` / `.copying_head_density` (when 2+ tensors exist): Cross-layer induction alignment metrics.
 
 ---
 
@@ -145,7 +146,15 @@ rea-neural patch-weights `
   --num-columns 64
 ```
 
-**Output Telemetry:**
-- `sparsity_ratio`: Percentage of parameters altered (typically $< 0.02\%$).
-- `frobenius_norm_delta`: $\|\Delta W\|_F$ showing minimal perturbation.
-- `is_loop_cured`: True, confirming the attractor direction was eliminated.
+**Additional Weight-Space CLI Diagnostics (`rea-neural`):**
+- `rea-neural subspace --model <m> --tensor <t> [--mode svd_modes|sparse_extremes|coordinate_slice]`
+- `rea-neural decompile --model <m> --tensor <t> [--circuit-type attention_head|mlp_projection|layer_norm_drift]`
+- `rea-neural diff-weights --baseline <orig> --patched <new> --tensor <t>` (`frobenius_relative_shift`, `is_within_safety_bound`)
+- `rea-neural probe-trace --model <m> --prompt "<text>"` (seeded SVD operator simulation)
+- `rea-neural verify-behavior --baseline <orig> --patched <new>` (`is_equilibrium_preserved`, `max_frobenius_relative_shift`)
+
+**Output Keys (`rea_patch_weights` / `patch-weights`):**
+- `output_path`, `output_sha256`, `patched_tensor_names`: Patched workspace artifact and integrity digest.
+- `metrics.modified_percentage` (`metrics.modified_elements` / `metrics.total_elements`): Percentage of parameters altered.
+- `metrics.frobenius_energy_shift_ratio`, `metrics.lipschitz_spectral_bound`, `metrics.is_within_safety_bound`: Spectral perturbation bounds ($< 0.005$ target).
+- **Behavioral Verification Caveat:** There is no static `is_loop_cured` boolean returned by patching itself; verify attractor attenuation afterward with `rea-neural diff-weights` and `rea-neural verify-behavior` (and real downstream model evaluation where applicable).

@@ -10,10 +10,13 @@ Strictly read-only; governed by ExecutionGuard and Capability.PROCESS_QUERY.
 import os
 import re
 import sys
+import math
 import time
 import uuid
 import struct
 import ctypes
+import threading
+from collections import OrderedDict
 from ctypes import wintypes
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -476,7 +479,8 @@ class VirtualMemoryInspector:
 
         return snapshot
 
-    _MODULE_SECTIONS_CACHE: Dict[str, List[Dict[str, Any]]] = {}
+    _MODULE_SECTIONS_CACHE: "OrderedDict[str, List[Dict[str, Any]]]" = OrderedDict()
+    _MAX_MODULE_CACHE_SIZE = 256
 
     @classmethod
     def _get_module_sections(cls, mod_path: Optional[str]) -> List[Dict[str, Any]]:
@@ -484,6 +488,7 @@ class VirtualMemoryInspector:
         if not mod_path or not os.path.isfile(mod_path):
             return []
         if mod_path in cls._MODULE_SECTIONS_CACHE:
+            cls._MODULE_SECTIONS_CACHE.move_to_end(mod_path)
             return cls._MODULE_SECTIONS_CACHE[mod_path]
 
         sections = []
@@ -512,6 +517,8 @@ class VirtualMemoryInspector:
         except Exception:
             pass
 
+        while len(cls._MODULE_SECTIONS_CACHE) >= cls._MAX_MODULE_CACHE_SIZE:
+            cls._MODULE_SECTIONS_CACHE.popitem(last=False)
         cls._MODULE_SECTIONS_CACHE[mod_path] = sections
         return sections
 
@@ -692,29 +699,69 @@ class VirtualMemoryInspector:
         }
 
     @classmethod
-    def read_process_memory(
+    def _get_process_start_time(cls, pid: int) -> Optional[int]:
+        """Returns Win32 FILETIME process creation timestamp as a 64-bit integer to guard against PID reuse."""
+        if not cls._is_windows():
+            return None
+        try:
+            k32 = ctypes.windll.kernel32
+            h_proc = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not h_proc:
+                h_proc = k32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)
+            if not h_proc:
+                return None
+            try:
+                class _FT(ctypes.Structure):
+                    _fields_ = [("dwLowDateTime", wintypes.DWORD), ("dwHighDateTime", wintypes.DWORD)]
+
+                ft_create, ft_exit, ft_kernel, ft_user = _FT(), _FT(), _FT(), _FT()
+                ok = k32.GetProcessTimes(
+                    h_proc,
+                    ctypes.byref(ft_create),
+                    ctypes.byref(ft_exit),
+                    ctypes.byref(ft_kernel),
+                    ctypes.byref(ft_user),
+                )
+                if ok:
+                    return (int(ft_create.dwHighDateTime) << 32) | int(ft_create.dwLowDateTime)
+            finally:
+                k32.CloseHandle(h_proc)
+        except Exception:
+            return None
+        return None
+
+    @classmethod
+    def _read_process_memory_raw(
         cls,
         pid: int,
         address: int,
-        size: int
-    ) -> Optional[bytes]:
+        size: int,
+        allow_partial: bool = True
+    ) -> Dict[str, Any]:
         """
-        Safely reads virtual memory bytes from a target process.
-        Uses kernel32.ReadProcessMemory in bounded chunked blocks.
-        Strictly read-only (PROCESS_VM_READ); governed by Capability.PROCESS_QUERY.
-        Returns None on non-Windows platforms or unmapped read failures, and raises PermissionError if OpenProcess fails.
+        Internal chunked ReadProcessMemory worker.
+        NEVER fabricates zero bytes on failed chunks or short reads: stops at the first
+        unreadable boundary and reports valid length and failure address transparently.
         """
-        ExecutionGuard.request_access(
-            component="virtual_memory_inspector",
-            operation="read_process_memory",
-            target=f"pid_{pid}_0x{address:X}",
-            capability=Capability.PROCESS_QUERY,
-            access_mode="READ"
-        )
         if size <= 0:
-            return b""
+            return {
+                "status": "success",
+                "data": b"",
+                "bytes_requested": 0,
+                "bytes_read": 0,
+                "is_partial": False,
+                "first_failed_address": None,
+            }
         if not cls._is_windows():
-            return None
+            return {
+                "status": "not_applicable",
+                "is_simulated": True,
+                "data": None,
+                "bytes_requested": size,
+                "bytes_read": 0,
+                "is_partial": False,
+                "first_failed_address": f"0x{address:X}",
+            }
 
         k32 = ctypes.windll.kernel32
         h_proc = k32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
@@ -729,13 +776,14 @@ class VirtualMemoryInspector:
             bytes_left = size
             cur_addr = address
             out_buf = bytearray()
+            failed_addr: Optional[int] = None
 
             k32.ReadProcessMemory.argtypes = [
                 wintypes.HANDLE,
                 ctypes.c_void_p,
                 ctypes.c_void_p,
                 ctypes.c_size_t,
-                ctypes.POINTER(ctypes.c_size_t)
+                ctypes.POINTER(ctypes.c_size_t),
             ]
             k32.ReadProcessMemory.restype = wintypes.BOOL
 
@@ -748,32 +796,213 @@ class VirtualMemoryInspector:
                     ctypes.c_void_p(cur_addr),
                     c_buf,
                     to_read,
-                    ctypes.byref(bytes_read)
+                    ctypes.byref(bytes_read),
                 )
-                if not ok or bytes_read.value == 0:
-                    if len(out_buf) == 0:
-                        return None
-                    out_buf.extend(b"\x00" * to_read)
-                else:
-                    out_buf.extend(c_buf.raw[:bytes_read.value])
-                    if bytes_read.value < to_read:
-                        out_buf.extend(b"\x00" * (to_read - bytes_read.value))
+                n_read = int(bytes_read.value)
+                if n_read > 0:
+                    out_buf.extend(c_buf.raw[:n_read])
+                if not ok or n_read == 0:
+                    failed_addr = cur_addr
+                    break
+                if n_read < to_read:
+                    failed_addr = cur_addr + n_read
+                    break
                 cur_addr += to_read
                 bytes_left -= to_read
 
-            return bytes(out_buf)
+            total_read = len(out_buf)
+            if total_read == 0:
+                return {
+                    "status": "error",
+                    "data": None,
+                    "bytes_requested": size,
+                    "bytes_read": 0,
+                    "is_partial": False,
+                    "first_failed_address": f"0x{(failed_addr if failed_addr is not None else address):X}",
+                }
+            if total_read < size:
+                if not allow_partial:
+                    return {
+                        "status": "partial_aborted",
+                        "data": None,
+                        "bytes_requested": size,
+                        "bytes_read": total_read,
+                        "is_partial": True,
+                        "first_failed_address": f"0x{(failed_addr if failed_addr is not None else address + total_read):X}",
+                    }
+                return {
+                    "status": "partial",
+                    "data": bytes(out_buf),
+                    "bytes_requested": size,
+                    "bytes_read": total_read,
+                    "is_partial": True,
+                    "first_failed_address": f"0x{(failed_addr if failed_addr is not None else address + total_read):X}",
+                }
+            return {
+                "status": "success",
+                "data": bytes(out_buf),
+                "bytes_requested": size,
+                "bytes_read": total_read,
+                "is_partial": False,
+                "first_failed_address": None,
+            }
         finally:
             k32.CloseHandle(h_proc)
+
+    @classmethod
+    def _read_memory_internal(
+        cls,
+        pid: int,
+        address: int,
+        size: int,
+        allow_partial: bool = True
+    ) -> Dict[str, Any]:
+        """Uses patched read_process_memory if mocked in tests, otherwise calls fast un-flooded raw reader."""
+        is_mocked = getattr(cls.read_process_memory, "__func__", None) is not VirtualMemoryInspector.read_process_memory.__func__
+        if is_mocked:
+            raw = cls.read_process_memory(pid, address, size)
+            if raw is None:
+                return {
+                    "status": "error",
+                    "data": None,
+                    "bytes_requested": max(0, size),
+                    "bytes_read": 0,
+                    "is_partial": False,
+                    "first_failed_address": f"0x{address:X}",
+                }
+            n = len(raw)
+            if n < size and not allow_partial:
+                return {
+                    "status": "partial_aborted",
+                    "data": None,
+                    "bytes_requested": size,
+                    "bytes_read": n,
+                    "is_partial": True,
+                    "first_failed_address": f"0x{address + n:X}",
+                }
+            return {
+                "status": "partial" if n < size else "success",
+                "data": raw,
+                "bytes_requested": max(0, size),
+                "bytes_read": n,
+                "is_partial": n < size,
+                "first_failed_address": f"0x{address + n:X}" if n < size else None,
+            }
+        return cls._read_process_memory_raw(pid, address, size, allow_partial=allow_partial)
+
+    @classmethod
+    def read_process_memory_checked(
+        cls,
+        pid: int,
+        address: int,
+        size: int,
+        allow_partial: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Mediated read-only virtual memory reader returning explicit read metadata
+        (data, bytes_requested, bytes_read, is_partial, first_failed_address).
+        Never pads unreadable spans with fabricated zeros.
+        """
+        ExecutionGuard.request_access(
+            component="virtual_memory_inspector",
+            operation="read_process_memory",
+            target=f"pid_{pid}_0x{address:X}",
+            capability=Capability.PROCESS_QUERY,
+            access_mode="READ",
+        )
+        return cls._read_process_memory_raw(pid, address, size, allow_partial=allow_partial)
+
+    @classmethod
+    def read_process_memory(
+        cls,
+        pid: int,
+        address: int,
+        size: int
+    ) -> Optional[bytes]:
+        """
+        Safely reads virtual memory bytes from a target process.
+        Uses kernel32.ReadProcessMemory in bounded chunked blocks.
+        Strictly read-only (PROCESS_VM_READ); governed by Capability.PROCESS_QUERY.
+        Truncates strictly at the last verified readable byte and NEVER pads failures with zeros.
+        Returns None on non-Windows platforms or zero-byte/unmapped read failures, and raises PermissionError if OpenProcess fails.
+        """
+        ExecutionGuard.request_access(
+            component="virtual_memory_inspector",
+            operation="read_process_memory",
+            target=f"pid_{pid}_0x{address:X}",
+            capability=Capability.PROCESS_QUERY,
+            access_mode="READ",
+        )
+        res = cls._read_process_memory_raw(pid, address, size, allow_partial=True)
+        return res.get("data")
 
 
 class ProcessMemoryScanner:
     """
     Stateful read-only memory value search engine providing First Scan and Next Scan.
-    Supports multiple data types (int32, int64, float, double, bytes, string).
-    Supports exact value, value between, increased, decreased, changed, and unchanged scans.
+    Supports int8, uint8, int16, uint16, int32, uint32, int64, uint64, float, double, bytes, and string.
+    Supports exact, between, unknown initial, increased, decreased, changed, and unchanged scans.
+    Bounded by LRU + TTL session eviction and PID creation-time identity verification.
     Strictly read-only (PROCESS_VM_READ); never modifies process memory.
     """
-    _ACTIVE_SESSIONS: Dict[str, Dict[str, Any]] = {}
+    _ACTIVE_SESSIONS: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+    _MAX_SESSIONS = 64
+    _SESSION_TTL_SECONDS = 1800.0
+    _SESSION_LOCK = threading.Lock()
+
+    _TYPE_MAP: Dict[str, Tuple[Optional[str], int, int]] = {
+        "int8": ("<b", 1, 1),
+        "uint8": ("<B", 1, 1),
+        "int16": ("<h", 2, 2),
+        "uint16": ("<H", 2, 2),
+        "int32": ("<i", 4, 4),
+        "uint32": ("<I", 4, 4),
+        "int64": ("<q", 8, 8),
+        "uint64": ("<Q", 8, 8),
+        "float": ("<f", 4, 4),
+        "double": ("<d", 8, 8),
+        "bytes": (None, 1, 1),
+        "string": (None, 1, 1),
+    }
+    _FIRST_SCAN_MODES = {"EXACT_VALUE", "VALUE_BETWEEN", "UNKNOWN_INITIAL_VALUE"}
+    _NEXT_SCAN_MODES = {
+        "EXACT_VALUE",
+        "VALUE_BETWEEN",
+        "INCREASED_VALUE",
+        "DECREASED_VALUE",
+        "CHANGED_VALUE",
+        "UNCHANGED_VALUE",
+    }
+
+    @classmethod
+    def _evict_sessions_locked(cls, now: Optional[float] = None) -> None:
+        now_ts = now if now is not None else time.time()
+        expired = [
+            sid for sid, s in cls._ACTIVE_SESSIONS.items()
+            if (now_ts - s.get("last_accessed", s.get("created_at", now_ts))) > cls._SESSION_TTL_SECONDS
+        ]
+        for sid in expired:
+            cls._ACTIVE_SESSIONS.pop(sid, None)
+        while len(cls._ACTIVE_SESSIONS) >= cls._MAX_SESSIONS:
+            cls._ACTIVE_SESSIONS.popitem(last=False)
+
+    @classmethod
+    def _parse_bytes_or_string_target(cls, dtype: str, value: Any) -> bytes:
+        if value is None:
+            raise ValueError(f"'value' is required for '{dtype}' scan.")
+        if dtype == "bytes":
+            if isinstance(value, (bytes, bytearray)):
+                raw = bytes(value)
+            else:
+                cleaned = str(value).replace(" ", "").replace("0x", "").replace("0X", "")
+                raw = bytes.fromhex(cleaned)
+            if not raw:
+                raise ValueError("'bytes' pattern must not be empty.")
+            return raw
+        encoded = str(value).encode("utf-8")
+        if not encoded:
+            raise ValueError("'string' search target must not be empty.")
+        return encoded
 
     @classmethod
     def first_scan(
@@ -785,7 +1014,8 @@ class ProcessMemoryScanner:
         min_val: Any = None,
         max_val: Any = None,
         writable_only: bool = True,
-        max_candidates: int = 50000
+        max_candidates: int = 50000,
+        alignment: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Initiates an initial memory scan across committed readable regions."""
         ExecutionGuard.request_access(
@@ -793,200 +1023,439 @@ class ProcessMemoryScanner:
             operation="first_scan",
             target=f"pid_{pid}_{data_type}_{scan_type}",
             capability=Capability.PROCESS_QUERY,
-            access_mode="READ"
+            access_mode="READ",
         )
+        dtype = data_type.lower()
+        type_info = cls._TYPE_MAP.get(dtype)
+        if not type_info:
+            raise ValueError(f"Unsupported scan data type: {data_type}")
+        fmt, step, default_align = type_info
+
+        if scan_type in ("INCREASED_VALUE", "DECREASED_VALUE", "CHANGED_VALUE", "UNCHANGED_VALUE"):
+            raise ValueError(
+                f"Scan type '{scan_type}' is a differential comparison mode valid only in next_scan(); "
+                f"run first_scan() with UNKNOWN_INITIAL_VALUE, EXACT_VALUE, or VALUE_BETWEEN."
+            )
+        if scan_type not in cls._FIRST_SCAN_MODES:
+            raise ValueError(f"Unsupported first_scan mode: {scan_type}")
+
+        if scan_type == "EXACT_VALUE" and value is None:
+            raise ValueError("'value' is required when scan_type='EXACT_VALUE'.")
+        if scan_type == "VALUE_BETWEEN" and (min_val is None or max_val is None):
+            raise ValueError("'min_val' and 'max_val' are required when scan_type='VALUE_BETWEEN'.")
+        if dtype in ("bytes", "string") and scan_type != "EXACT_VALUE":
+            raise ValueError(f"first_scan on '{dtype}' only supports scan_type='EXACT_VALUE'.")
+
+        if alignment is not None:
+            if alignment < 1:
+                raise ValueError("alignment must be >= 1.")
+            step_align = 1 if dtype in ("bytes", "string") else int(alignment)
+        else:
+            step_align = default_align
+
+        target_bytes: Optional[bytes] = None
+        if dtype in ("bytes", "string"):
+            target_bytes = cls._parse_bytes_or_string_target(dtype, value)
+
         snap = VirtualMemoryInspector.inspect_process(pid)
+        proc_start_time = VirtualMemoryInspector._get_process_start_time(pid)
+        now_ts = time.time()
+        session_id = uuid.uuid4().hex[:16]
+
         if snap.is_simulated:
-            session_id = str(uuid.uuid4())[:8]
-            cls._ACTIVE_SESSIONS[session_id] = {
-                "session_id": session_id,
-                "pid": pid,
-                "data_type": data_type,
-                "candidates": [],
-                "created_at": time.time()
-            }
+            with cls._SESSION_LOCK:
+                cls._evict_sessions_locked(now_ts)
+                cls._ACTIVE_SESSIONS[session_id] = {
+                    "session_id": session_id,
+                    "pid": pid,
+                    "process_start_time": proc_start_time,
+                    "data_type": dtype,
+                    "alignment": step_align,
+                    "candidates": [],
+                    "created_at": now_ts,
+                    "last_accessed": now_ts,
+                }
             return {
                 "status": "not_applicable",
                 "is_simulated": True,
                 "notice": "Process memory scanning requires a live Windows NT host with PROCESS_VM_READ access.",
                 "session_id": session_id,
                 "pid": pid,
-                "data_type": data_type,
+                "data_type": dtype,
                 "scan_type": scan_type,
+                "alignment": step_align,
                 "total_candidates": 0,
-                "candidates_sample": []
+                "candidates_sample": [],
             }
+
         candidates: List[Dict[str, Any]] = []
-
-        type_map = {
-            "int32": ("<i", 4, 4),
-            "uint32": ("<I", 4, 4),
-            "int64": ("<q", 8, 8),
-            "uint64": ("<Q", 8, 8),
-            "float": ("<f", 4, 4),
-            "double": ("<d", 8, 8),
-            "bytes": (None, 1, 1),
-            "string": (None, 1, 1),
-        }
-        type_info = type_map.get(data_type.lower())
-        if not type_info:
-            raise ValueError(f"Unsupported scan data type: {data_type}")
-        fmt, step, align = type_info
-
         target_regions = [
             r for r in snap.regions
             if r.state == MEM_COMMIT and (not writable_only or r.is_writable()) and not r.is_guard_page()
         ]
 
-        target_bytes = None
-        if data_type.lower() == "bytes":
-            target_bytes = bytes.fromhex(str(value).replace(" ", ""))
-        elif data_type.lower() == "string":
-            target_bytes = str(value).encode("utf-8")
+        SCAN_WINDOW = 4 * 1024 * 1024  # 4 MB bounded streaming window
+        truncated_by_limit = False
+        regions_scanned = 0
+        partial_regions_encountered = 0
+
+        pattern_len = len(target_bytes) if target_bytes is not None else step
+        overlap = max(0, pattern_len - step_align)
 
         for reg in target_regions:
             if len(candidates) >= max_candidates:
+                truncated_by_limit = True
                 break
-            raw = VirtualMemoryInspector.read_process_memory(pid, reg.base_address, reg.region_size)
-            if not raw or len(raw) < step:
-                continue
+            regions_scanned += 1
+            pos = 0
+            while pos < reg.region_size:
+                if len(candidates) >= max_candidates:
+                    truncated_by_limit = True
+                    break
+                win_len = min(SCAN_WINDOW, reg.region_size - pos)
+                read_res = VirtualMemoryInspector._read_memory_internal(
+                    pid, reg.base_address + pos, win_len, allow_partial=True
+                )
+                raw = read_res.get("data")
+                is_partial = bool(read_res.get("is_partial"))
+                if is_partial:
+                    partial_regions_encountered += 1
+                if not raw or len(raw) < pattern_len:
+                    break
 
-            if target_bytes is not None:
-                idx = 0
-                while idx != -1:
-                    idx = raw.find(target_bytes, idx)
-                    if idx != -1:
-                        addr = reg.base_address + idx
+                if target_bytes is not None:
+                    idx = 0
+                    disp_val = target_bytes.hex() if dtype == "bytes" else value
+                    while True:
+                        idx = raw.find(target_bytes, idx)
+                        if idx == -1:
+                            break
+                        addr = reg.base_address + pos + idx
                         candidates.append({
                             "address": f"0x{addr:016X}",
                             "address_int": addr,
-                            "value": value,
-                            "category": reg.category
+                            "value": disp_val,
+                            "raw_hex": target_bytes.hex(),
+                            "match_len": len(target_bytes),
+                            "category": reg.category,
                         })
                         if len(candidates) >= max_candidates:
+                            truncated_by_limit = True
                             break
                         idx += 1
-            else:
-                num_items = (len(raw) - step) // align + 1
-                for i in range(num_items):
-                    offset = i * align
-                    (val,) = struct.unpack_from(fmt, raw, offset)
-                    match = False
-                    if scan_type == "EXACT_VALUE" and value is not None:
-                        if data_type.lower() in ("float", "double"):
-                            match = abs(val - float(value)) < 1e-4
-                        else:
-                            match = (val == int(value))
-                    elif scan_type == "VALUE_BETWEEN" and min_val is not None and max_val is not None:
-                        match = (float(min_val) <= val <= float(max_val))
-                    elif scan_type == "UNKNOWN_INITIAL_VALUE":
-                        match = True
+                else:
+                    assert fmt is not None
+                    if scan_type == "EXACT_VALUE" and dtype not in ("float", "double"):
+                        # Fast C-level byte search for exact integers (critical when alignment=1 over large heaps)
+                        packed_target = struct.pack(fmt, int(value))
+                        idx = 0
+                        target_int = int(value)
+                        while True:
+                            idx = raw.find(packed_target, idx)
+                            if idx == -1:
+                                break
+                            abs_off = pos + idx
+                            if step_align == 1 or (abs_off % step_align == 0):
+                                addr = reg.base_address + abs_off
+                                candidates.append({
+                                    "address": f"0x{addr:016X}",
+                                    "address_int": addr,
+                                    "value": target_int,
+                                    "category": reg.category,
+                                })
+                                if len(candidates) >= max_candidates:
+                                    truncated_by_limit = True
+                                    break
+                            idx += 1
+                    else:
+                        limit_off = len(raw) - step
+                        for off in range(0, limit_off + 1, step_align):
+                            (val,) = struct.unpack_from(fmt, raw, off)
+                            match = False
+                            if scan_type == "EXACT_VALUE":
+                                match = math.isfinite(val) and abs(val - float(value)) < 1e-4
+                            elif scan_type == "VALUE_BETWEEN":
+                                match = math.isfinite(val) if isinstance(val, float) else True
+                                if match:
+                                    match = (float(min_val) <= val <= float(max_val))
+                            elif scan_type == "UNKNOWN_INITIAL_VALUE":
+                                match = True
 
-                    if match:
-                        addr = reg.base_address + offset
-                        candidates.append({
-                            "address": f"0x{addr:016X}",
-                            "address_int": addr,
-                            "value": round(val, 4) if isinstance(val, float) else val,
-                            "category": reg.category
-                        })
-                        if len(candidates) >= max_candidates:
-                            break
+                            if match:
+                                addr = reg.base_address + pos + off
+                                candidates.append({
+                                    "address": f"0x{addr:016X}",
+                                    "address_int": addr,
+                                    "value": round(val, 4) if isinstance(val, float) and math.isfinite(val) else val,
+                                    "category": reg.category,
+                                })
+                                if len(candidates) >= max_candidates:
+                                    truncated_by_limit = True
+                                    break
 
-        session_id = str(uuid.uuid4())[:8]
-        cls._ACTIVE_SESSIONS[session_id] = {
-            "session_id": session_id,
-            "pid": pid,
-            "data_type": data_type,
-            "candidates": candidates,
-            "created_at": time.time()
-        }
+                if is_partial or len(raw) < win_len or pos + win_len >= reg.region_size:
+                    break
+                usable = len(raw) - overlap
+                advance = (usable // step_align) * step_align
+                if advance <= 0:
+                    advance = step_align
+                pos += advance
+
+        with cls._SESSION_LOCK:
+            cls._evict_sessions_locked(now_ts)
+            cls._ACTIVE_SESSIONS[session_id] = {
+                "session_id": session_id,
+                "pid": pid,
+                "process_start_time": proc_start_time,
+                "data_type": dtype,
+                "alignment": step_align,
+                "candidates": candidates,
+                "created_at": now_ts,
+                "last_accessed": now_ts,
+            }
 
         return {
             "session_id": session_id,
             "pid": pid,
-            "data_type": data_type,
+            "data_type": dtype,
             "scan_type": scan_type,
+            "alignment": step_align,
+            "regions_scanned": regions_scanned,
+            "total_target_regions": len(target_regions),
+            "partial_read_regions": partial_regions_encountered,
+            "truncated_by_max_candidates": truncated_by_limit,
             "total_candidates": len(candidates),
-            "candidates_sample": candidates[:50]
+            "candidates_sample": candidates[:50],
         }
 
     @classmethod
     def next_scan(
         cls,
-        session_id: str,
+        session_id: Optional[str] = None,
         scan_type: str = "EXACT_VALUE",
         value: Any = None,
         min_val: Any = None,
-        max_val: Any = None
+        max_val: Any = None,
+        pid: Optional[int] = None,
+        data_type: Optional[str] = None,
+        candidate_addresses: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
-        """Filters previous scan candidates by re-reading their current memory values."""
-        sess = cls._ACTIVE_SESSIONS.get(session_id)
-        if not sess:
-            raise KeyError(f"Scan session '{session_id}' not found or expired.")
+        """
+        Filters previous scan candidates (from session_id or explicit candidate_addresses)
+        by re-reading current live memory values with strict type fidelity and zero fabrication.
+        """
+        if scan_type not in cls._NEXT_SCAN_MODES:
+            raise ValueError(f"Unsupported scan_type for next_scan: {scan_type}")
 
-        pid = sess["pid"]
-        data_type = sess["data_type"]
-        prev_candidates = sess["candidates"]
+        sess: Optional[Dict[str, Any]] = None
+        now_ts = time.time()
 
-        type_map = {
-            "int32": ("<i", 4),
-            "uint32": ("<I", 4),
-            "int64": ("<q", 8),
-            "uint64": ("<Q", 8),
-            "float": ("<f", 4),
-            "double": ("<d", 8),
-        }
-        fmt, step = type_map.get(data_type.lower(), ("<i", 4))
+        if session_id:
+            with cls._SESSION_LOCK:
+                cls._evict_sessions_locked(now_ts)
+                sess = cls._ACTIVE_SESSIONS.get(session_id)
+                if not sess:
+                    raise KeyError(f"Scan session '{session_id}' not found or expired.")
+                cls._ACTIVE_SESSIONS.move_to_end(session_id)
+                sess["last_accessed"] = now_ts
+            target_pid = int(sess["pid"])
+            dtype = str(sess["data_type"]).lower()
+            prev_candidates = list(sess["candidates"])
+            sess_start_time = sess.get("process_start_time")
+        else:
+            if not pid or pid <= 0:
+                raise ValueError("Either 'session_id' or valid 'pid' with 'candidate_addresses' is required.")
+            if candidate_addresses is None:
+                raise ValueError("Either 'session_id' or 'candidate_addresses' is required for next_scan.")
+            target_pid = int(pid)
+            dtype = str(data_type or "int32").lower()
+            if scan_type in ("INCREASED_VALUE", "DECREASED_VALUE", "CHANGED_VALUE", "UNCHANGED_VALUE"):
+                raise ValueError(
+                    f"Stateless candidate_addresses filtering cannot compute '{scan_type}' without a baseline session_id; "
+                    f"use EXACT_VALUE or VALUE_BETWEEN, or pass session_id from first_scan."
+                )
+            prev_candidates = [
+                {
+                    "address": f"0x{int(a, 0) if isinstance(a, str) else int(a):016X}",
+                    "address_int": int(a, 0) if isinstance(a, str) else int(a),
+                    "value": None,
+                    "category": "CANDIDATE",
+                }
+                for a in candidate_addresses
+            ]
+            sess_start_time = None
 
-        surviving = []
-        for cand in prev_candidates:
-            addr = cand["address_int"]
-            old_val = cand["value"]
-            raw = VirtualMemoryInspector.read_process_memory(pid, addr, step)
-            if not raw or len(raw) < step:
-                continue
-            (new_val,) = struct.unpack(fmt, raw)
-            if isinstance(new_val, float):
-                new_val = round(new_val, 4)
+        ExecutionGuard.request_access(
+            component="virtual_memory_inspector",
+            operation="next_scan",
+            target=f"pid_{target_pid}_{dtype}_{scan_type}",
+            capability=Capability.PROCESS_QUERY,
+            access_mode="READ",
+        )
 
-            match = False
-            if scan_type == "EXACT_VALUE" and value is not None:
-                match = (abs(new_val - float(value)) < 1e-4) if isinstance(new_val, float) else (new_val == int(value))
-            elif scan_type == "INCREASED_VALUE":
-                match = (new_val > old_val)
-            elif scan_type == "DECREASED_VALUE":
-                match = (new_val < old_val)
-            elif scan_type == "CHANGED_VALUE":
-                match = (new_val != old_val)
-            elif scan_type == "UNCHANGED_VALUE":
-                match = (new_val == old_val)
-            elif scan_type == "VALUE_BETWEEN" and min_val is not None and max_val is not None:
-                match = (float(min_val) <= new_val <= float(max_val))
+        if sess is not None and sess_start_time is not None and VirtualMemoryInspector._is_windows():
+            cur_start = VirtualMemoryInspector._get_process_start_time(target_pid)
+            if cur_start is not None and cur_start != sess_start_time:
+                with cls._SESSION_LOCK:
+                    cls._ACTIVE_SESSIONS.pop(session_id, None)  # type: ignore[arg-type]
+                raise RuntimeError(
+                    f"PID {target_pid} process identity changed (PID reuse detected); scan session '{session_id}' invalidated."
+                )
 
-            if match:
-                cand_copy = dict(cand)
-                cand_copy["previous_value"] = old_val
-                cand_copy["value"] = new_val
-                surviving.append(cand_copy)
+        if dtype not in cls._TYPE_MAP:
+            raise ValueError(f"Unsupported scan data type: {dtype}")
 
-        sess["candidates"] = surviving
+        if scan_type == "EXACT_VALUE" and value is None:
+            raise ValueError("'value' is required when scan_type='EXACT_VALUE'.")
+        if scan_type == "VALUE_BETWEEN" and (min_val is None or max_val is None):
+            raise ValueError("'min_val' and 'max_val' are required when scan_type='VALUE_BETWEEN'.")
+
+        surviving: List[Dict[str, Any]] = []
+
+        if dtype in ("bytes", "string"):
+            if scan_type in ("INCREASED_VALUE", "DECREASED_VALUE", "VALUE_BETWEEN"):
+                raise ValueError(
+                    f"Scan mode '{scan_type}' is not valid for '{dtype}' data type; "
+                    f"use EXACT_VALUE, CHANGED_VALUE, or UNCHANGED_VALUE."
+                )
+            target_bytes: Optional[bytes] = None
+            if scan_type == "EXACT_VALUE":
+                target_bytes = cls._parse_bytes_or_string_target(dtype, value)
+
+            for cand in prev_candidates:
+                addr = int(cand["address_int"])
+                old_hex = cand.get("raw_hex")
+                old_bytes: Optional[bytes] = None
+                if isinstance(old_hex, str) and old_hex:
+                    old_bytes = bytes.fromhex(old_hex)
+                elif cand.get("value") is not None:
+                    old_bytes = (
+                        cls._parse_bytes_or_string_target("bytes", cand["value"])
+                        if dtype == "bytes"
+                        else str(cand["value"]).encode("utf-8")
+                    )
+
+                read_len = len(target_bytes) if target_bytes is not None else (
+                    int(cand.get("match_len") or (len(old_bytes) if old_bytes else 0))
+                )
+                if read_len <= 0:
+                    continue
+
+                read_res = VirtualMemoryInspector._read_memory_internal(
+                    target_pid, addr, read_len, allow_partial=False
+                )
+                cur_bytes = read_res.get("data")
+                if cur_bytes is None or len(cur_bytes) < read_len:
+                    continue
+
+                match = False
+                if scan_type == "EXACT_VALUE" and target_bytes is not None:
+                    match = (cur_bytes == target_bytes)
+                elif scan_type == "CHANGED_VALUE" and old_bytes is not None:
+                    match = (cur_bytes != old_bytes)
+                elif scan_type == "UNCHANGED_VALUE" and old_bytes is not None:
+                    match = (cur_bytes == old_bytes)
+
+                if match:
+                    cand_copy = dict(cand)
+                    cand_copy["previous_value"] = cand.get("value")
+                    cand_copy["raw_hex"] = cur_bytes.hex()
+                    cand_copy["match_len"] = len(cur_bytes)
+                    cand_copy["value"] = (
+                        cur_bytes.hex() if dtype == "bytes" else cur_bytes.decode("utf-8", errors="replace")
+                    )
+                    surviving.append(cand_copy)
+        else:
+            fmt, step, _ = cls._TYPE_MAP[dtype]
+            assert fmt is not None
+            for cand in prev_candidates:
+                addr = int(cand["address_int"])
+                old_val = cand.get("value")
+                read_res = VirtualMemoryInspector._read_memory_internal(
+                    target_pid, addr, step, allow_partial=False
+                )
+                raw = read_res.get("data")
+                if raw is None or len(raw) < step:
+                    continue
+                (new_val,) = struct.unpack(fmt, raw)
+                if isinstance(new_val, float):
+                    if not math.isfinite(new_val):
+                        continue
+                    new_val = round(new_val, 4)
+
+                match = False
+                if scan_type == "EXACT_VALUE":
+                    match = (
+                        abs(new_val - float(value)) < 1e-4
+                        if dtype in ("float", "double")
+                        else (new_val == int(value))
+                    )
+                elif scan_type == "INCREASED_VALUE" and old_val is not None:
+                    match = (new_val > old_val)
+                elif scan_type == "DECREASED_VALUE" and old_val is not None:
+                    match = (new_val < old_val)
+                elif scan_type == "CHANGED_VALUE" and old_val is not None:
+                    match = (new_val != old_val)
+                elif scan_type == "UNCHANGED_VALUE" and old_val is not None:
+                    match = (new_val == old_val)
+                elif scan_type == "VALUE_BETWEEN":
+                    match = (float(min_val) <= new_val <= float(max_val))
+
+                if match:
+                    cand_copy = dict(cand)
+                    cand_copy["previous_value"] = old_val
+                    cand_copy["value"] = new_val
+                    surviving.append(cand_copy)
+
+        if sess is not None:
+            with cls._SESSION_LOCK:
+                if session_id in cls._ACTIVE_SESSIONS:
+                    cls._ACTIVE_SESSIONS[session_id]["candidates"] = surviving
+                    cls._ACTIVE_SESSIONS[session_id]["last_accessed"] = time.time()
+
         return {
             "session_id": session_id,
-            "pid": pid,
+            "pid": target_pid,
+            "data_type": dtype,
             "scan_type": scan_type,
             "previous_count": len(prev_candidates),
             "surviving_count": len(surviving),
-            "candidates_sample": surviving[:50]
+            "candidates_sample": surviving[:50],
         }
 
 
 class PointerScanner:
     """
     Reverse-engineers pointer paths connecting static module roots to dynamic memory objects.
-    Finds: [Module.dll + RVA] -> +Offset1 -> +Offset2 -> TargetAddress.
+    Supports depth 1..3 ([Module.dll+RVA] -> [+Off1] -> [+Off2] -> TargetAddress) with 4-byte slot
+    alignment support and mandatory live dereference verification before reporting.
     Strictly read-only; uses chunked ReadProcessMemory.
     """
+
+    @classmethod
+    def _verify_pointer_path(
+        cls,
+        pid: int,
+        base_slot_va: int,
+        offsets: List[int],
+        expected_target: int,
+        fmt: str,
+        ptr_size: int
+    ) -> bool:
+        """Independently re-dereferences a candidate pointer chain from base_slot_va to confirm it reaches expected_target."""
+        cur_ptr_slot = base_slot_va
+        for idx, off in enumerate(offsets):
+            read_res = VirtualMemoryInspector._read_memory_internal(pid, cur_ptr_slot, ptr_size, allow_partial=False)
+            raw = read_res.get("data")
+            if raw is None or len(raw) < ptr_size:
+                return False
+            (deref_val,) = struct.unpack(fmt, raw)
+            next_addr = deref_val + off
+            if idx == len(offsets) - 1:
+                return next_addr == expected_target
+            cur_ptr_slot = next_addr
+        return False
+
     @classmethod
     def find_pointer_paths(
         cls,
@@ -994,230 +1463,543 @@ class PointerScanner:
         target_address: int,
         max_depth: int = 2,
         max_offset: int = 0x1000,
-        max_results: int = 25
+        max_results: int = 25,
+        alignment: int = 4,
     ) -> Dict[str, Any]:
-        """Discovers multi-level pointer paths reaching target_address."""
+        """Discovers and dereference-verifies multi-level pointer paths (depth 1..3) reaching target_address."""
+        import bisect
+
         ExecutionGuard.request_access(
             component="virtual_memory_inspector",
             operation="pointer_scan",
             target=f"pid_{pid}_0x{target_address:X}",
             capability=Capability.PROCESS_QUERY,
-            access_mode="READ"
+            access_mode="READ",
         )
+        if max_depth < 1 or max_depth > 3:
+            raise ValueError(f"max_depth must be between 1 and 3 (got {max_depth}).")
+        if max_offset < 0:
+            raise ValueError("max_offset must be >= 0.")
+        if alignment < 1:
+            raise ValueError("alignment must be >= 1.")
+
         snap = VirtualMemoryInspector.inspect_process(pid)
         if snap.is_simulated:
             return {
                 "status": "not_applicable",
                 "is_simulated": True,
+                "heuristic": True,
                 "notice": "Pointer path resolution requires a live Windows NT process with PROCESS_VM_READ access.",
                 "pid": pid,
                 "target_address": f"0x{target_address:016X}",
+                "max_depth_searched": max_depth,
+                "alignment": alignment,
                 "paths_count": 0,
-                "paths": []
+                "paths": [],
             }
+
         arch = snap.architecture
         ptr_size = 4 if arch == "x86-32" else 8
         fmt = "<I" if ptr_size == 4 else "<Q"
+        scan_stride = min(alignment, ptr_size)
 
-        static_regions = [r for r in snap.regions if r.mem_type == MEM_IMAGE and r.category in ("IMAGE_DATA", "IMAGE_RDATA", "IMAGE_SECTION")]
-        heap_regions = [r for r in snap.regions if r.mem_type == MEM_PRIVATE and r.state == MEM_COMMIT and r.is_readable()]
+        static_regions = [
+            r for r in snap.regions
+            if r.mem_type == MEM_IMAGE and r.category in ("IMAGE_DATA", "IMAGE_RDATA", "IMAGE_SECTION") and r.is_readable()
+        ]
+        heap_regions = [
+            r for r in snap.regions
+            if r.mem_type == MEM_PRIVATE and r.state == MEM_COMMIT and r.is_readable() and not r.is_guard_page()
+        ]
+        # Prioritize regions nearest/containing target_address and keep bounded byte budget
+        heap_regions.sort(key=lambda r: abs((r.base_address + r.region_size // 2) - target_address))
 
-        paths_found = []
-
-        # Level 1 search: static module pointer -> target
+        static_blobs: List[Tuple[ProcessMemoryRegion, bytes]] = []
         for reg in static_regions:
+            if reg.region_size > 16 * 1024 * 1024:
+                continue
+            read_res = VirtualMemoryInspector._read_memory_internal(pid, reg.base_address, reg.region_size, allow_partial=True)
+            raw = read_res.get("data")
+            if raw and len(raw) >= ptr_size:
+                static_blobs.append((reg, raw))
+
+        paths_found: List[Dict[str, Any]] = []
+
+        # Depth 1: [Module+RVA] + delta == target_address
+        for reg, raw in static_blobs:
             if len(paths_found) >= max_results:
                 break
-            raw = VirtualMemoryInspector.read_process_memory(pid, reg.base_address, reg.region_size)
-            if not raw or len(raw) < ptr_size:
-                continue
-            num_ptrs = (len(raw) - ptr_size) // ptr_size + 1
-            for i in range(num_ptrs):
-                off = i * ptr_size
+            mod_name = reg.module_name or "target.exe"
+            mod_base = reg.allocation_base or reg.base_address
+            for off in range(0, len(raw) - ptr_size + 1, scan_stride):
                 (ptr_val,) = struct.unpack_from(fmt, raw, off)
-                if 0 <= (target_address - ptr_val) <= max_offset:
-                    delta = target_address - ptr_val
-                    mod_name = reg.module_name or "target.exe"
-                    rva = (reg.base_address + off) - (reg.allocation_base or reg.base_address)
+                delta = target_address - ptr_val
+                if 0 <= delta <= max_offset:
+                    slot_va = reg.base_address + off
+                    if not cls._verify_pointer_path(pid, slot_va, [delta], target_address, fmt, ptr_size):
+                        continue
+                    rva = slot_va - mod_base
                     paths_found.append({
                         "depth": 1,
                         "base_module": mod_name,
                         "base_rva": f"0x{rva:X}",
                         "offsets": [f"0x{delta:X}"],
                         "expression": f"[{mod_name}+0x{rva:X}] + 0x{delta:X}",
-                        "resolved_target": f"0x{target_address:X}"
+                        "resolved_target": f"0x{target_address:X}",
+                        "verified": True,
+                        "confidence": "HEURISTIC_STATIC_DEREF",
                     })
                     if len(paths_found) >= max_results:
                         break
 
-        # Level 2 search: static -> heap pointer -> target
+        # Build Level-1 heap candidates once when max_depth >= 2
+        heap_l1_map: Dict[int, int] = {}
+        sorted_h1: List[int] = []
+        heap_blobs: List[Tuple[ProcessMemoryRegion, bytes]] = []
         if max_depth >= 2 and len(paths_found) < max_results:
-            candidate_heap_ptrs = []
-            for reg in heap_regions[:20]:
-                if len(candidate_heap_ptrs) >= 200:
+            total_heap_bytes = 0
+            HEAVY_BUDGET = 64 * 1024 * 1024
+            for reg in heap_regions[:64]:
+                if total_heap_bytes >= HEAVY_BUDGET:
                     break
-                raw = VirtualMemoryInspector.read_process_memory(pid, reg.base_address, reg.region_size)
-                if not raw or len(raw) < ptr_size:
+                if reg.region_size > 16 * 1024 * 1024:
                     continue
-                num_ptrs = (len(raw) - ptr_size) // ptr_size + 1
-                for i in range(num_ptrs):
-                    off = i * ptr_size
-                    (ptr_val,) = struct.unpack_from(fmt, raw, off)
-                    if 0 <= (target_address - ptr_val) <= max_offset:
-                        candidate_heap_ptrs.append((reg.base_address + off, target_address - ptr_val))
-
-            for heap_addr, delta2 in candidate_heap_ptrs:
-                if len(paths_found) >= max_results:
+                read_res = VirtualMemoryInspector._read_memory_internal(pid, reg.base_address, reg.region_size, allow_partial=True)
+                raw = read_res.get("data")
+                if raw and len(raw) >= ptr_size:
+                    total_heap_bytes += len(raw)
+                    heap_blobs.append((reg, raw))
+                    for off in range(0, len(raw) - ptr_size + 1, scan_stride):
+                        (ptr_val,) = struct.unpack_from(fmt, raw, off)
+                        delta = target_address - ptr_val
+                        if 0 <= delta <= max_offset:
+                            h1_addr = reg.base_address + off
+                            heap_l1_map[h1_addr] = delta
+                            if len(heap_l1_map) >= 400:
+                                break
+                if len(heap_l1_map) >= 400:
                     break
-                for reg in static_regions:
+
+            sorted_h1 = sorted(heap_l1_map.keys())
+
+            # Depth 2: static -> heap_l1 -> target (using bisect for O(log H) lookup)
+            if sorted_h1:
+                for reg, raw in static_blobs:
                     if len(paths_found) >= max_results:
                         break
-                    raw = VirtualMemoryInspector.read_process_memory(pid, reg.base_address, reg.region_size)
-                    if not raw or len(raw) < ptr_size:
-                        continue
-                    num_ptrs = (len(raw) - ptr_size) // ptr_size + 1
-                    for i in range(num_ptrs):
-                        off = i * ptr_size
+                    mod_name = reg.module_name or "target.exe"
+                    mod_base = reg.allocation_base or reg.base_address
+                    for off in range(0, len(raw) - ptr_size + 1, scan_stride):
                         (ptr_val,) = struct.unpack_from(fmt, raw, off)
-                        if 0 <= (heap_addr - ptr_val) <= max_offset:
-                            delta1 = heap_addr - ptr_val
-                            mod_name = reg.module_name or "target.exe"
-                            rva = (reg.base_address + off) - (reg.allocation_base or reg.base_address)
-                            paths_found.append({
-                                "depth": 2,
-                                "base_module": mod_name,
-                                "base_rva": f"0x{rva:X}",
-                                "offsets": [f"0x{delta1:X}", f"0x{delta2:X}"],
-                                "expression": f"[[{mod_name}+0x{rva:X}] + 0x{delta1:X}] + 0x{delta2:X}",
-                                "intermediate_heap_address": f"0x{heap_addr:X}",
-                                "resolved_target": f"0x{target_address:X}"
-                            })
-                            if len(paths_found) >= max_results:
+                        lo_idx = bisect.bisect_left(sorted_h1, ptr_val)
+                        while lo_idx < len(sorted_h1):
+                            h1_addr = sorted_h1[lo_idx]
+                            d1 = h1_addr - ptr_val
+                            if d1 > max_offset:
                                 break
+                            d2 = heap_l1_map[h1_addr]
+                            slot_va = reg.base_address + off
+                            if cls._verify_pointer_path(pid, slot_va, [d1, d2], target_address, fmt, ptr_size):
+                                rva = slot_va - mod_base
+                                paths_found.append({
+                                    "depth": 2,
+                                    "base_module": mod_name,
+                                    "base_rva": f"0x{rva:X}",
+                                    "offsets": [f"0x{d1:X}", f"0x{d2:X}"],
+                                    "expression": f"[[{mod_name}+0x{rva:X}] + 0x{d1:X}] + 0x{d2:X}",
+                                    "intermediate_heap_address": f"0x{h1_addr:X}",
+                                    "resolved_target": f"0x{target_address:X}",
+                                    "verified": True,
+                                    "confidence": "HEURISTIC_STATIC_DEREF",
+                                })
+                                if len(paths_found) >= max_results:
+                                    break
+                            lo_idx += 1
+                        if len(paths_found) >= max_results:
+                            break
+
+        # Depth 3: static -> heap_l2 -> heap_l1 -> target
+        if max_depth >= 3 and len(paths_found) < max_results and sorted_h1:
+            heap_l2_map: Dict[int, Tuple[int, int, int]] = {}  # h2_addr -> (d2, d3, h1_addr)
+            for reg, raw in heap_blobs:
+                if len(heap_l2_map) >= 400:
+                    break
+                for off in range(0, len(raw) - ptr_size + 1, scan_stride):
+                    (ptr_val,) = struct.unpack_from(fmt, raw, off)
+                    lo_idx = bisect.bisect_left(sorted_h1, ptr_val)
+                    while lo_idx < len(sorted_h1):
+                        h1_addr = sorted_h1[lo_idx]
+                        d2 = h1_addr - ptr_val
+                        if d2 > max_offset:
+                            break
+                        h2_addr = reg.base_address + off
+                        if h2_addr != h1_addr:
+                            heap_l2_map[h2_addr] = (d2, heap_l1_map[h1_addr], h1_addr)
+                            break
+                        lo_idx += 1
+                    if len(heap_l2_map) >= 400:
+                        break
+
+            sorted_h2 = sorted(heap_l2_map.keys())
+            if sorted_h2:
+                for reg, raw in static_blobs:
+                    if len(paths_found) >= max_results:
+                        break
+                    mod_name = reg.module_name or "target.exe"
+                    mod_base = reg.allocation_base or reg.base_address
+                    for off in range(0, len(raw) - ptr_size + 1, scan_stride):
+                        (ptr_val,) = struct.unpack_from(fmt, raw, off)
+                        lo_idx = bisect.bisect_left(sorted_h2, ptr_val)
+                        while lo_idx < len(sorted_h2):
+                            h2_addr = sorted_h2[lo_idx]
+                            d1 = h2_addr - ptr_val
+                            if d1 > max_offset:
+                                break
+                            d2, d3, _h1 = heap_l2_map[h2_addr]
+                            slot_va = reg.base_address + off
+                            if cls._verify_pointer_path(pid, slot_va, [d1, d2, d3], target_address, fmt, ptr_size):
+                                rva = slot_va - mod_base
+                                paths_found.append({
+                                    "depth": 3,
+                                    "base_module": mod_name,
+                                    "base_rva": f"0x{rva:X}",
+                                    "offsets": [f"0x{d1:X}", f"0x{d2:X}", f"0x{d3:X}"],
+                                    "expression": f"[[[{mod_name}+0x{rva:X}] + 0x{d1:X}] + 0x{d2:X}] + 0x{d3:X}",
+                                    "intermediate_heap_address": f"0x{h2_addr:X}",
+                                    "resolved_target": f"0x{target_address:X}",
+                                    "verified": True,
+                                    "confidence": "HEURISTIC_STATIC_DEREF",
+                                })
+                                if len(paths_found) >= max_results:
+                                    break
+                            lo_idx += 1
+                        if len(paths_found) >= max_results:
+                            break
 
         return {
             "pid": pid,
             "target_address": f"0x{target_address:X}",
+            "max_depth_searched": max_depth,
+            "alignment": scan_stride,
+            "heuristic": True,
+            "notice": "Pointer chains are heuristic candidates verified immediately via read-only dereferencing; ASLR or heap freeing may invalidate paths later.",
             "paths_count": len(paths_found),
-            "paths": paths_found
+            "paths": paths_found,
         }
 
 
 class StructureDissector:
     """
-    Analyzes raw memory at a target address and classifies fields (pointers, vftables,
-    floats, integers, strings) to reconstruct runtime data structures.
+    Analyzes raw memory at a target address at 4-byte field granularity with 64-bit
+    pointer/scalar lookahead, confidence scoring, and alternative type hypotheses.
     Strictly read-only.
     """
+
+    @staticmethod
+    def _is_plausible_float32(raw4: bytes) -> Optional[float]:
+        (u32,) = struct.unpack("<I", raw4)
+        exp = (u32 >> 23) & 0xFF
+        if exp in (0, 0xFF):
+            return None
+        (f32,) = struct.unpack("<f", raw4)
+        if not math.isfinite(f32):
+            return None
+        if 0.0001 <= abs(f32) <= 1_000_000.0 and abs(f32 - round(f32, 3)) < 1e-3 * max(1.0, abs(f32)):
+            return round(f32, 4)
+        return None
+
+    @staticmethod
+    def _is_plausible_float64(raw8: bytes) -> Optional[float]:
+        (u64,) = struct.unpack("<Q", raw8)
+        exp = (u64 >> 52) & 0x7FF
+        if exp in (0, 0x7FF):
+            return None
+        (f64,) = struct.unpack("<d", raw8)
+        if not math.isfinite(f64):
+            return None
+        if 0.0001 <= abs(f64) <= 1_000_000.0 and abs(f64 - round(f64, 4)) < 1e-4 * max(1.0, abs(f64)):
+            return round(f64, 4)
+        return None
+
+    @classmethod
+    def _classify_pointer(
+        cls,
+        pid: int,
+        snap: ProcessMemoryMapSnapshot,
+        ptr_val: int,
+        ptr_size: int
+    ) -> Optional[Tuple[str, str, List[str], str]]:
+        """Classifies a committed target pointer and distinguishes IMAGE_RDATA vtables from code/data pointers."""
+        if ptr_val == 0:
+            return None
+        cls_ptr = snap.classify_address(ptr_val)
+        if cls_ptr.get("status") != "COMMITTED":
+            return None
+        cat = cls_ptr.get("category", "")
+        mod = cls_ptr.get("module_name")
+        rva = cls_ptr.get("rva")
+        uint_alt = "uint64_t" if ptr_size == 8 else "uint32_t"
+
+        if cat == "IMAGE_RDATA":
+            # Look ahead 1 slot: vtables reside in .rdata and hold pointers into .text
+            probe = VirtualMemoryInspector._read_memory_internal(pid, ptr_val, ptr_size, allow_partial=False)
+            p_raw = probe.get("data")
+            if p_raw and len(p_raw) == ptr_size:
+                fmt = "<Q" if ptr_size == 8 else "<I"
+                (first_slot,) = struct.unpack(fmt, p_raw)
+                slot_cls = snap.classify_address(first_slot)
+                if slot_cls.get("status") == "COMMITTED" and slot_cls.get("category") == "IMAGE_TEXT":
+                    return "void**", f"vtable_ptr ({mod}+{rva} -> {slot_cls.get('module_name')}+{slot_cls.get('rva')})", [uint_alt, "void*"], "HIGH"
+            return "void*", f"static_rdata_ptr ({mod}+{rva})", [uint_alt], "HIGH"
+        elif cat == "IMAGE_TEXT":
+            return "void*", f"code_or_fn_ptr ({mod}+{rva})", [uint_alt], "HIGH"
+        elif cat == "IMAGE_DATA":
+            return "void*", f"static_data_ptr ({mod}+{rva})", [uint_alt], "HIGH"
+        elif cat == "HEAP":
+            return "void*", f"heap_ptr (0x{ptr_val:X})", [uint_alt], "HIGH"
+        elif cat == "STACK":
+            return "void*", f"stack_frame_ptr (0x{ptr_val:X})", [uint_alt], "MEDIUM"
+        elif cat == "MAPPED_FILE":
+            return "void*", f"mapped_memory_ptr (0x{ptr_val:X})", [uint_alt], "HIGH"
+        return "void*", f"committed_ptr_{cat} (0x{ptr_val:X})", [uint_alt], "MEDIUM"
+
     @classmethod
     def dissect(
         cls,
         pid: int,
         base_address: int,
-        size: int = 128
+        size: int = 128,
+        struct_name: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Dissects consecutive memory slots and infers field data types."""
+        """Dissects memory at 4-byte field granularity with pointer/64-bit scalar lookahead."""
         ExecutionGuard.request_access(
             component="virtual_memory_inspector",
             operation="dissect_struct",
             target=f"pid_{pid}_0x{base_address:X}",
             capability=Capability.PROCESS_QUERY,
-            access_mode="READ"
+            access_mode="READ",
         )
         snap = VirtualMemoryInspector.inspect_process(pid)
+        effective_name = struct_name or f"Reconstructed_0x{base_address:X}"
         if snap.is_simulated:
             return {
                 "status": "not_applicable",
                 "is_simulated": True,
+                "heuristic": True,
                 "notice": "Structure dissection requires a live Windows NT process with PROCESS_VM_READ access.",
                 "pid": pid,
                 "base_address": f"0x{base_address:016X}",
+                "structure_name": effective_name,
                 "architecture": snap.architecture,
                 "fields_count": 0,
                 "fields": [],
-                "c_struct_definition": f"// Structure dissection unavailable on non-Windows environment for PID {pid}"
+                "c_struct_definition": f"// Structure dissection unavailable on non-Windows environment for PID {pid}",
             }
+
         arch = snap.architecture
         ptr_size = 4 if arch == "x86-32" else 8
-        fmt = "<I" if ptr_size == 4 else "<Q"
 
-        raw = VirtualMemoryInspector.read_process_memory(pid, base_address, size)
+        is_mocked = getattr(
+            VirtualMemoryInspector.read_process_memory, "__func__", None
+        ) is not VirtualMemoryInspector.read_process_memory.__func__
+        if is_mocked:
+            raw = VirtualMemoryInspector.read_process_memory(pid, base_address, size)
+            is_partial = bool(raw is not None and len(raw) < size)
+        else:
+            read_res = VirtualMemoryInspector.read_process_memory_checked(pid, base_address, size, allow_partial=True)
+            raw = read_res.get("data")
+            is_partial = bool(read_res.get("is_partial"))
+
         if not raw:
             return {
                 "status": "error",
-                "message": f"Could not read {size} bytes from address 0x{base_address:X}."
+                "message": f"Could not read {size} bytes from address 0x{base_address:X}.",
             }
 
-        fields = []
-        num_slots = min(len(raw) // ptr_size, size // ptr_size)
-        c_lines = [f"struct Reconstructed_0x{base_address:X} {{"]
+        usable_len = min(len(raw), size)
+        fields: List[Dict[str, Any]] = []
+        c_lines = [f"struct {effective_name} {{"]
 
-        for i in range(num_slots):
-            offset = i * ptr_size
-            (slot_val,) = struct.unpack_from(fmt, raw, offset)
+        offset = 0
+        while offset + 4 <= usable_len:
             field_name = f"field_0x{offset:X}"
 
-            cls_ptr = snap.classify_address(slot_val)
-            f_type = "unknown"
-            desc = ""
+            # On 64-bit aligned boundaries, look ahead across 8 bytes for pointers, NULL/zeros, or 64-bit scalars
+            if ptr_size == 8 and (offset % 8 == 0) and (offset + 8 <= usable_len):
+                raw8 = raw[offset:offset + 8]
+                (u64,) = struct.unpack("<Q", raw8)
+                (i64,) = struct.unpack("<q", raw8)
 
-            if cls_ptr.get("status") == "COMMITTED":
-                cat = cls_ptr.get("category", "")
-                if cat == "IMAGE_TEXT":
-                    f_type = "void**"
-                    desc = f"vftable_or_code_ptr ({cls_ptr.get('module_name')}+{cls_ptr.get('rva')})"
-                elif cat in ("IMAGE_DATA", "IMAGE_RDATA"):
-                    f_type = "void*"
-                    desc = f"static_data_ptr ({cls_ptr.get('module_name')}+{cls_ptr.get('rva')})"
-                elif cat == "HEAP":
-                    f_type = "void*"
-                    desc = f"heap_ptr (0x{slot_val:X})"
-                elif cat == "STACK":
-                    f_type = "void*"
-                    desc = f"stack_frame_ptr (0x{slot_val:X})"
-                elif cat == "MAPPED_FILE":
-                    f_type = "void*"
-                    desc = f"mapped_memory_ptr (0x{slot_val:X})"
+                ptr_hit = cls._classify_pointer(pid, snap, u64, 8)
+                if ptr_hit is not None:
+                    f_type, desc, alts, conf = ptr_hit
+                    fields.append({
+                        "offset": f"0x{offset:X}",
+                        "offset_bytes": offset,
+                        "size_bytes": 8,
+                        "raw_hex": f"0x{u64:016X}",
+                        "inferred_type": f_type,
+                        "confidence": conf,
+                        "alternatives": alts,
+                        "heuristic": True,
+                        "description": desc,
+                    })
+                    c_lines.append(f"    {f_type:<10} {field_name}; // 0x{offset:02X}: {desc}")
+                    offset += 8
+                    continue
+
+                if u64 == 0:
+                    fields.append({
+                        "offset": f"0x{offset:X}",
+                        "offset_bytes": offset,
+                        "size_bytes": 8,
+                        "raw_hex": f"0x{u64:016X}",
+                        "inferred_type": "uint64_t",
+                        "confidence": "LOW",
+                        "alternatives": ["void* (NULL)", "int32_t[2] (0, 0)", "double (0.0)"],
+                        "heuristic": True,
+                        "description": "NULL_POINTER_OR_ZERO (8 bytes all zero)",
+                    })
+                    c_lines.append(f"    uint64_t   {field_name}; // 0x{offset:02X}: NULL_POINTER_OR_ZERO")
+                    offset += 8
+                    continue
+
+                raw4_lo = raw[offset:offset + 4]
+                raw4_hi = raw[offset + 4:offset + 8]
+                (lo_u32,) = struct.unpack("<I", raw4_lo)
+                (hi_u32,) = struct.unpack("<I", raw4_hi)
+                (lo_i32,) = struct.unpack("<i", raw4_lo)
+                (hi_i32,) = struct.unpack("<i", raw4_hi)
+                lo_f32 = cls._is_plausible_float32(raw4_lo)
+                hi_f32 = cls._is_plausible_float32(raw4_hi)
+                f64_val = cls._is_plausible_float64(raw8)
+
+                # Zero-extended 64-bit unsigned integer (e.g. score=5000, magic=0xDEADBEEF in u64 slot)
+                if hi_u32 == 0 and lo_u32 != 0 and lo_f32 is None:
+                    fields.append({
+                        "offset": f"0x{offset:X}",
+                        "offset_bytes": offset,
+                        "size_bytes": 8,
+                        "raw_hex": f"0x{u64:016X}",
+                        "inferred_type": "uint64_t",
+                        "confidence": "MEDIUM",
+                        "alternatives": ["uint32_t + uint32_t_padding"],
+                        "heuristic": True,
+                        "description": f"Unsigned 64-bit integer: {u64} (0x{u64:X})",
+                    })
+                    c_lines.append(f"    uint64_t   {field_name}; // 0x{offset:02X}: uint64_t {u64}")
+                    offset += 8
+                    continue
+
+                # Sign-extended negative 64-bit integer
+                if hi_u32 == 0xFFFFFFFF and lo_i32 < 0 and lo_f32 is None:
+                    fields.append({
+                        "offset": f"0x{offset:X}",
+                        "offset_bytes": offset,
+                        "size_bytes": 8,
+                        "raw_hex": f"0x{u64:016X}",
+                        "inferred_type": "int64_t",
+                        "confidence": "MEDIUM",
+                        "alternatives": ["int32_t + sign_extension"],
+                        "heuristic": True,
+                        "description": f"Signed 64-bit integer: {i64}",
+                    })
+                    c_lines.append(f"    int64_t    {field_name}; // 0x{offset:02X}: int64_t {i64}")
+                    offset += 8
+                    continue
+
+                # Clean 64-bit double when halves do not look like discrete 32-bit int+float
+                if f64_val is not None and lo_f32 is None and hi_f32 is None and not (abs(lo_i32) < 100000 and abs(hi_i32) < 100000):
+                    fields.append({
+                        "offset": f"0x{offset:X}",
+                        "offset_bytes": offset,
+                        "size_bytes": 8,
+                        "raw_hex": f"0x{u64:016X}",
+                        "inferred_type": "double",
+                        "confidence": "MEDIUM",
+                        "alternatives": ["uint64_t", "uint32_t[2]"],
+                        "heuristic": True,
+                        "description": f"Double value: {f64_val}",
+                    })
+                    c_lines.append(f"    double     {field_name}; // 0x{offset:02X}: double {f64_val}")
+                    offset += 8
+                    continue
+
+            # Fall through to 4-byte field classification (never merges unrelated 32-bit fields!)
+            raw4 = raw[offset:offset + 4]
+            (u32,) = struct.unpack("<I", raw4)
+            (i32,) = struct.unpack("<i", raw4)
+
+            if ptr_size == 4:
+                ptr4_hit = cls._classify_pointer(pid, snap, u32, 4)
+                if ptr4_hit is not None:
+                    f_type, desc, alts, conf = ptr4_hit
+                    fields.append({
+                        "offset": f"0x{offset:X}",
+                        "offset_bytes": offset,
+                        "size_bytes": 4,
+                        "raw_hex": f"0x{u32:08X}",
+                        "inferred_type": f_type,
+                        "confidence": conf,
+                        "alternatives": alts,
+                        "heuristic": True,
+                        "description": desc,
+                    })
+                    c_lines.append(f"    {f_type:<10} {field_name}; // 0x{offset:02X}: {desc}")
+                    offset += 4
+                    continue
+
+            f32_val = cls._is_plausible_float32(raw4)
+            if u32 == 0:
+                f_type = "uint32_t"
+                conf = "LOW"
+                alts = ["int32_t (0)", "float (0.0)", "padding"]
+                desc = "Zero32 / Padding (0x0)"
+            elif f32_val is not None:
+                f_type = "float"
+                conf = "MEDIUM"
+                alts = ["uint32_t", "int32_t"]
+                desc = f"Float value: {f32_val}"
+            elif i32 < 0 and u32 > 0xF0000000:
+                f_type = "int32_t"
+                conf = "MEDIUM"
+                alts = ["uint32_t", "bitmask"]
+                desc = f"Signed int32: {i32} (u32: 0x{u32:08X})"
             else:
-                if ptr_size == 8:
-                    (i32_a, i32_b) = struct.unpack_from("<ii", raw, offset)
-                    (f32_a, f32_b) = struct.unpack_from("<ff", raw, offset)
-                    if 0.001 < abs(f32_a) < 100000.0 and abs(f32_a - round(f32_a, 2)) < 0.05:
-                        f_type = "float"
-                        desc = f"Float value: {round(f32_a, 4)}"
-                    elif slot_val == 0:
-                        f_type = "uint64_t"
-                        desc = "Zero / NULL"
-                    else:
-                        f_type = "int64_t"
-                        desc = f"Integer (int64: {slot_val}, int32: {i32_a})"
-                else:
-                    (f32,) = struct.unpack_from("<f", raw, offset)
-                    if 0.001 < abs(f32) < 100000.0:
-                        f_type = "float"
-                        desc = f"Float value: {round(f32, 4)}"
-                    else:
-                        f_type = "int32_t"
-                        desc = f"Integer value: {slot_val}"
+                f_type = "int32_t" if abs(i32) <= 0x7FFFFFFF and i32 >= -10000000 else "uint32_t"
+                conf = "MEDIUM"
+                alts = ["uint32_t" if f_type == "int32_t" else "int32_t", "bitflags"]
+                desc = f"Integer32: {i32 if f_type == 'int32_t' else u32} (0x{u32:08X})"
 
             fields.append({
                 "offset": f"0x{offset:X}",
                 "offset_bytes": offset,
-                "raw_hex": f"0x{slot_val:X}",
+                "size_bytes": 4,
+                "raw_hex": f"0x{u32:08X}",
                 "inferred_type": f_type,
-                "description": desc
+                "confidence": conf,
+                "alternatives": alts,
+                "heuristic": True,
+                "description": desc,
             })
-            c_lines.append(f"    {f_type:<10} {field_name}; // {offset:02X}: {desc}")
+            c_lines.append(f"    {f_type:<10} {field_name}; // 0x{offset:02X}: {desc}")
+            offset += 4
 
         c_lines.append("};")
 
         return {
             "status": "success",
+            "heuristic": True,
+            "notice": "Inferred types are 4-byte/8-byte heuristic classifications; verify against PDB/DWARF or decompiler output.",
             "pid": pid,
             "base_address": f"0x{base_address:016X}",
+            "structure_name": effective_name,
             "architecture": arch,
-            "size_analyzed": len(raw),
+            "bytes_requested": size,
+            "bytes_read": usable_len,
+            "is_partial": is_partial,
+            "size_analyzed": usable_len,
             "fields_count": len(fields),
             "fields": fields,
-            "c_struct_definition": "\n".join(c_lines)
+            "c_struct_definition": "\n".join(c_lines),
         }

@@ -173,6 +173,50 @@ class TestEtwCaptureEngine(unittest.TestCase):
         cats = [f["category"] for f in report["causality_findings"]]
         self.assertIn("RESOURCE_LOCK_CONTENTION", cats)
         self.assertIn("GRAPHICS_TDR_DEVICE_REMOVAL", cats)
+        self.assertIn("event_sources", report)
+
+    def test_event_log_classification_no_shadowing(self):
+        """Verifies System channel EventID 1001/41 is classified as KERNEL_POWER_OR_BUGCHECK (not shadowed by WER 1001)."""
+        self.assertEqual(
+            EtwLiveCaptureSession._classify_event_log_record("System", 1001, "CRITICAL"),
+            "KERNEL_POWER_OR_BUGCHECK"
+        )
+        self.assertEqual(
+            EtwLiveCaptureSession._classify_event_log_record("System", 41, "CRITICAL"),
+            "KERNEL_POWER_OR_BUGCHECK"
+        )
+        self.assertEqual(
+            EtwLiveCaptureSession._classify_event_log_record("Application", 1001, "INFO"),
+            "WER_REPORT"
+        )
+        self.assertEqual(
+            EtwLiveCaptureSession._classify_event_log_record("Application", 1000, "ERROR"),
+            "APPLICATION_ERROR"
+        )
+
+    def test_explicit_pid_timeline_excludes_pid_zero_and_preserves_provenance(self):
+        """Verifies get_timeline(pid=X) does not leak pid==0 events and EtwEventRecord tracks source provenance."""
+        session = EtwLiveCaptureSession(session_name="FilterTest", target_pid=None)
+        t0 = time.time()
+        ev_app = EtwEventRecord(t0, "Kernel-Process", 1, 7777, 11, "THREAD_START")
+        ev_zero = EtwEventRecord(t0 + 0.1, "Kernel-Power", 41, 0, 0, "KERNEL_POWER_OR_BUGCHECK", source="event_log_polling")
+        self.assertEqual(ev_app.to_dict()["source"], "synthetic_manual")
+        self.assertEqual(ev_zero.to_dict()["source"], "event_log_polling")
+
+        session.record_event(ev_app)
+        session.record_event(ev_zero)
+
+        strict_tl = session.get_timeline(pid=7777)
+        self.assertEqual(len(strict_tl), 1)
+        self.assertEqual(strict_tl[0]["pid"], 7777)
+
+        with_global = session.get_timeline(pid=7777, include_global=True)
+        self.assertEqual(len(with_global), 2)
+
+        report = EtwTimelineCorrelator.correlate_crash_timeline(with_global, crash_timestamp=t0 + 1.0)
+        self.assertEqual(report["temporal_verdict"], "KERNEL_BUGCHECK_RECORDED")
+        self.assertEqual(report["event_sources"].get("synthetic_manual"), 1)
+        self.assertEqual(report["event_sources"].get("event_log_polling"), 1)
 
 
 if __name__ == "__main__":

@@ -19,18 +19,22 @@ W_QK[Layer 14, Head 3] + W_OV[Layer 14, Head 3] ->
 
 ### 2.1 Induction Heads
 - **Behavior:** Look back at the token sequence, find where the current token appeared previously, and attend to the token that came immediately after it.
-- **Weight Signature:** High positive trace for $W_{QK}$ on shifted bigram embeddings; identity-like alignment in $W_{OV}$.
-- **Decompiled Output:**
+- **Weight Signature:** High positive trace for $W_{QK}$ on shifted bigram embeddings; identity-like alignment in $W_{OV}$ (or elevated singular dominance $\sigma_0/\sigma_1 > 1.8$ on attention projections).
+- **Decompiled Output (`CircuitDecompiler.decompile_attention_head`):**
   ```json
   {
-    "circuit_type": "induction_head",
-    "layer": 14,
-    "head": 3,
-    "confidence": 0.94,
-    "function": "In-context pattern continuation and copy mechanism",
-    "evidence_ref": "ev_svd_l14h3_01"
+    "layer_index": 14,
+    "head_index": 3,
+    "circuit_type": "attention_head",
+    "circuit_classification": "INDUCTION_COPY_HEAD",
+    "is_anomaly": false,
+    "classification_confidence": "HEURISTIC_SPECTRAL_RATIO",
+    "heuristic_note": "Classified from a single spectral singular value ratio (s0/s1); small or rank-deficient test tensors can trigger elevated dominance without runtime looping.",
+    "dominance_ratio": 2.45,
+    "pseudocode": "circuit Layer_14_Head_3 { ... }"
   }
   ```
+  *(For two-layer composition analysis, `CrossLayerCircuitAnalyzer.analyze_cross_layer_induction` emits `num_heads_analyzed`, `copying_heads_detected`, `copying_head_density`, `inferred_corpus_type`, and `head_composition_table`.)*
 
 ### 2.2 Previous-Token Heads
 - **Behavior:** Attend unconditionally to the immediate previous token ($t-1$).

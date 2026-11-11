@@ -124,50 +124,106 @@ def main():
         print("REA-Neural v7.4.0")
         sys.exit(0)
 
+    cmd_lower = sys.argv[1].lower()
+    mutation_cmds = {"patch", "patch-binary", "patch-weights"}
+    is_update_write = cmd_lower in ("update", "self-update") and any(f in sys.argv for f in ("--yes", "--confirm"))
+    strict_audit = cmd_lower in mutation_cmds or is_update_write
+
+    from security import AuditLogger, AuditPersistenceError
+    prev_strict = AuditLogger.get_strict_persistence()
+    AuditLogger.set_strict_persistence(strict_audit)
     try:
-        from security import AuditLogger
-        AuditLogger.ensure_chain_continuity(rotate_on_corrupt=True)
-    except Exception:
-        pass
+        try:
+            init_res = AuditLogger.ensure_chain_continuity(rotate_on_corrupt=not strict_audit)
+            if isinstance(init_res, dict) and init_res.get("audit_degraded") and strict_audit:
+                raise AuditPersistenceError(init_res.get("audit_degraded_reason") or "Audit persistence degraded")
+        except Exception as audit_err:
+            if strict_audit:
+                print(json.dumps({
+                    "status": "error",
+                    "command": cmd_lower,
+                    "error_type": type(audit_err).__name__,
+                    "error": f"AUDIT_INIT_FAILED: {audit_err}",
+                    "message": f"Fail-closed refusal for mutation command '{cmd_lower}': audit log initialization/persistence failed ({audit_err}).",
+                    "audit_degraded": True,
+                    "audit_degraded_reason": str(audit_err),
+                }, indent=2, ensure_ascii=False))
+                sys.exit(1)
+            AuditLogger.mark_degraded(str(audit_err))
+            sys.stderr.write(f"[AUDIT DEGRADATION WARNING] Audit log degraded for '{cmd_lower}': {audit_err}\n")
 
-    # Establish isolated target scope and authorized workspace for CLI execution
-    target_arg = None
-    workspace_arg = None
-    for flag in ("--file", "--binary", "--source", "--input", "--model", "--target", "--dmp"):
-        if flag in sys.argv:
-            idx = sys.argv.index(flag)
-            if idx + 1 < len(sys.argv):
-                target_arg = sys.argv[idx + 1]
-                break
+        # Establish isolated target scope and authorized workspace for CLI execution
+        target_arg = None
+        workspace_arg = None
+        for flag in ("--file", "--binary", "--source", "--input", "--model", "--target", "--dmp"):
+            if flag in sys.argv:
+                idx = sys.argv.index(flag)
+                if idx + 1 < len(sys.argv):
+                    target_arg = sys.argv[idx + 1]
+                    break
 
-    for flag in ("--workspace", "--workspace-dir"):
-        while flag in sys.argv:
-            idx = sys.argv.index(flag)
-            if idx + 1 < len(sys.argv):
-                workspace_arg = sys.argv[idx + 1]
-                del sys.argv[idx:idx + 2]
-            else:
-                del sys.argv[idx]
+        for flag in ("--workspace", "--workspace-dir"):
+            while flag in sys.argv:
+                idx = sys.argv.index(flag)
+                if idx + 1 < len(sys.argv):
+                    workspace_arg = sys.argv[idx + 1]
+                    del sys.argv[idx:idx + 2]
+                else:
+                    del sys.argv[idx]
 
-    try:
-        from security import ExecutionGuard
-        with ExecutionGuard.scoped_session(target_binary_path=target_arg, workspace_dir=workspace_arg):
-            _dispatch_cli()
-    except SystemExit:
-        raise
-    except Exception as e:
-        err_payload = {
-            "status": "error",
-            "command": sys.argv[1] if len(sys.argv) > 1 else None,
-            "error_type": type(e).__name__,
-            "error": str(e),
-            "message": str(e)
-        }
-        if os.environ.get("REA_DEBUG") == "1":
-            import traceback
-            err_payload["traceback"] = traceback.format_exc()
-        print(json.dumps(err_payload, indent=2, ensure_ascii=False))
-        sys.exit(1)
+        streaming_cmds = {"mcp", "mcp-server", "ghidra-bridge", "ghidra-headless", "etw-capture", "update", "self-update"}
+        should_buffer = cmd_lower not in streaming_cmds
+        try:
+            from security import ExecutionGuard
+            with ExecutionGuard.scoped_session(target_binary_path=target_arg, workspace_dir=workspace_arg):
+                if should_buffer:
+                    import io, contextlib
+                    cap_buf = io.StringIO()
+                    try:
+                        with contextlib.redirect_stdout(cap_buf):
+                            _dispatch_cli()
+                    finally:
+                        raw_out = cap_buf.getvalue()
+                        if AuditLogger.is_audit_degraded() and raw_out.strip():
+                            injected = False
+                            try:
+                                parsed = json.loads(raw_out)
+                                if isinstance(parsed, dict):
+                                    parsed["audit_degraded"] = True
+                                    parsed["audit_degraded_reason"] = AuditLogger.get_degraded_reason()
+                                    sys.stdout.write(json.dumps(parsed, indent=2, ensure_ascii=False) + "\n")
+                                    injected = True
+                            except Exception:
+                                pass
+                            if not injected:
+                                sys.stdout.write(raw_out)
+                                sys.stderr.write(
+                                    f"[AUDIT DEGRADED] Persistent audit logging unavailable: {AuditLogger.get_degraded_reason()}\n"
+                                )
+                        else:
+                            sys.stdout.write(raw_out)
+                else:
+                    _dispatch_cli()
+        except SystemExit:
+            raise
+        except Exception as e:
+            err_payload = {
+                "status": "error",
+                "command": sys.argv[1] if len(sys.argv) > 1 else None,
+                "error_type": type(e).__name__,
+                "error": str(e),
+                "message": str(e)
+            }
+            if AuditLogger.is_audit_degraded() or isinstance(e, AuditPersistenceError):
+                err_payload["audit_degraded"] = True
+                err_payload["audit_degraded_reason"] = AuditLogger.get_degraded_reason() or str(e)
+            if os.environ.get("REA_DEBUG") == "1":
+                import traceback
+                err_payload["traceback"] = traceback.format_exc()
+            print(json.dumps(err_payload, indent=2, ensure_ascii=False))
+            sys.exit(1)
+    finally:
+        AuditLogger.set_strict_persistence(prev_strict)
 
 
 def _dispatch_cli():
@@ -1140,6 +1196,7 @@ def _dispatch_cli():
             parser.add_argument("--addr", default=None, help="Target address in hex (e.g. 0x140001000) for struct or pointer scan")
             parser.add_argument("--size", type=int, default=128, help="Size in bytes for structure dissection (default: 128)")
             parser.add_argument("--depth", type=int, default=2, help="Max pointer scan depth (default: 2)")
+            parser.add_argument("--no-temp-marker", action="store_true", help="Keep discovery marker workspace-only without writing to system temp dir")
             parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
             args = parser.parse_args(sys.argv[2:])
 
@@ -1164,6 +1221,8 @@ def _dispatch_cli():
                 ]
                 if args.token:
                     daemon_cmd.extend(["--token", args.token])
+                if args.no_temp_marker:
+                    daemon_cmd.append("--no-temp-marker")
                 popen_kwargs: Dict[str, Any] = {
                     "close_fds": True,
                     "stdout": subprocess.DEVNULL,
@@ -1273,7 +1332,11 @@ def _dispatch_cli():
                 return
 
             # Default / --start: start bridge server in foreground
-            server = get_or_create_bridge(port=args.port, auth_token=args.token)
+            server = get_or_create_bridge(
+                port=args.port,
+                auth_token=args.token,
+                publish_temp_marker=not args.no_temp_marker,
+            )
             print(f"[*] REA-Neural Ghidra Live Bridge running on http://127.0.0.1:{server.port}")
             print(f"[*] Auth Token: {server.auth_token}")
             print(f"[*] Marker File: {getattr(server, '_marker_path', 'None')}")

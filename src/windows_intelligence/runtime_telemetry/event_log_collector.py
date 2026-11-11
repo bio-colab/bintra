@@ -268,6 +268,7 @@ class EventLogCollector:
                     details[key] = val
 
             ts_float = time.time()
+            ts_parse_failed = False
             if time_created:
                 try:
                     clean_ts = time_created.rstrip("Z")
@@ -278,9 +279,10 @@ class EventLogCollector:
                     ts_float = dt.timestamp()
                 except Exception:
                     ts_float = time.time()
+                    ts_parse_failed = True
 
             summary_msg = "; ".join(f"{k}={v}" for k, v in list(details.items())[:3])
-            parsed_events.append({
+            ev_entry = {
                 "time_created": ts_float,
                 "time_str": time_created,
                 "provider_name": provider_name,
@@ -290,7 +292,10 @@ class EventLogCollector:
                 "thread_id": tid,
                 "message": summary_msg,
                 "details": details
-            })
+            }
+            if ts_parse_failed:
+                ev_entry["timestamp_parse_failed"] = True
+            parsed_events.append(ev_entry)
 
         return parsed_events
 

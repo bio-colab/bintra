@@ -57,8 +57,8 @@ Use the `rea_patch_binary` tool:
 {
   "name": "rea_patch_binary",
   "arguments": {
-    "file_path": "C:\\path\\to\\original\\game.exe",
-    "output_path": "C:\\path\\to\\workspace\\game_patched.exe",
+    "file_path": "C:\\path\\to\\original\\target.exe",
+    "output_path": "C:\\path\\to\\workspace\\target_patched.exe",
     "offset": 4160,
     "patch_hex": "90 90 90 90 90",
     "force": false
@@ -99,16 +99,19 @@ When vibe-coding patches for the user, use these canonical, stack-safe patterns:
 | Desired Behavior | Original Machine Code | Safe Replacement Patch | Explanation |
 |:---|:---|:---|:---|
 | **Disable Check / Function (NOP)** | `74 08` (`jz +8`) or `E8 ...` (`call`) | `90 90` (or matching NOP count) | Neutralizes the instruction; preserves surrounding code. |
-| **Always Jump (Force Branch)** | `74 12` (`jz +18`) | `EB 12` (`jmp +18`) | Changes conditional jump to an unconditional short jump. |
+| **Always Jump (Force Branch)** | `74 12` (`jz +18`) | `EB 12` (`jmp +18`) | Changes conditional jump to an unconditional short jump (preserve relative displacement; short Jcc rel8 vs near rel32 lengths differ). |
 | **Never Jump (Skip Branch)** | `75 0A` (`jnz +10`) | `90 90` | Replaces the 2-byte branch with two NOPs. |
-| **Return Early (Void / Success)** | `55 48 89 E5 ...` | `31 C0 C3` (`xor eax, eax; ret`) | Returns 0 (`SUCCESS`) immediately without modifying caller stack frame. |
+| **Return Early (Function Entry)** | `55 48 89 E5 ...` | `31 C0 C3` (`xor eax, eax; ret`) | Returns 0 at function entry **before** stack frame setup (`push rbp; mov rbp, rsp`); patching after prologue setup requires matching epilogue teardown. |
+
+> [!NOTE]
+> **Heuristic Scope Caveat:** Stack balance checking (`RSP` / `RBP` proprioception) validates local replacement instructions heuristically; it does not perform full inter-procedural calling-convention or branch-target relocation verification. Always re-inspect relative jump targets and test patched workspace binaries in an isolated sandbox.
 
 ---
 
 ## 5. Post-Patch Verification Checklist
 
-After the patch completes, confirm to the user:
-1. `is_stack_safe`: True (stack balance maintained).
-2. `pe_checksum_recalculated`: True (Windows loader will accept the modified PE header without triggering corruption warnings).
-3. `original_file_intact`: True (baseline SHA-256 baseline untouched on disk).
-4. `output_location`: Absolute path inside the designated workspace.
+After `rea_patch_binary` or `patch-binary` completes, inspect these exact returned fields:
+1. `is_safe` / `is_stack_safe`: `true` (heuristic stack balance guard passed).
+2. `pe_checksum_recalculated` & `new_pe_checksum`: `true` and updated PE header checksum hex.
+3. `original_sha256` & `patched_sha256`: Distinct digests confirming source binary remained untouched (`Safety Kernel` `source_file` immutability).
+4. `output_file`: Destination path inside the authorized workspace directory (alongside `file_offset`, `virtual_rva`, `target_section`, and `is_in_executable_section`).

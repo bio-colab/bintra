@@ -39,22 +39,22 @@ Complex code protection techniques—such as Control Flow Flattening, Opaque Pre
 ### 2. Cross-Architecture & Cross-Compiler Semantic Matching
 Traditional function matching algorithms rely on exact opcode hashes or structural CFG graphs, which fail when binaries are recompiled across architectures (x86-64 vs. ARM64) or optimization levels (`-O0` vs. `-O3`). `REA-Neural` bridges this gap via two complementary mechanisms:
 - **16-D Behavioral Feature Vectorizer (`SemanticFunctionMatcher`):** In standalone mode, extracts an engineered 16-dimensional behavioral histogram and state transition profile with scale-congruence guards (`scale_ratio >= 0.60`) and 100% disassembly completeness. Provides fast, zero-dependency cosine matching across structurally similar routines without requiring a heavy deep learning runtime.
-- **High P-Code SSA IR Vectorizer (`ghidra_pcode_vectorizer.py`):** When paired with Ghidra decompilation, High P-Code SSA operations are lifted into complete 64-dimensional semantic vectors encoding transition topology, def-use edge density, cyclomatic loop complexity, and memory intensity (>95% cross-architecture matching on evaluated functions).
+- **High P-Code SSA IR Vectorizer (`ghidra_pcode_vectorizer.py`):** When paired with Ghidra decompilation, High P-Code SSA operations are lifted into complete 64-dimensional semantic vectors encoding transition topology, def-use edge density, cyclomatic loop complexity, and memory intensity (cosine match threshold `MATCH_THRESHOLD = 0.90`; empirical accuracy is tracked via repeatable evaluation benchmarks rather than fixed source claims).
 
 ### 3. Goal-Driven Surgical Binary Patching
 Manual byte patching is notoriously error-prone, frequently resulting in stack imbalance (`RSP`/`RBP` misalignment) or PE checksum violations. `REA-Neural` computes minimal perturbation vectors ($\Delta \text{State} \le \epsilon$), automatically recalculates PE integrity checksums, and enforces a heuristic nociception guard against stack frame balance violations (`RET`/frame-altering opcode checks).
 
 ### 4. Hybrid Native-Neural Application Dissection & Weight Security Auditing
-Modern Windows applications (games, anti-cheat, endpoint security clients, media suites) embed neural inference logic (ONNX, TFLite, GGUF, DirectML, WinML, Safetensors) directly into PE sections (`.rsrc`, `.rodata`). `REA-Neural` scans native binaries to expose these embedded logic cores and decompile the boundary between native Win32 API calls and embedded decision matrices.
+Modern Windows applications (desktop suites, simulation runtimes, endpoint security clients, media tools) embed neural inference logic (ONNX, TFLite, GGUF, DirectML, WinML, Safetensors) directly into PE sections (`.rsrc`, `.rodata`). `REA-Neural` scans native binaries to expose these embedded logic cores and decompile the boundary between native Win32 API calls and embedded decision matrices.
 - **Zero-Execution Security Auditing:** Scans raw embedded weights for dormant Trojan/backdoor trigger neurons and anomalous rank-1 spikes before host execution.
 - **Selective Column Surgery:** Intervenes in linear projection matrices (`column_direction_subtract`) at extreme sparsity (editing top-$K$ columns, e.g. 1.56% of weights for 64 of 4096 columns) to eliminate pathological looping or bypass deadlocks without retraining.
 - **Cross-Layer Induction & Effective Rank:** Evaluates cross-layer composition ($W_{QK}^{(l_2)} W_{OV}^{(l_1)}$) and spectral effective rank to infer alphabet and structural data complexity without running model text.
 
-### 5. Symbiotic Ghidra Integration (High P-Code Vectorization & Live Bidirectional Bridge)
-Rather than treating Ghidra as a detached external decompiler, `REA-Neural` directly feeds and complements Ghidra through a bidirectional, authenticated localhost JSON-RPC 2.0 bridge daemon (`ghidra_live_bridge.py` & `ReaLiveBridgeService.py`):
-- **Live Bidirectional IPC Bridge:** Localhost transport (`127.0.0.1:41718`) protected by capability tokens and auto-discovery markers (`.rea_bridge.json`). Allows seamless background daemon operation (`--daemon`), remote status inspection, and cross-process shutdown.
-- **Dynamic Diagnostic Injection:** Streams Phase 1 VAD memory layout notes, Phase 1.5 runtime structure dissections (auto-synthesized C composite structs registered in Ghidra's `DataTypeManager`) and pointer scan paths, Phase 2 Crash RCA root-cause bookmarks and function renames, and Phase 3 ETW temporal causality timelines directly into the active Ghidra Program Database.
-- **High P-Code IR Vectorization:** Translates Ghidra's SSA P-code operations into 64-dimensional continuous behavioral vectors, achieving $>95\%$ cross-architecture semantic matching invariant to compiler registers or optimizations.
+### 5. Symbiotic Ghidra Integration (High P-Code Vectorization & Live Queued-Poll Bridge)
+Rather than treating Ghidra as a detached external decompiler, `REA-Neural` directly feeds and complements Ghidra through an authenticated localhost HTTP JSON-RPC 2.0 queued-poll bridge (`ghidra_live_bridge.py` & `ReaLiveBridgeService.py`):
+- **Queued-Poll Localhost IPC Bridge:** Multi-threaded `ThreadingMixIn` HTTP server on `127.0.0.1:41718` (with per-session auth token verification and bounded discovery markers under `cap.tempdir.marker.write`, optionally disabled via `--no-temp-marker` / `publish_temp_marker=false`). `ReaLiveBridgeService.py` polls queued mutations on a `1.0s` interval inside Ghidra's background thread for thread-safe Program DB updates.
+- **Dynamic Diagnostic Injection:** Streams Phase 1 VAD memory layout notes, Phase 1.5 runtime structure dissections (auto-synthesized C composite structs registered in Ghidra's `DataTypeManager`) and pointer scan paths, Phase 2 Crash RCA root-cause bookmarks and function renames (preserving explicit `rva` vs. `va` image-base relocation), and Phase 3 ETW temporal causality timelines directly into the active Ghidra Program Database.
+- **High P-Code IR Vectorization:** Translates Ghidra's SSA P-code operations into 64-dimensional continuous behavioral vectors, matching routines deterministically above `MATCH_THRESHOLD = 0.90` cosine similarity across compiler optimizations and architectures.
 - **Pre-Decompiler Opaque Predicate Pruning:** Simplifies algebraic dead-end branches before AST construction, eliminating decompiler timeouts and sprawling control-flow flattening dispatcher cascades.
 
 ---
@@ -159,7 +159,7 @@ rea-neural/
 ├── skills/
 │   └── reverse-engineer-anything/ # Agent-native skill specification
 ├── schemas/                       # Agent MCP tool definitions
-├── tests/                         # 182 automated unit, sensory, telemetry & security tests
+├── tests/                         # 195 automated unit, sensory, telemetry & security tests
 └── docs/                          # Architecture, Roadmap & mathematical foundations
     ├── architecture.md            # Master architecture & formal model
     └── ROADMAP.md                 # Strategic direction, tech evaluation & roadmap
@@ -349,7 +349,7 @@ rea-neural update --yes
 
 ### Running the Test Suite
 ```powershell
-# Run the complete test suite (182 unit, sensory, runtime telemetry, and security remediation tests)
+# Run the complete test suite (195 unit, sensory, runtime telemetry, and security remediation tests)
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
@@ -384,7 +384,7 @@ We warmly welcome contributions from the binary analysis, systems research, and 
 - **Roadmap:** Track ongoing priorities (ETW live telemetry, Event Log native API, NTAPI phnt) in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Citation, References & Verification
-- **Upstream Foundation:** Based on **REA (Reverse Engineer Anything)** by morluto.
+- **Upstream Foundation:** Inspired by the **REA (Reverse Engineer Anything)** paradigm for deterministic static/runtime reverse engineering.
 - **Academic Research Reference:** Inspired by *"Sparks of Weight-Space Programming: LLMs can natively read & write neural network weights"*, by Rikiya Takehi, Jayden Teoh, Alex Zhang, and Omar Khattab (MIT CSAIL, November 2026).
   - [alphaXiv Preprint Discussion](https://www.alphaxiv.org/abs/2611.weight-space-programming)
   - [Official MIT CSAIL Replication Logs & Prompts Repository](https://github.com/RikiyaT/lm_understand-logs)
@@ -414,4 +414,9 @@ We warmly welcome contributions from the binary analysis, systems research, and 
 
 4. **Cross-Platform Host Degradation:**
    - Windows Intelligence subsystems (`WindowsRegistryAnalyzer`, `CommandExecutor`, `WindowsOSProfiler`) fail-closed gracefully on non-Windows host environments (such as Linux CI or sandboxes), returning structured `status: "not_applicable"` diagnostics rather than failing with platform attribute errors.
+
+5. **Runtime Telemetry, Memory Integrity & Audit Persistence Contracts:**
+   - **Strict Read-Only Process Introspection:** Live memory scanning (`rea_memory_scan`, `rea_pointer_scan`, `rea_struct_dissect`) uses `PROCESS_VM_READ | PROCESS_QUERY_INFORMATION` only and requires an explicit workspace-scoped `--session-file` / `session_id` without altering target process memory.
+   - **Hybrid Native ETW + Non-Elevated Fallbacks:** `EtwCaptureEngine` attempts real-time native `OpenTraceW` / `ProcessTrace` trace consumption (requiring Administrator or Performance Log Users privileges) and falls back cleanly on standard non-elevated Windows sessions to Toolhelp32 module snapshots (`CreateToolhelp32Snapshot`) and `WEVTAPI` Windows Event Log channels, explicitly reporting `event_sources` and `has_native_etw_events`.
+   - **Audit Persistence & Fail-Closed CLI:** Mutating CLI actions (`patch`, `patch-binary`, `patch-weights`, and `update --yes`/`--confirm`) require strict fail-closed `AuditLogger` initialization (`AUDIT_INIT_FAILED`), while read-only CLI inspections signal degraded logging transparently via `"audit_degraded": true` and `"audit_degraded_reason"`.
 

@@ -20,7 +20,7 @@
 
 <!-- Describe how these changes were tested. Include commands and outputs. -->
 - [ ] Ran full test suite locally: `python -m unittest discover -s tests -p "test_*.py"`
-- [ ] All 139+ tests passing without errors or warnings.
+- [ ] All 195 tests passing on Windows (0 failures; graceful degradation verified on Linux CI).
 - [ ] Added dedicated unit / regression tests for new logic.
 
 ## Security & Architectural Checklist

@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import json
+import time
 import hashlib
 import threading
 from datetime import datetime, timezone
@@ -39,6 +40,8 @@ class AuditLogger:
     _last_hash: str = "0" * 64
     _strict_persistence: bool = False
     _explicitly_cleared: bool = False
+    _audit_degraded: bool = False
+    _degraded_reason: Optional[str] = None
 
     # Default persistent log path
     _log_dir = os.path.join(os.path.expanduser("~"), ".rea_neural", "logs")
@@ -55,6 +58,31 @@ class AuditLogger:
         """Enables or disables fail-closed persistence enforcement."""
         with cls._lock:
             cls._strict_persistence = enabled
+
+    @classmethod
+    def get_strict_persistence(cls) -> bool:
+        """Returns whether strict audit persistence enforcement is active."""
+        with cls._lock:
+            return cls._strict_persistence
+
+    @classmethod
+    def mark_degraded(cls, reason: str) -> None:
+        """Records that persistent audit logging has degraded during this session."""
+        with cls._lock:
+            cls._audit_degraded = True
+            cls._degraded_reason = str(reason)
+
+    @classmethod
+    def is_audit_degraded(cls) -> bool:
+        """Returns True if persistent audit logging failed or could not initialize."""
+        with cls._lock:
+            return cls._audit_degraded
+
+    @classmethod
+    def get_degraded_reason(cls) -> Optional[str]:
+        """Returns the latest audit degradation error message, if any."""
+        with cls._lock:
+            return cls._degraded_reason
 
     @classmethod
     def set_log_file(cls, file_path: str) -> None:
@@ -143,24 +171,68 @@ class AuditLogger:
             target_file = log_path or cls._log_file
             if cls._explicitly_cleared and log_path is None:
                 return {"recovered": False, "records_count": 0, "skipped": "cleared_test_state"}
+
+            res: Dict[str, Any]
             if cls._sequence > 0 and cls._journal:
-                return {"recovered": True, "records_count": len(cls._journal), "head_hash": cls._last_hash}
-            try:
-                return cls._recover_chain_locked(target_file)
-            except AuditIntegrityError as err:
-                if not rotate_on_corrupt or not os.path.exists(target_file):
-                    raise
-                import sys, time
-                rotated = f"{target_file}.legacy.{int(time.time())}.jsonl"
+                res = {"recovered": True, "records_count": len(cls._journal), "head_hash": cls._last_hash}
+            else:
                 try:
-                    os.replace(target_file, rotated)
-                except OSError:
-                    rotated = None
-                cls._sequence = 0
-                cls._last_hash = "0" * 64
-                cls._journal.clear()
-                print(f"[REA-Neural][AuditLogger] Warning: rotated legacy/broken audit log ({err}) -> {rotated}", file=sys.stderr)
-                return {"recovered": False, "records_count": 0, "rotated_legacy_log": rotated, "head_hash": cls._last_hash}
+                    res = cls._recover_chain_locked(target_file)
+                except AuditIntegrityError as err:
+                    if not rotate_on_corrupt or not os.path.exists(target_file):
+                        cls._audit_degraded = True
+                        cls._degraded_reason = str(err)
+                        raise
+                    rotated = f"{target_file}.legacy.{int(time.time())}.jsonl"
+                    try:
+                        os.replace(target_file, rotated)
+                    except OSError as rot_err:
+                        rotated = None
+                        if cls._strict_persistence:
+                            cls._audit_degraded = True
+                            cls._degraded_reason = str(rot_err)
+                            raise AuditPersistenceError(
+                                f"CRITICAL: Cannot rotate corrupt audit log '{target_file}': {rot_err}"
+                            ) from rot_err
+                    cls._sequence = 0
+                    cls._last_hash = "0" * 64
+                    cls._journal.clear()
+                    print(f"[REA-Neural][AuditLogger] Warning: rotated legacy/broken audit log ({err}) -> {rotated}", file=sys.stderr)
+                    res = {"recovered": False, "records_count": 0, "rotated_legacy_log": rotated, "head_hash": cls._last_hash}
+                except OSError as io_err:
+                    cls._audit_degraded = True
+                    cls._degraded_reason = str(io_err)
+                    if cls._strict_persistence:
+                        raise AuditPersistenceError(
+                            f"CRITICAL: Cannot read audit log '{target_file}': {io_err}"
+                        ) from io_err
+                    sys.stderr.write(
+                        f"[AUDIT PERSISTENCE WARNING] Cannot read audit log '{target_file}': {io_err}\n"
+                    )
+                    return {"recovered": False, "records_count": 0, "audit_degraded": True, "audit_degraded_reason": str(io_err), "head_hash": cls._last_hash}
+
+            # Verify directory/file writability upfront so callers detect degraded audit early
+            if log_path is None:
+                parent_dir = os.path.dirname(target_file)
+                try:
+                    if parent_dir:
+                        os.makedirs(parent_dir, exist_ok=True)
+                    with open(target_file, "a", encoding="utf-8"):
+                        pass
+                except Exception as exc:
+                    cls._audit_degraded = True
+                    cls._degraded_reason = str(exc)
+                    if cls._strict_persistence:
+                        raise AuditPersistenceError(
+                            f"CRITICAL: Audit log location '{target_file}' is not writable: {exc}"
+                        ) from exc
+                    sys.stderr.write(
+                        f"[AUDIT PERSISTENCE WARNING] Audit log location '{target_file}' is not writable: {exc}\n"
+                    )
+                    res["audit_degraded"] = True
+                    res["audit_degraded_reason"] = str(exc)
+
+            return res
 
     @classmethod
     def log_decision(
@@ -228,6 +300,8 @@ class AuditLogger:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 f.flush()
         except Exception as exc:
+            cls._audit_degraded = True
+            cls._degraded_reason = str(exc)
             if cls._strict_persistence:
                 raise AuditPersistenceError(f"CRITICAL: Failed to write audit record to disk: {exc}") from exc
             sys.stderr.write(f"[AUDIT PERSISTENCE WARNING] Failed to persist audit record to disk: {exc}\n")
@@ -325,3 +399,5 @@ class AuditLogger:
             cls._sequence = 0
             cls._last_hash = "0" * 64
             cls._explicitly_cleared = True
+            cls._audit_degraded = False
+            cls._degraded_reason = None

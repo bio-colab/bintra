@@ -176,11 +176,16 @@ public class BintraGhidraBridge extends GhidraScript {
 
         Gson gson = new GsonBuilder().setPrettyPrinting().create();
         File wsDir = new File(System.getProperty("user.home"), ".bintra" + File.separator + "workspace");
-        if (!wsDir.exists()) {
-            wsDir.mkdirs();
+        File exportsDir = new File(wsDir, "exports");
+        File plansDir = new File(wsDir, "plans");
+        if (!exportsDir.exists()) {
+            exportsDir.mkdirs();
         }
-        File tempExport = File.createTempFile("bintra_ghidra_export_", ".json", wsDir);
-        File tempPlan = File.createTempFile("bintra_ghidra_plan_", ".json", wsDir);
+        if (!plansDir.exists()) {
+            plansDir.mkdirs();
+        }
+        File tempExport = File.createTempFile("bintra_ghidra_export_", ".json", exportsDir);
+        File tempPlan = File.createTempFile("bintra_ghidra_plan_", ".json", plansDir);
         tempExport.deleteOnExit();
         tempPlan.deleteOnExit();
 
@@ -199,7 +204,8 @@ public class BintraGhidraBridge extends GhidraScript {
             cliPy.getAbsolutePath(),
             "ghidra-analyze",
             "--input", tempExport.getAbsolutePath(),
-            "--output", tempPlan.getAbsolutePath()
+            "--output", tempPlan.getAbsolutePath(),
+            "--workspace", plansDir.getAbsolutePath()
         );
         pb.redirectErrorStream(true);
         Process proc = pb.start();

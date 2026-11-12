@@ -1200,10 +1200,40 @@ class BintraMcpServer:
         elif name == "bintra_ghidra_headless":
             import subprocess, tempfile
             bin_path = args["binary_path"]
-            ghidra_dir = Path(args.get("ghidra_path") or os.environ.get("GHIDRA_INSTALL_DIR", r"C:\ghidra"))
-            headless_bat = ghidra_dir / "support" / "analyzeHeadless.bat"
-            if not headless_bat.exists():
-                raise FileNotFoundError(f"analyzeHeadless.bat not found at: {headless_bat}")
+            ghidra_path_val = args.get("ghidra_path") or os.environ.get("GHIDRA_INSTALL_DIR") or os.environ.get("GHIDRA_HOME")
+            headless_name = "analyzeHeadless.bat" if os.name == "nt" else "analyzeHeadless"
+            alt_name = "analyzeHeadless" if os.name == "nt" else "analyzeHeadless.bat"
+
+            headless_bat = None
+            if ghidra_path_val:
+                p = Path(ghidra_path_val)
+                cand = p / "support" / headless_name
+                if cand.exists():
+                    headless_bat = cand
+                elif (p / "support" / alt_name).exists():
+                    headless_bat = p / "support" / alt_name
+
+            if not headless_bat:
+                candidates = [
+                    Path.home() / "tools" / "ghidra",
+                    Path.home() / "ghidra",
+                    Path(r"C:\ghidra") if os.name == "nt" else Path("/opt/ghidra"),
+                    Path(r"C:\tools\ghidra"),
+                    Path(r"D:\ghidra"),
+                ]
+                for cand_dir in candidates:
+                    cand = cand_dir / "support" / headless_name
+                    if cand.exists():
+                        headless_bat = cand
+                        break
+                    alt = cand_dir / "support" / alt_name
+                    if alt.exists():
+                        headless_bat = alt
+                        break
+
+            if not headless_bat or not headless_bat.exists():
+                raise FileNotFoundError(f"analyzeHeadless executable not found. Configure GHIDRA_INSTALL_DIR or pass 'ghidra_path'.")
+
             script_dir = SRC_DIR.parent / "ghidra_scripts"
             script_args = ["apply"] if args.get("apply", False) else []
             cmd = [
@@ -1215,8 +1245,20 @@ class BintraMcpServer:
                 "-postScript", "BintraGhidraBridge.java"
             ] + script_args
             proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
+            error_markers = [
+                "SCRIPT ERROR:",
+                "Analysis failed for file:",
+                "GhidraScriptLoadException",
+                "RuntimeException:",
+                "ERROR (GhidraScript)",
+            ]
+            has_script_error = any(m in combined for m in error_markers)
+            effective_exit = proc.returncode if proc.returncode != 0 else (1 if has_script_error else 0)
             return {
-                "exit_code": proc.returncode,
+                "exit_code": effective_exit,
+                "script_error_detected": has_script_error,
+                "is_error": effective_exit != 0,
                 "stdout_tail": proc.stdout[-3000:],
                 "stderr_tail": proc.stderr[-2000:]
             }

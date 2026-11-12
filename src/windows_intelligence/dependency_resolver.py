@@ -98,11 +98,23 @@ class WindowsDependencyResolver:
         if not effective_app_dir:
             cand_parent = os.path.dirname(target_dir)
             cand_root = os.path.dirname(cand_parent)
-            if os.path.basename(cand_parent).lower() in ("obs-plugins", "plugins"):
+            p_name = os.path.basename(cand_parent).lower()
+            if p_name in ("obs-plugins", "plugins"):
                 sub = os.path.basename(target_dir)
                 sibling_bin = os.path.join(cand_root, "bin", sub)
                 if os.path.isdir(sibling_bin):
                     effective_app_dir = sibling_bin
+            elif p_name == "core" or os.path.basename(os.path.dirname(cand_parent)).lower() == "core":
+                # OBS 33 modular structure: OBS_ROOT\core\<plugin>\<plugin>.dll or OBS_ROOT\core\<plugin>\data\<sub.dll>
+                app_root = cand_root if p_name == "core" else os.path.dirname(cand_root)
+                for b_cand in (
+                    os.path.join(app_root, "bin", "64bit"),
+                    os.path.join(app_root, "bin", "32bit"),
+                    os.path.join(app_root, "bin"),
+                ):
+                    if os.path.isdir(b_cand):
+                        effective_app_dir = b_cand
+                        break
 
         if effective_app_dir:
             can_app = os.path.abspath(effective_app_dir)

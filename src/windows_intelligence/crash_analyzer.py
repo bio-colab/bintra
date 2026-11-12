@@ -9,7 +9,6 @@ import os
 import sys
 import glob
 import struct
-import subprocess
 import xml.etree.ElementTree as ET
 from typing import Dict, Any, List, Optional
 
@@ -147,23 +146,26 @@ class WindowsCrashAnalyzer:
 
         # Target Application Error Event 1000 specifically to avoid unrelated events
         xpath = "*[System[Provider[@Name='Application Error'] and (EventID=1000)]]"
-        cmd = [
-            "wevtutil", "qe", "Application",
+        extra = [
+            "Application",
             f"/q:{xpath}",
             f"/c:{max_events}",
             "/rd:true",
             "/f:RenderedXml"
         ]
 
+        stdout_data = ""
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            if res.returncode != 0 or not res.stdout:
+            from security.safe_subprocess import SafeSubprocessBroker
+            res = SafeSubprocessBroker.execute_catalog_command("event_query", extra_flags=extra, timeout=5)
+            if res.get("returncode", -1) != 0 or not res.get("stdout"):
                 return []
+            stdout_data = res.get("stdout", "")
         except Exception:
             return []
 
         events = []
-        raw_xml = f"<Events>{res.stdout}</Events>"
+        raw_xml = f"<Events>{stdout_data}</Events>"
         try:
             root = ET.fromstring(raw_xml)
             for event_elem in root.findall(".//{*}Event"):

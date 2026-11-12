@@ -155,12 +155,13 @@ def main():
         # Establish isolated target scope and authorized workspace for CLI execution
         target_arg = None
         workspace_arg = None
-        for flag in ("--file", "--binary", "--source", "--input", "--model", "--target", "--dmp"):
-            if flag in sys.argv:
-                idx = sys.argv.index(flag)
-                if idx + 1 < len(sys.argv):
-                    target_arg = sys.argv[idx + 1]
-                    break
+        if cmd_lower != "ghidra-analyze":
+            for flag in ("--file", "--binary", "--source", "--input", "--model", "--target", "--dmp"):
+                if flag in sys.argv:
+                    idx = sys.argv.index(flag)
+                    if idx + 1 < len(sys.argv):
+                        target_arg = sys.argv[idx + 1]
+                        break
 
         for flag in ("--workspace", "--workspace-dir"):
             while flag in sys.argv:
@@ -170,6 +171,11 @@ def main():
                     del sys.argv[idx:idx + 2]
                 else:
                     del sys.argv[idx]
+
+        if cmd_lower == "ghidra-analyze" and not workspace_arg and "--output" in sys.argv:
+            out_idx = sys.argv.index("--output")
+            if out_idx + 1 < len(sys.argv):
+                workspace_arg = os.path.dirname(os.path.abspath(sys.argv[out_idx + 1]))
 
         streaming_cmds = {"mcp", "mcp-server", "ghidra-bridge", "ghidra-headless", "etw-capture", "update", "self-update"}
         should_buffer = cmd_lower not in streaming_cmds
@@ -1201,10 +1207,23 @@ def _dispatch_cli():
             print(f"[Bintra] Launching Ghidra Headless Analyzer...")
             print(f"[Bintra] Binary: {args.binary}")
             print(f"[Bintra] Script: {script_dir / 'BintraGhidraBridge.java'}")
-            res = subprocess.run(cmd_args)
-            if res.returncode != 0:
-                sys.stderr.write(f"[Bintra] Ghidra Headless Analyzer failed with return code {res.returncode}\n")
-            sys.exit(res.returncode)
+            res = subprocess.run(cmd_args, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            print(res.stdout, end="")
+            if res.stderr:
+                sys.stderr.write(res.stderr)
+            combined = (res.stdout or "") + "\n" + (res.stderr or "")
+            error_markers = [
+                "SCRIPT ERROR:",
+                "Analysis failed for file:",
+                "GhidraScriptLoadException",
+                "RuntimeException:",
+                "ERROR (GhidraScript)",
+            ]
+            has_script_error = any(m in combined for m in error_markers)
+            if res.returncode != 0 or has_script_error:
+                sys.stderr.write(f"[Bintra] Ghidra Headless Analyzer failed (rc={res.returncode}, script_error={has_script_error})\n")
+                sys.exit(res.returncode if res.returncode != 0 else 1)
+            sys.exit(0)
 
         elif cmd == "ghidra-bridge":
             parser = argparse.ArgumentParser(prog="bintra ghidra-bridge", description="Bintra Ghidra Live Bidirectional Bridge Daemon")
@@ -1538,6 +1557,18 @@ def _handle_update() -> None:
 
     if os.path.isdir(git_dir):
         try:
+            # Verify git remote configuration before fetching
+            remotes_res = subprocess.run(
+                ["git", "remote"],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True
+            )
+            remotes = [r.strip() for r in remotes_res.stdout.splitlines() if r.strip()] if remotes_res.returncode == 0 else []
+            if not remotes or "origin" not in remotes:
+                print("[-] No remote 'origin' configured for repository. Update check skipped.")
+                return
+
             print(f"[*] Checking remote repository for updates (branch: '{args.branch}')...")
             fetch_res = subprocess.run(
                 ["git", "fetch", "--tags", "origin", "--", args.branch],

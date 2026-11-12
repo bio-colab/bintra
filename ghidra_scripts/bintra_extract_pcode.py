@@ -130,10 +130,13 @@ def run():
 
     # Write export JSON inside authorized Bintra workspace
     ws_dir = os.path.join(os.path.expanduser("~"), ".bintra", "workspace")
-    os.makedirs(ws_dir, exist_ok=True)
-    fd_exp, export_path = tempfile.mkstemp(prefix="bintra_exp_", suffix=".json", dir=ws_dir)
+    exports_dir = os.path.join(ws_dir, "exports")
+    plans_dir = os.path.join(ws_dir, "plans")
+    os.makedirs(exports_dir, exist_ok=True)
+    os.makedirs(plans_dir, exist_ok=True)
+    fd_exp, export_path = tempfile.mkstemp(prefix="bintra_exp_", suffix=".json", dir=exports_dir)
     os.close(fd_exp)
-    fd_plan, plan_path = tempfile.mkstemp(prefix="bintra_plan_", suffix=".json", dir=ws_dir)
+    fd_plan, plan_path = tempfile.mkstemp(prefix="bintra_plan_", suffix=".json", dir=plans_dir)
     os.close(fd_plan)
 
     with open(export_path, "w") as f:
@@ -141,7 +144,7 @@ def run():
 
     # Invoke Bintra
     python_exe = os.environ.get("PYTHON_EXE", "python")
-    cmd = [python_exe, cli_py, "ghidra-analyze", "--input", export_path, "--output", plan_path]
+    cmd = [python_exe, cli_py, "ghidra-analyze", "--input", export_path, "--output", plan_path, "--workspace", plans_dir]
     print("[Bintra] Running: " + " ".join(cmd))
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     stdout, stderr = proc.communicate()

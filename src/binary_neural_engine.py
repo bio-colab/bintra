@@ -332,6 +332,9 @@ class BinaryFormatInspector:
             result["imports"] = BinaryFormatInspector._parse_pe_imports(f, file_size, result, is_64_bit)
             result["exports"] = BinaryFormatInspector._parse_pe_exports(f, file_size, result)
             result["delay_imports"] = BinaryFormatInspector._parse_pe_delay_imports(f, file_size, result, is_64_bit)
+            result["debug"] = BinaryFormatInspector._parse_pe_debug(f, file_size, result)
+            result["relocations"] = BinaryFormatInspector._parse_pe_relocations(f, file_size, result)
+            result["resources"] = BinaryFormatInspector._parse_pe_resources(f, file_size, result)
             result["version_info"] = BinaryFormatInspector._parse_pe_version_info(file_path)
 
             return result
@@ -432,6 +435,7 @@ class BinaryFormatInspector:
         ords_off = BinaryFormatInspector.rva_to_offset(pe_info, ordinals_rva)
 
         exported = []
+        named_indices = set()
         if names_off and ords_off and funcs_off:
             for idx in range(min(num_names, 65536)):
                 if names_off + (idx + 1) * 4 > file_size or ords_off + (idx + 1) * 2 > file_size:
@@ -447,6 +451,8 @@ class BinaryFormatInspector:
 
                 if ord_val >= num_funcs:
                     continue
+
+                named_indices.add(ord_val)
 
                 if funcs_off + (ord_val + 1) * 4 > file_size:
                     continue
@@ -486,6 +492,40 @@ class BinaryFormatInspector:
                             raw_fwd.extend(ch)
                         exp_entry["forwarded_to"] = raw_fwd.decode("latin-1", errors="ignore")
 
+                exported.append(exp_entry)
+
+        # Enumerate remaining functions in EAT exported by Ordinal-only
+        if funcs_off:
+            for ord_val in range(min(num_funcs, 65536)):
+                if ord_val in named_indices:
+                    continue
+                if funcs_off + (ord_val + 1) * 4 > file_size:
+                    break
+                f.seek(funcs_off + ord_val * 4)
+                fn_rva_bytes = f.read(4)
+                if len(fn_rva_bytes) < 4:
+                    break
+                fn_rva = struct.unpack("<I", fn_rva_bytes)[0]
+                if fn_rva == 0:
+                    continue
+                is_forwarded = (export_dir_size > 0 and export_rva <= fn_rva < export_rva + export_dir_size)
+                exp_entry = {
+                    "name": None,
+                    "ordinal": ordinal_base + ord_val,
+                    "rva": hex(fn_rva),
+                    "is_forwarded": is_forwarded
+                }
+                if is_forwarded:
+                    fwd_off = BinaryFormatInspector.rva_to_offset(pe_info, fn_rva)
+                    if fwd_off and 0 <= fwd_off < file_size:
+                        f.seek(fwd_off)
+                        raw_fwd = bytearray()
+                        while len(raw_fwd) < 256 and f.tell() < file_size:
+                            ch = f.read(1)
+                            if not ch or ch == b"\x00":
+                                break
+                            raw_fwd.extend(ch)
+                        exp_entry["forwarded_to"] = raw_fwd.decode("latin-1", errors="ignore")
                 exported.append(exp_entry)
 
         return {
@@ -586,6 +626,170 @@ class BinaryFormatInspector:
         }
 
     @staticmethod
+    def _parse_pe_debug(f, file_size: int, pe_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Parses Microsoft PE Debug Directory (IMAGE_DEBUG_DIRECTORY) and CodeView PDB references."""
+        dd = pe_info.get("data_directories", {})
+        if "Debug" not in dd:
+            return {"has_debug_directory": False, "entries_count": 0, "pdb_path": None, "pdb_guid": None, "pdb_age": None, "types": []}
+        debug_rva = int(dd["Debug"]["rva"], 16)
+        debug_size = int(dd["Debug"].get("size", 0))
+        debug_off = BinaryFormatInspector.rva_to_offset(pe_info, debug_rva)
+        if debug_off is None or debug_off >= file_size or debug_size < 28:
+            return {"has_debug_directory": False, "entries_count": 0, "pdb_path": None, "pdb_guid": None, "pdb_age": None, "types": []}
+
+        DEBUG_TYPES = {
+            0: "UNKNOWN", 1: "COFF", 2: "CODEVIEW", 3: "FPO", 4: "MISC",
+            5: "EXCEPTION", 6: "FIXUP", 7: "OMAP_TO_SRC", 8: "OMAP_FROM_SRC",
+            9: "BORLAND", 11: "CLSID", 12: "VC_FEATURE", 13: "POGO",
+            14: "ILTCG", 15: "MPX", 16: "REPRO", 20: "EX_DLLCHARACTERISTICS"
+        }
+
+        num_entries = min(debug_size // 28, 64)
+        types_found = []
+        pdb_path = None
+        pdb_guid = None
+        pdb_age = None
+
+        for idx in range(num_entries):
+            entry_off = debug_off + idx * 28
+            if entry_off + 28 > file_size:
+                break
+            f.seek(entry_off)
+            entry_bytes = f.read(28)
+            if len(entry_bytes) < 28:
+                break
+            _, _, _, _, d_type, size_data, addr_raw, ptr_raw = struct.unpack("<IIHHIIII", entry_bytes)
+            type_name = DEBUG_TYPES.get(d_type, f"TYPE_{d_type}")
+            types_found.append(type_name)
+
+            if d_type == 2 and size_data >= 24:
+                cv_off = ptr_raw if (0 < ptr_raw < file_size) else BinaryFormatInspector.rva_to_offset(pe_info, addr_raw)
+                if cv_off and cv_off + 24 <= file_size:
+                    f.seek(cv_off)
+                    cv_head = f.read(min(size_data, 1024))
+                    if cv_head.startswith(b"RSDS") and len(cv_head) >= 24:
+                        guid_bytes = cv_head[4:20]
+                        d1, d2, d3 = struct.unpack("<IHH", guid_bytes[:8])
+                        d4 = guid_bytes[8:16]
+                        pdb_guid = f"{{{d1:08X}-{d2:04X}-{d3:04X}-{d4[:2].hex().upper()}-{d4[2:].hex().upper()}}}"
+                        (pdb_age,) = struct.unpack("<I", cv_head[20:24])
+                        raw_path = cv_head[24:].split(b"\x00")[0]
+                        pdb_path = raw_path.decode("utf-8", errors="ignore")
+
+        return {
+            "has_debug_directory": True,
+            "entries_count": len(types_found),
+            "pdb_path": pdb_path,
+            "pdb_guid": pdb_guid,
+            "pdb_age": pdb_age,
+            "types": types_found
+        }
+
+    @staticmethod
+    def _parse_pe_relocations(f, file_size: int, pe_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Parses Microsoft PE Base Relocation Table (IMAGE_BASE_RELOCATION)."""
+        dd = pe_info.get("data_directories", {})
+        if "BaseRelocationTable" not in dd:
+            return {"has_relocations": False, "blocks_count": 0, "total_relocations": 0, "types": {}}
+        reloc_rva = int(dd["BaseRelocationTable"]["rva"], 16)
+        reloc_size = int(dd["BaseRelocationTable"].get("size", 0))
+        reloc_off = BinaryFormatInspector.rva_to_offset(pe_info, reloc_rva)
+        if reloc_off is None or reloc_off >= file_size or reloc_size < 8:
+            return {"has_relocations": False, "blocks_count": 0, "total_relocations": 0, "types": {}}
+
+        TYPE_NAMES = {0: "ABSOLUTE", 1: "HIGH", 2: "LOW", 3: "HIGHLOW", 4: "HIGHADJ", 10: "DIR64"}
+        curr_off = reloc_off
+        end_off = min(file_size, reloc_off + reloc_size)
+        blocks = 0
+        total_relocs = 0
+        type_counts: Dict[str, int] = {}
+
+        while curr_off + 8 <= end_off and blocks < 4096:
+            f.seek(curr_off)
+            hdr = f.read(8)
+            if len(hdr) < 8:
+                break
+            page_rva, block_size = struct.unpack("<II", hdr)
+            if block_size < 8 or curr_off + block_size > end_off:
+                break
+            num_entries = (block_size - 8) // 2
+            entries_bytes = f.read(num_entries * 2)
+            for k in range(min(num_entries, len(entries_bytes) // 2)):
+                entry = struct.unpack_from("<H", entries_bytes, k * 2)[0]
+                rel_type = entry >> 12
+                tname = TYPE_NAMES.get(rel_type, f"TYPE_{rel_type}")
+                type_counts[tname] = type_counts.get(tname, 0) + 1
+                if rel_type != 0:
+                    total_relocs += 1
+            blocks += 1
+            curr_off += block_size
+
+        return {
+            "has_relocations": total_relocs > 0,
+            "blocks_count": blocks,
+            "total_relocations": total_relocs,
+            "types": type_counts
+        }
+
+    @staticmethod
+    def _parse_pe_resources(f, file_size: int, pe_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Parses Microsoft PE Resource Directory (IMAGE_RESOURCE_DIRECTORY) root types."""
+        dd = pe_info.get("data_directories", {})
+        if "ResourceTable" not in dd:
+            return {"has_resources": False, "resource_types_count": 0, "resource_types": []}
+        res_rva = int(dd["ResourceTable"]["rva"], 16)
+        res_size = int(dd["ResourceTable"].get("size", 0))
+        res_off = BinaryFormatInspector.rva_to_offset(pe_info, res_rva)
+        if res_off is None or res_off >= file_size or res_size < 16:
+            return {"has_resources": False, "resource_types_count": 0, "resource_types": []}
+
+        RT_NAMES = {
+            1: "CURSOR", 2: "BITMAP", 3: "ICON", 4: "MENU", 5: "DIALOG", 6: "STRING",
+            7: "FONTDIR", 8: "FONT", 9: "ACCELERATOR", 10: "RCDATA", 11: "MESSAGETABLE",
+            12: "GROUP_CURSOR", 14: "GROUP_ICON", 16: "VERSION", 24: "MANIFEST"
+        }
+
+        f.seek(res_off)
+        root_hdr = f.read(16)
+        if len(root_hdr) < 16:
+            return {"has_resources": False, "resource_types_count": 0, "resource_types": []}
+
+        _, _, _, _, num_named, num_ids = struct.unpack("<IIHHHH", root_hdr)
+        total_types = min(num_named + num_ids, 256)
+        resource_types: List[str] = []
+
+        for idx in range(total_types):
+            entry_off = res_off + 16 + idx * 8
+            if entry_off + 8 > file_size:
+                break
+            f.seek(entry_off)
+            entry_bytes = f.read(8)
+            if len(entry_bytes) < 8:
+                break
+            name_or_id, _ = struct.unpack("<II", entry_bytes)
+            is_string = bool(name_or_id & 0x80000000)
+            if is_string:
+                name_offset = res_off + (name_or_id & 0x7FFFFFFF)
+                if name_offset + 2 <= file_size:
+                    f.seek(name_offset)
+                    s_len_bytes = f.read(2)
+                    if len(s_len_bytes) == 2:
+                        (s_len,) = struct.unpack("<H", s_len_bytes)
+                        str_bytes = f.read(min(s_len * 2, 128))
+                        type_str = str_bytes.decode("utf-16le", errors="ignore")
+                        if type_str:
+                            resource_types.append(type_str)
+            else:
+                type_id = name_or_id & 0xFFFF
+                resource_types.append(RT_NAMES.get(type_id, f"RT_{type_id}"))
+
+        return {
+            "has_resources": len(resource_types) > 0,
+            "resource_types_count": len(resource_types),
+            "resource_types": resource_types
+        }
+
+    @staticmethod
     def _parse_pe_version_info(file_path: str) -> Dict[str, Any]:
         """Extracts official Windows VS_VERSION_INFO / StringFileInfo metadata."""
         info: Dict[str, Any] = {
@@ -597,67 +801,98 @@ class BinaryFormatInspector:
             "original_filename": None,
             "legal_copyright": None,
         }
-        if os.name != "nt":
-            return info
-        try:
-            import ctypes
-            from ctypes import wintypes
-            version_dll = getattr(ctypes.windll, "version", None)
-            if not version_dll:
-                return info
-            GetFileVersionInfoSizeW = version_dll.GetFileVersionInfoSizeW
-            GetFileVersionInfoSizeW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD)]
-            GetFileVersionInfoSizeW.restype = wintypes.DWORD
+        if os.name == "nt":
+            try:
+                import ctypes
+                from ctypes import wintypes
+                version_dll = getattr(ctypes.windll, "version", None)
+                if version_dll:
+                    GetFileVersionInfoSizeW = version_dll.GetFileVersionInfoSizeW
+                    GetFileVersionInfoSizeW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(wintypes.DWORD)]
+                    GetFileVersionInfoSizeW.restype = wintypes.DWORD
 
-            dummy = wintypes.DWORD(0)
-            size = GetFileVersionInfoSizeW(file_path, ctypes.byref(dummy))
-            if size == 0:
-                return info
+                    dummy = wintypes.DWORD(0)
+                    size = GetFileVersionInfoSizeW(file_path, ctypes.byref(dummy))
+                    if size > 0:
+                        buf = ctypes.create_string_buffer(size)
+                        GetFileVersionInfoW = version_dll.GetFileVersionInfoW
+                        GetFileVersionInfoW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID]
+                        GetFileVersionInfoW.restype = wintypes.BOOL
+                        if GetFileVersionInfoW(file_path, 0, size, buf):
+                            VerQueryValueW = version_dll.VerQueryValueW
+                            VerQueryValueW.argtypes = [wintypes.LPCVOID, wintypes.LPCWSTR, ctypes.POINTER(wintypes.LPVOID), ctypes.POINTER(wintypes.UINT)]
+                            VerQueryValueW.restype = wintypes.BOOL
 
-            buf = ctypes.create_string_buffer(size)
-            GetFileVersionInfoW = version_dll.GetFileVersionInfoW
-            GetFileVersionInfoW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID]
-            GetFileVersionInfoW.restype = wintypes.BOOL
-            if not GetFileVersionInfoW(file_path, 0, size, buf):
-                return info
+                            p_trans = wintypes.LPVOID()
+                            u_trans_len = wintypes.UINT()
+                            trans_pairs = [("0409", "04b0"), ("0409", "04e4"), ("0000", "04b0")]
+                            if VerQueryValueW(buf, r"\VarFileInfo\Translation", ctypes.byref(p_trans), ctypes.byref(u_trans_len)):
+                                if u_trans_len.value >= 4:
+                                    trans_bytes = ctypes.string_at(p_trans.value, u_trans_len.value)
+                                    for i in range(0, len(trans_bytes), 4):
+                                        if i + 4 <= len(trans_bytes):
+                                            lang, cp = struct.unpack("<HH", trans_bytes[i:i+4])
+                                            trans_pairs.insert(0, (f"{lang:04x}", f"{cp:04x}"))
 
-            VerQueryValueW = version_dll.VerQueryValueW
-            VerQueryValueW.argtypes = [wintypes.LPCVOID, wintypes.LPCWSTR, ctypes.POINTER(wintypes.LPVOID), ctypes.POINTER(wintypes.UINT)]
-            VerQueryValueW.restype = wintypes.BOOL
+                            keys = {
+                                "FileVersion": "file_version",
+                                "ProductVersion": "product_version",
+                                "CompanyName": "company_name",
+                                "ProductName": "product_name",
+                                "FileDescription": "file_description",
+                                "OriginalFilename": "original_filename",
+                                "LegalCopyright": "legal_copyright",
+                            }
+                            for lang, cp in trans_pairs:
+                                for k, field in keys.items():
+                                    if info[field]:
+                                        continue
+                                    sub_block = f"\\StringFileInfo\\{lang}{cp}\\{k}"
+                                    p_val = wintypes.LPVOID()
+                                    u_len = wintypes.UINT()
+                                    if VerQueryValueW(buf, sub_block, ctypes.byref(p_val), ctypes.byref(u_len)) and u_len.value > 0:
+                                        val_str = ctypes.wstring_at(p_val.value)
+                                        if val_str:
+                                            info[field] = val_str
+            except Exception:
+                pass
 
-            p_trans = wintypes.LPVOID()
-            u_trans_len = wintypes.UINT()
-            trans_pairs = [("0409", "04b0"), ("0409", "04e4"), ("0000", "04b0")]
-            if VerQueryValueW(buf, r"\VarFileInfo\Translation", ctypes.byref(p_trans), ctypes.byref(u_trans_len)):
-                if u_trans_len.value >= 4:
-                    trans_bytes = ctypes.string_at(p_trans.value, u_trans_len.value)
-                    for i in range(0, len(trans_bytes), 4):
-                        if i + 4 <= len(trans_bytes):
-                            lang, cp = struct.unpack("<HH", trans_bytes[i:i+4])
-                            trans_pairs.insert(0, (f"{lang:04x}", f"{cp:04x}"))
+        # Pure-Python fallback scan for VS_VERSION_INFO StringFileInfo strings (works cross-platform and without version.dll)
+        if any(v is None for v in info.values()) and os.path.exists(file_path):
+            try:
+                with open(file_path, "rb") as f:
+                    content = f.read(min(os.path.getsize(file_path), 33554432))
+                sig = "VS_VERSION_INFO".encode("utf-16le")
+                pos = content.find(sig)
+                if pos != -1:
+                    keys_map = {
+                        "FileVersion": "file_version",
+                        "ProductVersion": "product_version",
+                        "CompanyName": "company_name",
+                        "ProductName": "product_name",
+                        "FileDescription": "file_description",
+                        "OriginalFilename": "original_filename",
+                        "LegalCopyright": "legal_copyright",
+                    }
+                    for k, field in keys_map.items():
+                        if info[field]:
+                            continue
+                        ksig = (k + "\x00").encode("utf-16le")
+                        kpos = content.find(ksig, pos)
+                        if kpos != -1 and kpos >= 6:
+                            wLength, wValueLength, wType = struct.unpack_from("<HHH", content, kpos - 6)
+                            val_start = kpos + len(ksig)
+                            offset = val_start - (kpos - 6)
+                            if offset % 4 != 0:
+                                val_start += (4 - (offset % 4))
+                            if val_start + wValueLength * 2 <= len(content):
+                                val_bytes = content[val_start : val_start + wValueLength * 2]
+                                val_str = val_bytes.decode("utf-16le", errors="ignore").rstrip("\x00").strip()
+                                if val_str:
+                                    info[field] = val_str
+            except Exception:
+                pass
 
-            keys = {
-                "FileVersion": "file_version",
-                "ProductVersion": "product_version",
-                "CompanyName": "company_name",
-                "ProductName": "product_name",
-                "FileDescription": "file_description",
-                "OriginalFilename": "original_filename",
-                "LegalCopyright": "legal_copyright",
-            }
-            for lang, cp in trans_pairs:
-                for k, field in keys.items():
-                    if info[field]:
-                        continue
-                    sub_block = f"\\StringFileInfo\\{lang}{cp}\\{k}"
-                    p_val = wintypes.LPVOID()
-                    u_len = wintypes.UINT()
-                    if VerQueryValueW(buf, sub_block, ctypes.byref(p_val), ctypes.byref(u_len)) and u_len.value > 0:
-                        val_str = ctypes.wstring_at(p_val.value)
-                        if val_str:
-                            info[field] = val_str
-        except Exception:
-            pass
         return info
 
     @staticmethod
@@ -1310,10 +1545,10 @@ class SemanticFunctionMatcher:
                 insns.append("call" if ((w >> 26) & 0x3F) == 0x25 else "jump")
             elif ((w >> 25) & 0x7F) in (0x50, 0x51, 0x52, 0x53) or (w & 0xFFE003E0) in (0xD10003E0, 0x910003E0):
                 insns.append("push" if (w & 0x800000) == 0 else "pop")
-            elif ((w >> 25) & 0x07) in (0x04, 0x05):
-                insns.append("mov")
-            elif ((w >> 25) & 0x07) in (0x01, 0x05) or ((w >> 24) & 0x1F) in (0x11, 0x51, 0x91, 0xD1, 0x0A, 0x0B, 0x4A, 0x4B, 0x8A, 0x8B, 0xCA, 0xCB):
+            elif ((w >> 25) & 0x07) == 0x05 or ((w >> 24) & 0x1F) in (0x11, 0x51, 0x91, 0xD1, 0x0A, 0x0B, 0x4A, 0x4B, 0x8A, 0x8B, 0xCA, 0xCB):
                 insns.append("alu")
+            elif ((w >> 25) & 0x07) == 0x04 or ((w >> 23) & 0x3F) in (0x25, 0x35):
+                insns.append("mov")
             elif w == 0xD503201F:
                 insns.append("nop")
             else:

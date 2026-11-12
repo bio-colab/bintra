@@ -38,6 +38,9 @@ class TestObsBenchmarkRemediations(unittest.TestCase):
         info = BinaryFormatInspector.inspect(target)
         self.assertIn("delay_imports", info)
         self.assertIn("version_info", info)
+        self.assertIn("debug", info)
+        self.assertIn("relocations", info)
+        self.assertIn("resources", info)
         self.assertIn("imported_dlls_count", info["delay_imports"])
         self.assertIn("modules", info["delay_imports"])
         self.assertIsInstance(info["version_info"], dict)
@@ -45,6 +48,55 @@ class TestObsBenchmarkRemediations(unittest.TestCase):
             # Verify version_info keys are structured
             for k in ("file_version", "product_version", "company_name", "product_name"):
                 self.assertIn(k, info["version_info"])
+            # Verify debug, relocations, and resources structures
+            self.assertTrue(info["debug"].get("has_debug_directory"))
+            self.assertIsNotNone(info["debug"].get("pdb_path"))
+            self.assertTrue(info["relocations"].get("has_relocations"))
+            self.assertGreater(info["relocations"].get("total_relocations", 0), 0)
+            self.assertTrue(info["resources"].get("has_resources"))
+            self.assertGreater(info["resources"].get("resource_types_count", 0), 0)
+
+    def test_binary_format_inspector_pure_python_version_fallback(self):
+        """Verifies pure-Python VS_VERSION_INFO fallback without version.dll."""
+        import unittest.mock as mock
+        target = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "notepad.exe")
+        if not os.path.exists(target):
+            self.skipTest("Requires host notepad.exe")
+
+        with mock.patch("ctypes.windll.version", None):
+            vinfo = BinaryFormatInspector._parse_pe_version_info(target)
+            self.assertIsNotNone(vinfo.get("file_version"))
+            self.assertIsNotNone(vinfo.get("product_version"))
+            self.assertIsNotNone(vinfo.get("company_name"))
+
+    def test_binary_format_inspector_ordinal_only_exports(self):
+        """Verifies parsing of ordinal-only exported functions."""
+        for name in ["uxtheme.dll", "comctl32.dll", "shell32.dll"]:
+            target = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", name)
+            if os.path.exists(target):
+                res = BinaryFormatInspector.inspect(target)
+                exports = res.get("exports", {}).get("functions", [])
+                unnamed = [e for e in exports if e.get("name") is None]
+                if unnamed:
+                    self.assertGreater(len(unnamed), 0)
+                    self.assertIsInstance(unnamed[0]["ordinal"], int)
+                    self.assertTrue(unnamed[0]["rva"].startswith("0x"))
+                    return
+        self.skipTest("No system DLL with ordinal exports found")
+
+    def test_windows_crash_analyzer_safe_broker_usage(self):
+        """Verifies WindowsCrashAnalyzer routes event queries through SafeSubprocessBroker."""
+        import unittest.mock as mock
+        from windows_intelligence.crash_analyzer import WindowsCrashAnalyzer
+
+        with mock.patch("security.safe_subprocess.SafeSubprocessBroker.execute_catalog_command") as mock_exec:
+            mock_exec.return_value = {"returncode": 0, "stdout": "<Events></Events>"}
+            events = WindowsCrashAnalyzer.query_event_log(max_events=5)
+            self.assertEqual(events, [])
+            mock_exec.assert_called_once()
+            args, kwargs = mock_exec.call_args
+            self.assertEqual(args[0], "event_query")
+            self.assertIn("/c:5", kwargs["extra_flags"])
 
     def test_dependency_resolver_app_dir_support(self):
         """Verifies that app_dir is properly prepended to loader search order."""

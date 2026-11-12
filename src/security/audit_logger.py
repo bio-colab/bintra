@@ -209,6 +209,7 @@ class AuditLogger:
         cls._journal = records
         cls._sequence = len(records)
         cls._last_hash = expected_prev
+        cls._explicitly_cleared = False
         return {"recovered": True, "records_count": len(records), "head_hash": expected_prev}
 
     @classmethod
@@ -239,6 +240,7 @@ class AuditLogger:
             target_file = log_path or cls._log_file
             lock_path = (target_file or "") + ".lock"
             with _ProcessFileLock(lock_path):
+                cls._explicitly_cleared = False
                 return cls._recover_chain_locked(target_file)
 
     @classmethod
@@ -344,7 +346,7 @@ class AuditLogger:
             lock_path = (cls._log_file or "") + ".lock"
             with _ProcessFileLock(lock_path):
                 # Synchronize with on-disk state if another process appended
-                if cls._log_file:
+                if cls._log_file and not cls._explicitly_cleared:
                     disk_tail = cls._read_disk_tail(cls._log_file)
                     if disk_tail is not None:
                         disk_seq = disk_tail.get("sequence", -1)
@@ -389,6 +391,8 @@ class AuditLogger:
     @classmethod
     def _persist_record(cls, record: Dict[str, Any]) -> None:
         """Appends record to persistent JSONL log file with atomic flush."""
+        if cls._explicitly_cleared:
+            return
         try:
             if cls._log_dir:
                 os.makedirs(cls._log_dir, exist_ok=True)

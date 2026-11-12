@@ -107,7 +107,7 @@ class CausalitySynthesizer:
                 node_type="IMPORTED_DLL",
                 label=dll_name,
                 status="RESOLVED",
-                disk_path=dll_info.get("resolved_path")
+                disk_path=dll_info.get("located_path")
             )
             graph.add_edge(bin_id, dll_id, relation="DEPENDS_ON")
 

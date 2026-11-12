@@ -75,6 +75,8 @@ OPCODE_MAP: Dict[str, str] = {
     "INT_ZEXT": "SUBPIECE_CAST", "INT_SEXT": "SUBPIECE_CAST", "PIECE": "SUBPIECE_CAST",
     "SUBPIECE": "SUBPIECE_CAST", "CAST": "SUBPIECE_CAST", "TRUNC": "SUBPIECE_CAST",
     "FLOAT2FLOAT": "SUBPIECE_CAST", "INT2FLOAT": "SUBPIECE_CAST", "FLOAT2INT": "SUBPIECE_CAST",
+    # Data movement & bit-counting
+    "COPY": "SUBPIECE_CAST", "POPCOUNT": "ALU_ARITH", "LZCOUNT": "ALU_ARITH",
     # High P-Code SSA Phis
     "MULTIEQUAL": "SSA_PHI", "INDIRECT": "SSA_PHI",
 }
@@ -96,7 +98,7 @@ class PcodeVectorizer:
     @classmethod
     def classify_opcode(cls, opcode: str) -> str:
         clean = opcode.strip().upper()
-        return OPCODE_MAP.get(clean, "ALU_ARITH")
+        return OPCODE_MAP.get(clean, "UNKNOWN")
 
     @classmethod
     def vectorize_pcode_ops(cls, pcode_ops: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -127,10 +129,14 @@ class PcodeVectorizer:
         has_calls = 0
         has_returns = 0
 
+        unknown_ops = 0
         for op in pcode_ops:
             op_name = op.get("opcode", op.get("mnemonic", "UNKNOWN"))
             cat = cls.classify_opcode(op_name)
-            cat_idx = CAT_TO_INDEX.get(cat, 0)
+            if cat == "UNKNOWN":
+                unknown_ops += 1
+                continue
+            cat_idx = CAT_TO_INDEX[cat]
             cat_counts[cat_idx] += 1.0
 
             if prev_cat_idx is not None:
@@ -182,9 +188,7 @@ class PcodeVectorizer:
             outflow = np.sum(transitions, axis=1) / trans_sum
             vec[12:24] = inflow
             vec[24:36] = outflow
-
-            u_flat = np.linalg.svd(transitions, compute_uv=False)
-            vec[36:48] = u_flat[:12] / max(float(u_flat[0]), 1e-6)
+            vec[36:48] = s_vals[:12] / max(float(s_vals[0]), 1e-6)
 
         # Structural telemetry slots
         vec[48] = math.log1p(total_ops) / 10.0
@@ -225,8 +229,23 @@ class PcodeVectorizer:
         pcode_ops: List[Dict[str, Any]],
         basic_blocks: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
-        """Alias for vectorize_pcode_ops supporting optional basic_blocks parameter."""
-        return cls.vectorize_pcode_ops(pcode_ops)
+        """Vectorizes P-code operations and folds optional CFG basic_blocks topology."""
+        res = cls.vectorize_pcode_ops(pcode_ops)
+        if basic_blocks:
+            cfg = ControlFlowGraphAnalyzer.analyze_cfg(basic_blocks)
+            vec = np.array(res["vector"], dtype=np.float32)
+            # Blend CFG cyclomatic complexity and back-edge density into high-level telemetry
+            num_blocks = max(float(cfg.get("block_count", 0)), 1.0)
+            cyc = float(cfg.get("cyclomatic_complexity", 1))
+            back_edges = float(cfg.get("back_edge_count", 0))
+            vec[61] = min(vec[61] * 0.7 + min(cyc / 20.0, 1.0) * 0.3, 1.0)
+            vec[62] = min(vec[62] * 0.7 + min(back_edges / num_blocks, 1.0) * 0.3, 1.0)
+            norm = float(np.linalg.norm(vec))
+            if norm > 1e-12:
+                vec /= norm
+            res["vector"] = vec.tolist()
+            res["cfg_topology"] = cfg
+        return res
 
 
 # ============================================================================
@@ -349,6 +368,13 @@ class PcodeFunctionMatcher:
 # ============================================================================
 # 4. CONTROL FLOW GRAPH (CFG) ANALYZER
 # ============================================================================
+
+    @classmethod
+    def match_batch(cls, vecs_a: np.ndarray, vecs_b: np.ndarray) -> np.ndarray:
+        """Vectorized N x M cosine similarity matrix for P-code embeddings."""
+        if vecs_a.size == 0 or vecs_b.size == 0:
+            return np.zeros((vecs_a.shape[0], vecs_b.shape[0]), dtype=np.float32)
+        return np.clip(vecs_a @ vecs_b.T, -1.0, 1.0)
 
 class ControlFlowGraphAnalyzer:
     """

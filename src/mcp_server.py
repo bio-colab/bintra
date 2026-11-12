@@ -730,6 +730,10 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                 "model_path": {
                     "type": "string",
                     "description": "Path to safetensors model file"
+                },
+                "tensor": {
+                    "type": "string",
+                    "description": "Optional tensor name to audit"
                 }
             },
             "required": ["model_path"]
@@ -1065,6 +1069,7 @@ class BintraMcpServer:
             if tool_name == "bintra_win_catalog_cmd":
                 req_metadata["is_catalog_command"] = True
 
+            self._validate_tool_arguments(tool_name, args)
             with ExecutionGuard.scoped_session(target_binary_path=target_path, workspace_dir=workspace_dir):
                 # COMPLETE MEDIATION: All MCP tool invocations MUST be authorized by Reference Monitor
                 ExecutionGuard.request_access(
@@ -1075,8 +1080,6 @@ class BintraMcpServer:
                     access_mode=mode,
                     metadata=req_metadata
                 )
-
-                self._validate_tool_arguments(tool_name, args)
                 result_data = self.dispatch_tool(tool_name, args)
                 return {
                     "content": [

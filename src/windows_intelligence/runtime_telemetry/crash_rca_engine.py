@@ -165,7 +165,7 @@ class CrashRootCauseAnalyzer:
                 "severity": "UNKNOWN",
                 "description": "Exception record has no target virtual address (non-memory exception or incomplete dump)."
             }
-        if target_vaddr <= cls.NULL_PAGE_BOUND:
+        if target_vaddr < cls.NULL_PAGE_BOUND:
             return {
                 "category": "NULL_PAGE_TRAP",
                 "status": "DETERMINISTIC_NULL_DEREFERENCE",
@@ -431,7 +431,7 @@ class CrashRootCauseAnalyzer:
             }
 
         mem_expr = mem_match.group(1).lower().replace(" ", "")
-        candidate_regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"]
+        candidate_regs = ["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "rip", "eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp"]
 
         found_reg = None
         for r in candidate_regs:
@@ -475,7 +475,7 @@ class CrashRootCauseAnalyzer:
 
         # Extract numeric displacement (e.g. + 0x28 or + 40)
         disp = 0
-        disp_match = re.search(r"\+([0-9a-fx]+)", mem_expr)
+        disp_match = re.search(r"([+-](?:0x[0-9a-f]+|[0-9]+))", mem_expr)
         if disp_match:
             try:
                 disp = int(disp_match.group(1), 0)

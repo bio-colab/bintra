@@ -18,7 +18,7 @@ import socket
 import socketserver
 import tempfile
 import threading
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Any, List, Optional, Tuple, Callable
 
@@ -82,9 +82,15 @@ class GhidraBridgeRequestHandler(BaseHTTPRequestHandler):
             self._send_json_error(None, -32700, "Parse error: Invalid JSON")
             return
 
+        if not isinstance(req, dict):
+            self._send_json_error(None, -32600, "Invalid Request: expected JSON object", http_status=400)
+            return
         method = req.get("method")
-        params = req.get("params", {})
+        params = req.get("params") or {}
         req_id = req.get("id")
+        if not isinstance(params, dict):
+            self._send_json_error(req_id, -32602, "Invalid params: expected JSON object", http_status=400)
+            return
 
         server: GhidraLiveBridgeServer = self.server.bridge_server  # type: ignore
 
@@ -142,7 +148,7 @@ class GhidraLiveBridgeServer:
         # Command queues for Ghidra to consume (bounded ring semantics)
         self._max_queue_size = 2000
         self._queue_overflow_count = 0
-        self._command_queue: List[Dict[str, Any]] = []
+        self._command_queue: deque = deque(maxlen=self._max_queue_size)
         self._queue_lock = threading.Lock()
 
         # Bounded LRU cache of decompiled functions pushed by Ghidra
@@ -291,11 +297,21 @@ class GhidraLiveBridgeServer:
 
         elif method == "ghidra.push_pcode":
             fn_name = params.get("name", "sub_unknown")
-            while len(self._decompiled_functions) >= self._max_cached_functions:
-                self._decompiled_functions.popitem(last=False)
-            self._decompiled_functions[fn_name] = params
-            self._decompiled_functions.move_to_end(fn_name)
-            return {"status": "cached", "function": fn_name}
+            with self._cache_lock:
+                while len(self._decompiled_functions) >= self._max_cached_functions:
+                    self._decompiled_functions.popitem(last=False)
+                self._decompiled_functions[fn_name] = params
+                self._decompiled_functions.move_to_end(fn_name)
+                cached_len = len(self._decompiled_functions)
+            return {"status": "cached", "function": fn_name, "cached_functions": cached_len}
+
+        elif method == "ghidra.query_cached_functions":
+            filter_name = params.get("name")
+            with self._cache_lock:
+                if filter_name:
+                    fn_data = self._decompiled_functions.get(filter_name)
+                    return {"found": fn_data is not None, "function": fn_data}
+                return {"cached_functions": list(self._decompiled_functions.keys()), "count": len(self._decompiled_functions)}
 
         elif method == "bintra.deobfuscate_function":
             pcode_ops = params.get("pcode_ops", [])
@@ -351,7 +367,7 @@ class GhidraLiveBridgeServer:
         """Pushes an annotation or mutation command into the bounded queue for Ghidra to poll."""
         with self._queue_lock:
             if len(self._command_queue) >= self._max_queue_size:
-                self._command_queue.pop(0)
+                self._command_queue.popleft()
                 self._queue_overflow_count += 1
             self._command_queue.append({
                 "action": action,

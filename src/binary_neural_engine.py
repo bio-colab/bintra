@@ -135,18 +135,16 @@ class BinaryFormatInspector:
         if len(temp) >= checksum_offset + 4:
             temp[checksum_offset:checksum_offset + 4] = b"\x00\x00\x00\x00"
 
-        total = 0
-        num_words = len(temp) // 2
-        for i in range(num_words):
-            (word,) = struct.unpack_from("<H", temp, i * 2)
-            total += word
-            total = (total & 0xFFFF) + (total >> 16)
-
+        even_len = len(temp) & ~1
+        if even_len > 0:
+            words = np.frombuffer(temp, dtype="<u2", count=even_len // 2)
+            total = int(np.sum(words, dtype=np.uint64))
+        else:
+            total = 0
         if len(temp) % 2 != 0:
             total += temp[-1]
+        while total >> 16:
             total = (total & 0xFFFF) + (total >> 16)
-
-        total = (total & 0xFFFF) + (total >> 16)
         final_checksum = (total & 0xFFFFFFFF) + len(file_bytes)
         return final_checksum & 0xFFFFFFFF
 
@@ -321,23 +319,163 @@ class BinaryFormatInspector:
                 "windows_security_mitigations": mitigations,
                 "data_directories": data_directories,
                 "sections_count": num_sections,
+                "sections_truncated": num_sections > 96,
                 "sections": sections,
                 "sha256": BinaryFormatInspector.compute_sha256(file_path)
             }
             ep_file_off = BinaryFormatInspector.rva_to_offset(result, entry_point_rva)
             result["entry_point_file_offset"] = hex(ep_file_off) if ep_file_off is not None else None
 
-            # High-Fidelity Import, Export & Delay-Load Analysis
+            # High-Fidelity Read-Only PE/COFF Directory Analysis
             is_64_bit = (pe_type.startswith("PE32+"))
+            result["rich_header"] = BinaryFormatInspector._parse_pe_rich_header(f, pe_offset)
             result["imports"] = BinaryFormatInspector._parse_pe_imports(f, file_size, result, is_64_bit)
             result["exports"] = BinaryFormatInspector._parse_pe_exports(f, file_size, result)
             result["delay_imports"] = BinaryFormatInspector._parse_pe_delay_imports(f, file_size, result, is_64_bit)
             result["debug"] = BinaryFormatInspector._parse_pe_debug(f, file_size, result)
             result["relocations"] = BinaryFormatInspector._parse_pe_relocations(f, file_size, result)
             result["resources"] = BinaryFormatInspector._parse_pe_resources(f, file_size, result)
+            result["tls"] = BinaryFormatInspector._parse_pe_tls(f, file_size, result, is_64_bit)
+            result["load_config"] = BinaryFormatInspector._parse_pe_load_config(f, file_size, result, is_64_bit)
+            result["security_authenticode"] = BinaryFormatInspector._parse_pe_security(f, file_size, result)
+            result["clr_metadata"] = BinaryFormatInspector._parse_pe_clr(f, file_size, result)
             result["version_info"] = BinaryFormatInspector._parse_pe_version_info(file_path)
 
             return result
+
+    @staticmethod
+    def _read_cstr(f, file_size: int, offset: int, max_len: int = 256) -> str:
+        if offset < 0 or offset >= file_size:
+            return ""
+        f.seek(offset)
+        buf = f.read(min(max_len, file_size - offset))
+        nul = buf.find(b"\x00")
+        if nul != -1:
+            buf = buf[:nul]
+        return buf.decode("latin-1", errors="ignore")
+
+    @staticmethod
+    def _parse_pe_rich_header(f, pe_offset: int) -> Dict[str, Any]:
+        if pe_offset <= 0x80 or pe_offset > 65536:
+            return {"present": False, "entries": []}
+        f.seek(0x80)
+        stub = f.read(pe_offset - 0x80)
+        rich_idx = stub.find(b"Rich")
+        if rich_idx == -1 or rich_idx + 8 > len(stub):
+            return {"present": False, "entries": []}
+        xor_key_bytes = stub[rich_idx + 4 : rich_idx + 8]
+        (xor_key,) = struct.unpack("<I", xor_key_bytes)
+        dans_sig = struct.pack("<I", 0x536E6144 ^ xor_key)
+        dans_idx = stub.rfind(dans_sig, 0, rich_idx)
+        if dans_idx == -1:
+            return {"present": False, "entries": []}
+        entries = []
+        pos = dans_idx + 16
+        while pos + 8 <= rich_idx:
+            d0, d1 = struct.unpack_from("<II", stub, pos)
+            comp_id = d0 ^ xor_key
+            count = d1 ^ xor_key
+            prod_id = (comp_id >> 16) & 0xFFFF
+            build_num = comp_id & 0xFFFF
+            entries.append({"prod_id": prod_id, "build_number": build_num, "count": count})
+            pos += 8
+        return {"present": True, "xor_key": hex(xor_key), "entry_count": len(entries), "entries": entries}
+
+    @staticmethod
+    def _parse_pe_tls(f, file_size: int, pe_info: Dict[str, Any], is_64: bool) -> Dict[str, Any]:
+        dd = pe_info.get("data_directories", {})
+        if "TLSTable" not in dd:
+            return {"present": False, "callbacks": []}
+        tls_rva = int(dd["TLSTable"]["rva"], 16)
+        tls_off = BinaryFormatInspector.rva_to_offset(pe_info, tls_rva)
+        if tls_off is None:
+            return {"present": True, "callbacks": [], "error": "unmapped_tls_rva"}
+        img_base = int(pe_info.get("image_base", "0x0"), 16)
+        f.seek(tls_off)
+        raw = f.read(40 if is_64 else 24)
+        if (is_64 and len(raw) < 32) or (not is_64 and len(raw) < 16):
+            return {"present": True, "callbacks": [], "error": "truncated_tls_dir"}
+        cb_va = struct.unpack_from("<Q", raw, 24)[0] if is_64 else struct.unpack_from("<I", raw, 12)[0]
+        callbacks: List[str] = []
+        if cb_va > img_base:
+            cb_off = BinaryFormatInspector.rva_to_offset(pe_info, cb_va - img_base)
+            if cb_off is not None:
+                ptr_sz = 8 if is_64 else 4
+                fmt = "<Q" if is_64 else "<I"
+                for idx in range(64):
+                    if cb_off + idx * ptr_sz + ptr_sz > file_size:
+                        break
+                    f.seek(cb_off + idx * ptr_sz)
+                    (val,) = struct.unpack(fmt, f.read(ptr_sz))
+                    if val == 0:
+                        break
+                    callbacks.append(hex(val))
+        return {"present": True, "address_of_callbacks_va": hex(cb_va), "callback_count": len(callbacks), "callbacks": callbacks}
+
+    @staticmethod
+    def _parse_pe_load_config(f, file_size: int, pe_info: Dict[str, Any], is_64: bool) -> Dict[str, Any]:
+        dd = pe_info.get("data_directories", {})
+        if "LoadConfigTable" not in dd:
+            return {"present": False}
+        lc_rva = int(dd["LoadConfigTable"]["rva"], 16)
+        lc_off = BinaryFormatInspector.rva_to_offset(pe_info, lc_rva)
+        if lc_off is None or lc_off + 4 > file_size:
+            return {"present": True, "error": "unmapped_load_config"}
+        f.seek(lc_off)
+        raw = f.read(min(256, file_size - lc_off))
+        if len(raw) < 4:
+            return {"present": True, "error": "truncated_load_config"}
+        (struct_size,) = struct.unpack_from("<I", raw, 0)
+        info: Dict[str, Any] = {"present": True, "size": struct_size}
+        if is_64 and len(raw) >= 96:
+            info["security_cookie_va"] = hex(struct.unpack_from("<Q", raw, 88)[0])
+            if len(raw) >= 152:
+                info["guard_cf_check_va"] = hex(struct.unpack_from("<Q", raw, 112)[0])
+                info["guard_cf_function_count"] = struct.unpack_from("<Q", raw, 136)[0]
+                info["guard_flags"] = hex(struct.unpack_from("<I", raw, 144)[0])
+        elif not is_64 and len(raw) >= 72:
+            info["security_cookie_va"] = hex(struct.unpack_from("<I", raw, 60)[0])
+            info["seh_handler_table_va"] = hex(struct.unpack_from("<I", raw, 64)[0])
+            info["seh_handler_count"] = struct.unpack_from("<I", raw, 68)[0]
+            if len(raw) >= 92:
+                info["guard_cf_check_va"] = hex(struct.unpack_from("<I", raw, 72)[0])
+                info["guard_cf_function_count"] = struct.unpack_from("<I", raw, 84)[0]
+                info["guard_flags"] = hex(struct.unpack_from("<I", raw, 88)[0])
+        return info
+
+    @staticmethod
+    def _parse_pe_security(f, file_size: int, pe_info: Dict[str, Any]) -> Dict[str, Any]:
+        dd = pe_info.get("data_directories", {})
+        if "CertificateTable" not in dd:
+            return {"signed": False}
+        # Note: Security directory entry uses a raw FILE OFFSET, not an RVA
+        sec_off = int(dd["CertificateTable"]["rva"], 16)
+        sec_size = int(dd["CertificateTable"]["size"])
+        if sec_off <= 0 or sec_off + 8 > file_size:
+            return {"signed": False, "error": "invalid_security_offset"}
+        f.seek(sec_off)
+        hdr = f.read(8)
+        if len(hdr) < 8:
+            return {"signed": False, "error": "truncated_win_certificate"}
+        dw_len, w_rev, w_type = struct.unpack("<IHH", hdr)
+        cert_type_name = {0x0001: "X509", 0x0002: "PKCS_SIGNED_DATA", 0x0003: "RESERVED_1", 0x0004: "TS_STACK_SIGNED"}.get(w_type, hex(w_type))
+        return {"signed": True, "file_offset": sec_off, "total_size": sec_size, "dw_length": dw_len, "revision": hex(w_rev), "certificate_type": cert_type_name}
+
+    @staticmethod
+    def _parse_pe_clr(f, file_size: int, pe_info: Dict[str, Any]) -> Dict[str, Any]:
+        dd = pe_info.get("data_directories", {})
+        if "CLRRuntimeHeader" not in dd:
+            return {"is_dotnet": False}
+        clr_rva = int(dd["CLRRuntimeHeader"]["rva"], 16)
+        clr_off = BinaryFormatInspector.rva_to_offset(pe_info, clr_rva)
+        if clr_off is None or clr_off + 24 > file_size:
+            return {"is_dotnet": True, "error": "unmapped_clr_header"}
+        f.seek(clr_off)
+        raw = f.read(24)
+        if len(raw) < 24:
+            return {"is_dotnet": True, "error": "truncated_clr_header"}
+        cb, maj, min_v, meta_rva, meta_sz, flags, ep_token = struct.unpack("<IHHIIII", raw)
+        return {"is_dotnet": True, "header_size": cb, "runtime_version": f"{maj}.{min_v}", "metadata_rva": hex(meta_rva), "metadata_size": meta_sz, "flags": hex(flags), "entry_point_token": hex(ep_token)}
 
     @staticmethod
     def _parse_pe_imports(f, file_size: int, pe_info: Dict[str, Any], is_64: bool) -> Dict[str, Any]:
@@ -1261,16 +1399,17 @@ class ContinuousDeobfuscator:
         for var_key, entries in cmps_by_var_entries.items():
             if len(entries) < 3:
                 continue
-            offsets = sorted([e["offset"] for e in entries])
-            # Slide window to find localized dispatcher loop within 1024 bytes
-            for start_idx in range(len(offsets)):
-                window_entries = [
-                    e for e in entries
-                    if offsets[start_idx] <= e["offset"] <= offsets[start_idx] + 1024
-                ]
-                win_states = set(e["state_value"] for e in window_entries)
+            sorted_entries = sorted(entries, key=lambda e: e["offset"])
+            # O(N) two-pointer sliding window to find localized dispatcher loop within 1024 bytes
+            right = 0
+            for left in range(len(sorted_entries)):
+                limit = sorted_entries[left]["offset"] + 1024
+                while right < len(sorted_entries) and sorted_entries[right]["offset"] <= limit:
+                    right += 1
+                window_entries = sorted_entries[left:right]
+                win_states = {e["state_value"] for e in window_entries}
                 if len(win_states) >= 3:
-                    win_offsets = sorted([e["offset"] for e in window_entries])
+                    win_offsets = [e["offset"] for e in window_entries]
                     intervals = np.diff(win_offsets).astype(np.float32)
                     if len(intervals) >= 2:
                         mean_int = float(np.mean(intervals))
@@ -1567,11 +1706,16 @@ class SemanticFunctionMatcher:
         if len(raw_bytes) < 2:
             return vec
 
-        is_arm64 = (
-            (len(raw_bytes) % 4 == 0)
-            and raw_bytes.endswith(b"\xc0\x03\x5f\xd6")  # patched: require AArch64 RET terminator
-            and not (b"\xc3" in raw_bytes or b"\x55\x48" in raw_bytes)
+        has_x86_sig = (b"\xc3" in raw_bytes or b"\x55\x48\x89\xe5" in raw_bytes or b"\x48\x83\xec" in raw_bytes)
+        arm64_words = [
+            struct.unpack_from("<I", raw_bytes, i)[0]
+            for i in range(0, len(raw_bytes) - (len(raw_bytes) % 4), 4)
+        ] if len(raw_bytes) % 4 == 0 else []
+        has_arm64_sig = any(
+            w == 0xD65F03C0 or (w & 0xFC000000) in (0x94000000, 0x14000000) or (w & 0x9F000000) == 0x90000000
+            for w in arm64_words
         )
+        is_arm64 = (len(raw_bytes) % 4 == 0) and has_arm64_sig and not has_x86_sig
 
         if is_arm64:
             insns = SemanticFunctionMatcher.decode_instructions_arm64(raw_bytes)
@@ -1599,9 +1743,12 @@ class SemanticFunctionMatcher:
         vec[6] = insns.count("ret") / total
         vec[7] = insns.count("nop") / total
 
-        vec[8] = insns.count("push") / max(insns.count("pop"), 1)
-        vec[9] = insns.count("jump") / max(insns.count("call"), 1)
-        vec[10] = insns.count("alu") / max(insns.count("mov"), 1)
+        c_push, c_pop = insns.count("push"), insns.count("pop")
+        c_jump, c_call = insns.count("jump"), insns.count("call")
+        c_alu, c_mov = insns.count("alu"), insns.count("mov")
+        vec[8] = c_push / (c_push + c_pop + 1.0)
+        vec[9] = c_jump / (c_jump + c_call + 1.0)
+        vec[10] = c_alu / (c_alu + c_mov + 1.0)
 
         # Populate structural invariants and operational bigrams
         bigrams = list(zip(insns[:-1], insns[1:]))
@@ -1616,6 +1763,13 @@ class SemanticFunctionMatcher:
         if norm > 1e-6:
             vec /= norm
         return vec
+
+    @classmethod
+    def match_batch(cls, vecs_a: np.ndarray, vecs_b: np.ndarray) -> np.ndarray:
+        """Vectorized N x M cosine similarity matrix for L2-normalized function vectors."""
+        if vecs_a.size == 0 or vecs_b.size == 0:
+            return np.zeros((vecs_a.shape[0], vecs_b.shape[0]), dtype=np.float32)
+        return np.clip(vecs_a @ vecs_b.T, -1.0, 1.0)
 
     @classmethod
     def match_pcode(
@@ -2412,16 +2566,18 @@ class SensoryCortex:
             "present": True, "efficiency_score": 0.94, "importance_rank": 9, "telemetry": temporal_details
         }
 
-        # 3. Active Touch
-        synth_mat = np.eye(8, dtype=np.float32)
-        _, touch_metrics = WeightPatcher.rank1_nullify(synth_mat, mode_index=0, alpha=0.5)
+        # 3. Active Touch (Read-Only Reverse Engineering Inspection Surface)
         senses_output["active_touch"] = {
             "id": 3, "name_ar": "اللمس النشط", "name_en": "Active Touch",
             "present": True, "efficiency_score": 0.97, "importance_rank": 3,
             "telemetry": {
-                "supported_weight_operations": ["rank_1_nullify", "sparse_clamp", "subspace_zero", "vector_add", "column_direction_subtract", "graft_conditional_subcircuit", "compile_weights_from_spec"],
-                "supported_binary_operations": ["surgical_byte_patch", "pe_checksum_sync", "atomic_windows_replace", "ghidra_db_mutation", "pcode_varnode_vectorization"],
-                "probe_lipschitz_bound": round(touch_metrics["lipschitz_spectral_bound"], 4),
+                "supported_read_only_operations": [
+                    "pe_rich_header_parse", "pe_tls_callback_inspect",
+                    "pe_load_config_cfg_audit", "pe_authenticode_header_inspect",
+                    "pcode_varnode_vectorization", "pcode_ssa_invariant_proof",
+                    "minidump_offline_vad_inspect"
+                ],
+                "read_only_enforced": True,
             }
         }
 

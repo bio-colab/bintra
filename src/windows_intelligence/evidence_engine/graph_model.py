@@ -1,3 +1,4 @@
+import re
 # -*- coding: utf-8 -*-
 """
 Formal Evidence Graph Data Structures for Bintra.
@@ -126,7 +127,7 @@ class EvidenceGraph:
 
         # 1. Define nodes with clean sanitized IDs and shapes
         def _sanitize(nid: str) -> str:
-            return nid.replace(":", "_").replace(".", "_").replace("\\", "_").replace("/", "_").replace("-", "_")
+            return re.sub(r"[^A-Za-z0-9_]", "_", nid)
 
         for n in self.nodes.values():
             s_id = _sanitize(n.id)
@@ -139,7 +140,7 @@ class EvidenceGraph:
             elif n.node_type == "GHIDRA_FUNCTION":
                 lines.append(f'    {s_id}(["FUNC: {clean_label}"]):::funcClass')
             elif n.node_type == "PE_SECTION":
-                lines.append(f'    {s_id}[["SEC: {clean_label}"]]:;:secClass')
+                lines.append(f'    {s_id}[["SEC: {clean_label}"]]:::secClass')
             elif n.node_type == "HARDWARE_DEVICE":
                 lines.append(f'    {s_id}[/"HW: {clean_label}"/]:::hwClass')
             elif n.node_type == "KERNEL_DRIVER":

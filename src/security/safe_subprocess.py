@@ -105,7 +105,7 @@ class SafeSubprocessBroker:
         target = os.path.join(sys32, exe_name)
         if os.path.exists(target):
             return target
-        return exe_name
+        raise SecurityViolationError(f"Fail-closed: Catalog executable '{exe_name}' not found in System32 ({sys32}).")
 
     @classmethod
     def execute_catalog_command(

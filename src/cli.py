@@ -1123,6 +1123,7 @@ def _dispatch_cli():
             parser.add_argument("command")
             parser.add_argument("--input", "--file", dest="input", required=True, help="Path to exported Ghidra JSON file")
             parser.add_argument("--output", default=None, help="Path to write the generated mutation plan JSON")
+            parser.add_argument("--workspace", default=None, help="Optional workspace directory override")
             args = parser.parse_args()
 
             from security import SafeFileAccess, ExecutionGuard, Capability

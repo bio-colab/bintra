@@ -158,7 +158,7 @@ class WindowsCrashAnalyzer:
         try:
             from security.safe_subprocess import SafeSubprocessBroker
             res = SafeSubprocessBroker.execute_catalog_command("event_query", extra_flags=extra, timeout=5)
-            if res.get("returncode", -1) != 0 or not res.get("stdout"):
+            if res.get("exit_code", -1) != 0 or not res.get("stdout"):
                 return []
             stdout_data = res.get("stdout", "")
         except Exception:

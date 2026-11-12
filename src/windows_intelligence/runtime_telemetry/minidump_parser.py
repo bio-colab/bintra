@@ -1,3 +1,4 @@
+import bisect
 # -*- coding: utf-8 -*-
 """
 Pure-Python Multi-Stream MiniDump (.dmp) Parser & Crash Intelligence Engine.
@@ -171,6 +172,21 @@ class MiniDumpParser:
                     sz, rva = stream_map[6]
                     exception_info = cls._parse_exception_stream(f, rva, sz, file_size)
 
+                # 5b. Offline Memory & VAD Streams (Streams 5, 9, 16)
+                memory_ranges: List[Dict[str, int]] = []
+                if 5 in stream_map:
+                    sz, rva = stream_map[5]
+                    memory_ranges.extend(cls._parse_memory_list_stream(f, rva, sz, file_size))
+                if 9 in stream_map:
+                    sz, rva = stream_map[9]
+                    memory_ranges.extend(cls._parse_memory64_list_stream(f, rva, sz, file_size))
+                if memory_ranges:
+                    memory_ranges.sort(key=lambda r: r["start_va"])
+                vad_regions: List[Dict[str, Any]] = []
+                if 16 in stream_map:
+                    sz, rva = stream_map[16]
+                    vad_regions = cls._parse_memory_info_list_stream(f, rva, sz, file_size)
+
                 # 6. Correlate Fault Address with Loaded Modules
                 cls._correlate_fault(exception_info, modules)
 
@@ -187,6 +203,8 @@ class MiniDumpParser:
                     "thread_count": len(threads),
                     "module_count": len(modules),
                     "threads": threads,
+                    "memory_ranges": memory_ranges,
+                    "vad_regions": vad_regions,
                     "modules": modules,
                     "exception_info": exception_info,
                     "modules_sample": [m["name"] for m in modules[:10]]
@@ -280,11 +298,19 @@ class MiniDumpParser:
             if len(mod_record) < 108:
                 break
             base_img, size_img, chksum, timestamp, name_rva = struct.unpack("<QIIII", mod_record[:24])
+            # VS_FIXEDFILEINFO at offset 24 (52 bytes): dwFileVersionMS (off 32), dwFileVersionLS (off 36)
+            v_sig, _, v_ms, v_ls = struct.unpack("<IIII", mod_record[24:40])
+            file_version = None
+            if v_sig == 0xFEEF04BD:
+                file_version = f"{(v_ms >> 16) & 0xFFFF}.{v_ms & 0xFFFF}.{(v_ls >> 16) & 0xFFFF}.{v_ls & 0xFFFF}"
+            # CvRecord MINIDUMP_LOCATION_DESCRIPTOR at offset 76 (8 bytes: DataSize, Rva)
+            cv_size, cv_rva = struct.unpack("<II", mod_record[76:84])
             cur_pos = f.tell()
             mod_path = cls._read_minidump_string(f, name_rva)
+            pdb_info = cls._parse_codeview_record(f, cv_rva, cv_size, file_size) if cv_size >= 24 and cv_rva > 0 else None
             f.seek(cur_pos)
 
-            modules.append({
+            mod_entry = {
                 "name": os.path.basename(mod_path),
                 "path": mod_path,
                 "base_address": hex(base_img),
@@ -292,9 +318,127 @@ class MiniDumpParser:
                 "size": size_img,
                 "end_address": hex(base_img + size_img),
                 "checksum": hex(chksum),
-                "timestamp": timestamp
-            })
+                "timestamp": timestamp,
+            }
+            if file_version:
+                mod_entry["file_version"] = file_version
+            if pdb_info:
+                mod_entry["pdb"] = pdb_info
+            modules.append(mod_entry)
         return modules
+
+
+    @classmethod
+    def _parse_codeview_record(cls, f, rva: int, size: int, file_size: int = 0) -> Optional[Dict[str, Any]]:
+        if rva <= 0 or size < 24 or (file_size > 0 and rva + size > file_size):
+            return None
+        f.seek(rva)
+        data = f.read(min(size, 512))
+        if len(data) < 24:
+            return None
+        sig = data[:4]
+        if sig == b"RSDS":
+            d1, d2, d3 = struct.unpack("<IHH", data[4:12])
+            d4 = data[12:20]
+            age = struct.unpack("<I", data[20:24])[0]
+            guid = f"{d1:08x}-{d2:04x}-{d3:04x}-{d4[:2].hex()}-{d4[2:].hex()}"
+            pdb_name = data[24:].split(b"\x00", 1)[0].decode("utf-8", errors="ignore")
+            return {"signature": "RSDS", "guid": guid, "age": age, "pdb_name": pdb_name}
+        if sig == b"NB10" and len(data) >= 16:
+            ts, age = struct.unpack("<II", data[8:16])
+            pdb_name = data[16:].split(b"\x00", 1)[0].decode("utf-8", errors="ignore")
+            return {"signature": "NB10", "timestamp": ts, "age": age, "pdb_name": pdb_name}
+        return None
+
+    @classmethod
+    def _parse_memory_list_stream(cls, f, rva: int, size: int, file_size: int = 0) -> List[Dict[str, int]]:
+        if size < 4 or rva < 0 or (file_size > 0 and rva + size > file_size):
+            return []
+        f.seek(rva)
+        raw_num = f.read(4)
+        if len(raw_num) < 4:
+            return []
+        (num_ranges,) = struct.unpack("<I", raw_num)
+        ranges = []
+        for _ in range(min(num_ranges, 8192)):
+            rec = f.read(16)
+            if len(rec) < 16:
+                break
+            start_va, data_size, data_rva = struct.unpack("<QII", rec)
+            if data_size > 0:
+                ranges.append({"start_va": start_va, "end_va": start_va + data_size, "size": data_size, "file_rva": data_rva})
+        ranges.sort(key=lambda r: r["start_va"])
+        return ranges
+
+    @classmethod
+    def _parse_memory64_list_stream(cls, f, rva: int, size: int, file_size: int = 0) -> List[Dict[str, int]]:
+        if size < 16 or rva < 0 or (file_size > 0 and rva + size > file_size):
+            return []
+        f.seek(rva)
+        hdr = f.read(16)
+        if len(hdr) < 16:
+            return []
+        num_ranges, base_rva = struct.unpack("<QQ", hdr)
+        ranges = []
+        cur_rva = base_rva
+        for _ in range(min(num_ranges, 65536)):
+            rec = f.read(16)
+            if len(rec) < 16:
+                break
+            start_va, data_size = struct.unpack("<QQ", rec)
+            if data_size > 0:
+                ranges.append({"start_va": start_va, "end_va": start_va + data_size, "size": data_size, "file_rva": cur_rva})
+                cur_rva += data_size
+        ranges.sort(key=lambda r: r["start_va"])
+        return ranges
+
+    @classmethod
+    def _parse_memory_info_list_stream(cls, f, rva: int, size: int, file_size: int = 0) -> List[Dict[str, Any]]:
+        if size < 16 or rva < 0 or (file_size > 0 and rva + size > file_size):
+            return []
+        f.seek(rva)
+        hdr = f.read(16)
+        if len(hdr) < 16:
+            return []
+        hdr_size, entry_size, num_entries = struct.unpack("<IIQ", hdr)
+        if entry_size < 48:
+            return []
+        f.seek(rva + hdr_size)
+        regions = []
+        for _ in range(min(num_entries, 16384)):
+            rec = f.read(entry_size)
+            if len(rec) < 48:
+                break
+            base_addr, alloc_base, alloc_prot, _, reg_size, state, protect, mem_type = struct.unpack("<QQIIQIII", rec[:48])
+            regions.append({
+                "base_address": hex(base_addr),
+                "base_int": base_addr,
+                "allocation_base": hex(alloc_base),
+                "size": reg_size,
+                "state": hex(state),
+                "protect": hex(protect),
+                "type": hex(mem_type),
+            })
+        return regions
+
+    @classmethod
+    def read_memory_from_dump(cls, dump_path: str, parsed_dump: Dict[str, Any], va: int, size: int) -> Optional[bytes]:
+        """Reads bytes from offline MemoryListStream / Memory64ListStream using O(log N) bisect lookup."""
+        ranges = parsed_dump.get("memory_ranges") or []
+        if not ranges or size <= 0:
+            return None
+        starts = [r["start_va"] for r in ranges]
+        idx = bisect.bisect_right(starts, va) - 1
+        if idx < 0:
+            return None
+        rng = ranges[idx]
+        if va < rng["start_va"] or va >= rng["end_va"]:
+            return None
+        avail = min(size, rng["end_va"] - va)
+        file_off = rng["file_rva"] + (va - rng["start_va"])
+        with open(dump_path, "rb") as f:
+            f.seek(file_off)
+            return f.read(avail)
 
     @classmethod
     def _parse_exception_stream(cls, f, rva: int, size: int, file_size: int = 0) -> Optional[Dict[str, Any]]:

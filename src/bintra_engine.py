@@ -81,7 +81,7 @@ class SafetensorsHandler:
             if not isinstance(shape, (list, tuple)):
                 raise ValueError(f"Invalid shape for tensor '{name}': must be a list of integers.")
             for dim in shape:
-                if not isinstance(dim, int) or dim < 0:
+                if not isinstance(dim, int) or isinstance(dim, bool) or dim < 0:
                     raise ValueError(f"Invalid dimension {dim} in shape for tensor '{name}': must be a non-negative integer.")
 
             # Validate data_offsets
@@ -89,7 +89,7 @@ class SafetensorsHandler:
             if not isinstance(offsets, (list, tuple)) or len(offsets) != 2:
                 raise ValueError(f"Invalid data_offsets for tensor '{name}': must be a 2-element list [start, end].")
             start_off, end_off = offsets
-            if not isinstance(start_off, int) or not isinstance(end_off, int) or start_off < 0 or end_off < 0:
+            if not isinstance(start_off, int) or isinstance(start_off, bool) or not isinstance(end_off, int) or isinstance(end_off, bool) or start_off < 0 or end_off < 0:
                 raise ValueError(f"Negative offset in data_offsets [{start_off}, {end_off}] for tensor '{name}'.")
             if end_off < start_off:
                 raise ValueError(f"Inverted offset range [{start_off}, {end_off}] for tensor '{name}'.")
@@ -142,7 +142,10 @@ class SafetensorsHandler:
             header_json_bytes = f.read(header_len)
             if len(header_json_bytes) < header_len:
                 raise ValueError("Truncated safetensors header.")
-            header_dict = json.loads(header_json_bytes.decode("utf-8"))
+            try:
+                header_dict = json.loads(header_json_bytes.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ValueError(f"Malformed safetensors JSON header: {exc}") from exc
             if not isinstance(header_dict, dict):
                 raise ValueError(f"Invalid safetensors header: root must be a JSON object, got {type(header_dict).__name__}.")
             header_sha256 = hashlib.sha256(header_json_bytes).hexdigest()
@@ -415,6 +418,8 @@ class SubspaceAnalyzer:
         """Extracts top-k outlier coordinates by absolute magnitude (fulfills inspect_weight_subspace schema)."""
         f32 = matrix.astype(np.float32)
         flat_abs = np.abs(f32).ravel()
+        if flat_abs.size == 0:
+            return []
         k = min(max(int(top_k), 1), 64, flat_abs.size)
 
         if k == flat_abs.size:

@@ -32,12 +32,26 @@ class TestObsBenchmarkRemediations(unittest.TestCase):
         """Verifies that PE inspection includes delay_imports and version_info."""
         # Test on host system binary
         target = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "notepad.exe")
+        tmp_pe = None
         if not os.path.exists(target):
-            target = sys.executable
+            import struct, tempfile
+            tmp_pe = tempfile.NamedTemporaryFile(suffix=".exe", delete=False)
+            buf = bytearray(512)
+            buf[0:2] = b"MZ"
+            struct.pack_into("<I", buf, 0x3C, 0x80)
+            buf[0x80:0x84] = b"PE\x00\x00"
+            struct.pack_into("<HHIIIHH", buf, 0x84, 0x8664, 0, 0, 0, 0, 0xF0, 0x22)
+            struct.pack_into("<H", buf, 0x98, 0x20B)
+            struct.pack_into("<I", buf, 0x98 + 108, 16)
+            tmp_pe.write(buf)
+            tmp_pe.close()
+            target = tmp_pe.name
 
         info = BinaryFormatInspector.inspect(target)
         self.assertIn("delay_imports", info)
         self.assertIn("version_info", info)
+        if tmp_pe:
+            os.unlink(tmp_pe.name)
         self.assertIn("debug", info)
         self.assertIn("relocations", info)
         self.assertIn("resources", info)
@@ -89,8 +103,8 @@ class TestObsBenchmarkRemediations(unittest.TestCase):
         import unittest.mock as mock
         from windows_intelligence.crash_analyzer import WindowsCrashAnalyzer
 
-        with mock.patch("security.safe_subprocess.SafeSubprocessBroker.execute_catalog_command") as mock_exec:
-            mock_exec.return_value = {"returncode": 0, "stdout": "<Events></Events>"}
+        with mock.patch("os.name", "nt"), mock.patch("security.safe_subprocess.SafeSubprocessBroker.execute_catalog_command") as mock_exec:
+            mock_exec.return_value = {"status": "success", "exit_code": 0, "stdout": "<Events></Events>"}
             events = WindowsCrashAnalyzer.query_event_log(max_events=5)
             self.assertEqual(events, [])
             mock_exec.assert_called_once()

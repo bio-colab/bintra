@@ -132,8 +132,10 @@ def run():
     ws_dir = os.path.join(os.path.expanduser("~"), ".bintra", "workspace")
     exports_dir = os.path.join(ws_dir, "exports")
     plans_dir = os.path.join(ws_dir, "plans")
-    os.makedirs(exports_dir, exist_ok=True)
-    os.makedirs(plans_dir, exist_ok=True)
+    if not os.path.isdir(exports_dir):
+        os.makedirs(exports_dir)
+    if not os.path.isdir(plans_dir):
+        os.makedirs(plans_dir)
     fd_exp, export_path = tempfile.mkstemp(prefix="bintra_exp_", suffix=".json", dir=exports_dir)
     os.close(fd_exp)
     fd_plan, plan_path = tempfile.mkstemp(prefix="bintra_plan_", suffix=".json", dir=plans_dir)

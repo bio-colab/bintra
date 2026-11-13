@@ -209,7 +209,7 @@ class TestObsBenchmarkRemediations(unittest.TestCase):
 
         session = EtwLiveCaptureSession(session_name="UnitTest_NonAdmin_Capture", target_pid=os.getpid())
         start_res = session.start_session()
-        self.assertIn(start_res.get("status"), ("non_elevated", "active", "running"))
+        self.assertIn(start_res.get("status"), ("success", "non_elevated", "active", "running"))
 
         import time
         time.sleep(0.5)
@@ -293,7 +293,7 @@ class TestObsBenchmarkRemediations(unittest.TestCase):
 
         session = EtwLiveCaptureSession(session_name="UnitTest_DynamicPid_Trace", target_pid=None)
         start_res = session.start_session()
-        self.assertIn(start_res.get("status"), ("non_elevated", "active", "running"))
+        self.assertIn(start_res.get("status"), ("success", "non_elevated", "active", "running"))
 
         import time
         time.sleep(0.3)

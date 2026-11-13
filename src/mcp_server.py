@@ -371,7 +371,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "problems_only": {
+                "offline_inf_paths": {"type": "array", "items": {"type": "string"}, "description": "Optional .inf file paths for offline cross-platform driver matching"}, "device_id": {"type": "string", "description": "Optional device instance ID for offline matching"}, "problems_only": {
                     "type": "boolean",
                     "description": "If true, only returns devices that report non-zero CM_PROB_* error codes"
                 }
@@ -767,7 +767,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
     },
     {
         "name": "bintra_device_driver_intelligence",
-        "description": "Deep device identity parsing, PnP hardware topology, Driver Store package matching, and Driver Rank evaluation.",
+        "description": "Audits PnP devices, CM_PROB_* codes, PCI/USB/HDAUDIO/HID/ACPI identities, and Driver Rank bindings; supports cross-platform offline .inf matching via offline_inf_paths.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1698,6 +1698,10 @@ class BintraMcpServer:
 
         elif name == "bintra_device_driver_intelligence":
             from windows_intelligence.device_intelligence import DriverMatcher, DriverPackageInventory
+            offline_infs = args.get("offline_inf_paths")
+            if offline_infs and args.get("device_id"):
+                parsed_infs = [DriverPackageInventory.parse_offline_inf(p) for p in offline_infs]
+                return DriverMatcher.match_offline_device_to_infs(args["device_id"], parsed_infs)
             action = args.get("action", "audit")
             query = args.get("device_query")
             c_filter = args.get("class_filter")

@@ -77,3 +77,7 @@ bintra ghidra-bridge --annotate-pointers 1234 --addr 0x7FF71000 --depth 2
 # Stop cleanly:
 bintra ghidra-bridge --stop --port 41718
 ```
+
+## P-Code CFG Folding & Cached Queries
+- `PcodeVectorizer.vectorize_high_function()` folds `basic_blocks` CFG topology into 64-D embeddings; `PcodeFunctionMatcher.match_batch()` computes vectorized similarity.
+- `GhidraLiveBridgeServer` supports `ghidra.query_cached_functions` for read-only inspection of pushed P-Code functions.

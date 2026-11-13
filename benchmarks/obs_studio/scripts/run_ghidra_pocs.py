@@ -68,7 +68,7 @@ def sanitize_text(value: str) -> str:
         (str(HOME_DIR).lower(), "%USERPROFILE%"),
     ]:
         out = out.replace(src, dst)
-        out = out.replace(src.replace("\\", "/"), dst.replace("/", "/").replace("\\", "/"))
+        out = out.replace(src.replace("\\", "/"), dst)
         out = out.replace(src.replace("\\", "\\\\"), dst.replace("\\", "\\\\"))
     return out
 

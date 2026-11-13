@@ -34,7 +34,7 @@ class DriverMatcher:
         device_query: Optional[str] = None,
         class_filter: Optional[str] = None,
         problems_only: bool = False,
-        max_devices: int = 64
+        max_devices: int = 512
     ) -> Dict[str, Any]:
         """
         Conducts a unified compatibility audit linking PnP devices to their active drivers,
@@ -152,4 +152,47 @@ class DriverMatcher:
             "devices_audited": len(results),
             "driver_packages_cataloged": len(packages),
             "device_reports": results
+        }
+
+    @classmethod
+    def match_offline_device_to_infs(
+        cls,
+        device_record: Any,
+        inf_records: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Cross-platform offline Driver Rank matcher between a device record/ID and parsed INF packages."""
+        identity = DeviceIdentity.parse_device_instance(device_record)
+        if isinstance(device_record, str):
+            dev_hwids = [device_record.upper()]
+            dev_compats: List[str] = []
+        else:
+            dev_hwids = [h.upper() for h in (device_record.get("hardware_ids") or []) if h]
+            if device_record.get("device_instance_id"):
+                dev_hwids.append(str(device_record["device_instance_id"]).upper())
+            dev_compats = [c.upper() for c in (device_record.get("compatible_ids") or []) if c]
+
+        best_rank = 3
+        best_match = None
+        for inf in inf_records:
+            inf_hwids = [h.upper() for h in (inf.get("hardware_ids") or [])]
+            for dh in dev_hwids:
+                if dh in inf_hwids:
+                    rank = 0 if "SUBSYS_" in dh else 1
+                    if rank < best_rank or best_match is None:
+                        best_rank = rank
+                        best_match = inf
+                elif any(ih in dh or dh.startswith(ih) for ih in inf_hwids):
+                    if 1 < best_rank or best_match is None:
+                        best_rank = 1
+                        best_match = inf
+            for dc in dev_compats:
+                if dc in inf_hwids and 2 < best_rank:
+                    best_rank = 2
+                    best_match = inf
+
+        return {
+            "identity": identity,
+            "driver_rank": best_rank,
+            "rank_description": cls.RANK_DESCRIPTIONS.get(best_rank),
+            "matched_inf": best_match,
         }

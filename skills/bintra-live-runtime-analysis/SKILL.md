@@ -94,3 +94,7 @@ bintra mem-scan --pid 1234 --type int32 --mode changed --session-file .\workspac
    - Always inspect `"heuristic": true`, `"is_partial"`, `"bytes_read"` vs `"bytes_requested"`, and `"alternatives"` before treating inferred scalar types (`int32_t`, `float`, `uint64_t`) as final C types without PDB/DWARF symbols.
 3. **Crash Root Cause Analysis (`bintra_crash_rca` / `crash-rca`):**
    - Cross-checks parsed MiniDump exception `operation` / `access_type`, Capstone instruction decoding, and register blame heuristics against memory spatial boundaries. Inspect `confidence` and `memory_spatial_classification` to separate high-confidence NULL dereferences (`< 0x10000`) from dynamic heap/stack faults.
+
+## Offline MiniDump Memory & VAD Streams
+- `MiniDumpParser` parses Streams 5, 9, and 16 plus module `CvRecord` (RSDS/NB10 PDB) and `VS_FIXEDFILEINFO`, enabling `read_memory_from_dump()` offline.
+- `bintra process-mitigations --pid <pid>` and `bintra registry-read --hive HKLM --key <subkey>` expose mitigation and registry inspection on the CLI.

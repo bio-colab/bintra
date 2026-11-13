@@ -204,3 +204,7 @@ Exposes PnP device instance IDs, active problem codes (`CM_PROB_FAILED_START`, `
 
 > [!NOTE]
 > **Platform Caveat:** All Windows NT introspection engines degrade fail-closed on non-Windows hosts (Linux/macOS CI), returning `status: "not_applicable"` with clear explanatory notes rather than raising platform errors.
+
+## Hardware & Offline INF Driver Diagnostics
+- `bintra hw-audit --problems-only --class-filter <class>` decodes `CM_PROB_*` codes across `PCI`, `USB`, `HDAUDIO`, `HID`, `ACPI`, `BLUETOOTH`, and `STORAGE` buses.
+- `DriverPackageInventory.parse_offline_inf()` and `DriverMatcher.match_offline_device_to_infs()` evaluate Driver Rank (0–3) offline.

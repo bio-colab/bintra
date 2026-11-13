@@ -127,3 +127,8 @@ bintra crash-rca --dmp <crash.dmp> [--binary <path>]
 bintra etw-capture --session-name Bintra_Diagnostic_Trace --pid <pid> --duration 2.0
 bintra ghidra-bridge --start --port 41718 --no-temp-marker
 ```
+
+## Read-Only PE, MiniDump & Hardware Workflows
+- Use `bintra inspect` for Rich Header, TLS callbacks, Load Config (GuardCF/SafeSEH), Authenticode `WIN_CERTIFICATE`, and CLR/.NET metadata.
+- Use `bintra evidence-graph --target <path> --format mermaid` for cross-layer causality graphs.
+- Use `bintra hw-audit --problems-only --class-filter <class>` and `bintra dev-match` (or `bintra_device_driver_intelligence` with `offline_inf_paths`) for `CM_PROB_*` and offline `.inf` driver correlation.

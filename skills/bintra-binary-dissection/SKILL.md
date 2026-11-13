@@ -104,3 +104,7 @@ When relaying findings to the user, translate technical telemetry into clear, ac
    - Bintra's deobfuscator is REX-aware. A pattern like `xor r8, r8; jz` is flagged as zeroing, whereas `xor r8, rax; jz` is recognized as legitimate computation and NOT flagged.
 3. **Sensory Cortex Efficiency:**
    - Note to Agent: `overall_sensory_efficiency` (e.g. 0.958) is a **static capability readiness indicator** of the 10 senses, NOT a measured machine learning accuracy. Always read the detailed `telemetry` dictionary under each sense for real measured values!
+
+## Extended PE/COFF Directories
+- `BinaryFormatInspector._parse_pe()` surfaces `rich_header`, `tls`, `load_config`, `security_authenticode`, `clr_metadata`, and `sections_truncated`.
+- `SemanticFunctionMatcher.match_batch()` provides vectorized $N \times M$ cosine similarity across x86-64 and ARM64.

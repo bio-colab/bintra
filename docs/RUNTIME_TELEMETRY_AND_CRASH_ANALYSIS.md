@@ -165,3 +165,7 @@ TOTAL VERIFIED TESTS:                                    195 Tests [PASS]
 - **محدودية تفكيك التعليمات في Crash RCA:** تفكيك نافذة `-32/+48` بايت حول تعليمة العطل يدعم حالياً معمارية `x86`/`x64` عبر Capstone، وقد لا يصادف بداية التعليمة المثلى قبل العطل إذا سبقته تعليمات متغيرة الطول غير محاذاة، لذا تُعرض النتائج كتشخيص مدعوم بالأدلة لا كبرهان حتمي مطلق.
 - **عزل مسارات المسح الذاكري:** تتطلب عمليات مسح القيم (`mem-scan`, `bintra_memory_scan`) حفظ الجلسات حصراً داخل مساحة العمل عبر `ExecutionGuard`؛ أي مسار جلسة خارج النطاق يُرفض تلقائياً برمز `OutOfScopeError`.
 - **طبيعة جسر Ghidra غير المتزامنة:** يستخدم الجسر آلية وضع الطلبات في طابور مع استطلاع دوري من داخل غيدرا كل `1.0s`؛ قد يلاحظ استغراقاً بحدود ثانية واحدة قبل ظهور التعليقات أو الهياكل داخل `CodeBrowser`.
+
+### Offline MiniDump Streams & Hardware Correlation
+- `MiniDumpParser` extracts `MemoryListStream` (Stream 5), `Memory64ListStream` (Stream 9), `MemoryInfoListStream` (Stream 16), `VS_FIXEDFILEINFO`, and CodeView RSDS/NB10 PDB metadata (`CvRecord`), supporting $O(\log N)$ offline memory reads via `MiniDumpParser.read_memory_from_dump()`.
+- `CausalitySynthesizer` is directly exposed on the CLI via `bintra evidence-graph --target <path> --format json|mermaid`.

@@ -24,7 +24,12 @@ KNOWN_PCI_VENDORS = {
     "1B21": "ASMedia Technology Inc.",
     "1D6A": "Aquantia Corp.",
     "15B7": "Sandisk Corp / Western Digital",
-    "144D": "Samsung Electronics Co Ltd"
+    "144D": "Samsung Electronics Co Ltd",
+    "14C3": "MediaTek Inc.",
+    "17CB": "Qualcomm",
+    "1987": "Phison Electronics Corp.",
+    "2646": "Kingston Technology",
+    "C0A9": "Micron / Crucial Technology",
 }
 
 KNOWN_USB_VENDORS = {
@@ -40,7 +45,12 @@ KNOWN_USB_VENDORS = {
     "1B1C": "Corsair Memory, Inc.",
     "0955": "NVIDIA Corp.",
     "03F0": "HP Inc.",
-    "17EF": "Lenovo"
+    "17EF": "Lenovo",
+    "0FD9": "Elgato Systems GmbH",
+    "1235": "Focusrite-Novation",
+    "B58E": "Blue Microphones",
+    "1038": "SteelSeries ApS",
+    "0763": "M-Audio / Midiman",
 }
 
 
@@ -80,7 +90,7 @@ class DeviceIdentity:
         all_ids = (hw_ids or []) + [inst_id]
         for hid in all_ids:
             hid_upper = hid.upper()
-            if "PCI\\" in hid_upper or "VEN_" in hid_upper:
+            if "PCI\\" in hid_upper or ("VEN_" in hid_upper and "HDAUDIO\\" not in hid_upper):
                 bus_type = "PCI"
                 v_m = re.search(r"VEN_([0-9A-F]{4})", hid_upper)
                 d_m = re.search(r"DEV_([0-9A-F]{4})", hid_upper)
@@ -97,6 +107,38 @@ class DeviceIdentity:
                     revision = r_m.group(1)
                 if vendor_id and device_id:
                     break
+            elif "HDAUDIO\\" in hid_upper or "FUNC_" in hid_upper:
+                bus_type = "HDAUDIO"
+                v_m = re.search(r"VEN_([0-9A-F]{4})", hid_upper)
+                d_m = re.search(r"DEV_([0-9A-F]{4})", hid_upper)
+                r_m = re.search(r"REV_([0-9A-F]{4})", hid_upper)
+                if v_m and not vendor_id:
+                    vendor_id = v_m.group(1)
+                    vendor_name = KNOWN_PCI_VENDORS.get(vendor_id)
+                if d_m and not device_id:
+                    device_id = d_m.group(1)
+                if r_m and not revision:
+                    revision = r_m.group(1)
+                if vendor_id and device_id:
+                    break
+            elif "HID\\" in hid_upper and "VID_" in hid_upper:
+                bus_type = "HID"
+                v_m = re.search(r"VID_([0-9A-F]{4})", hid_upper)
+                d_m = re.search(r"PID_([0-9A-F]{4})", hid_upper)
+                if v_m and not vendor_id:
+                    vendor_id = v_m.group(1)
+                    vendor_name = KNOWN_USB_VENDORS.get(vendor_id)
+                if d_m and not device_id:
+                    device_id = d_m.group(1)
+                if vendor_id and device_id:
+                    break
+            elif "ACPI\\" in hid_upper:
+                if bus_type == "UNKNOWN":
+                    bus_type = "ACPI"
+            elif "BTHENUM\\" in hid_upper:
+                bus_type = "BLUETOOTH"
+            elif "NVME\\" in hid_upper or "SCSI\\" in hid_upper:
+                bus_type = "STORAGE"
             elif "USB\\" in hid_upper or "VID_" in hid_upper:
                 bus_type = "USB"
                 v_m = re.search(r"VID_([0-9A-F]{4})", hid_upper)

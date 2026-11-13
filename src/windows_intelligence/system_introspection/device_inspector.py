@@ -37,6 +37,29 @@ class NativeDeviceInspector:
     SetupAPI and Configuration Manager (CfgMgr32) APIs rather than raw registry keys.
     """
 
+    CM_PROB_DESCRIPTIONS = {
+        0: "Healthy",
+        1: "CM_PROB_NOT_CONFIGURED (Device is not configured correctly)",
+        3: "CM_PROB_OUT_OF_MEMORY (Driver out of memory)",
+        10: "CM_PROB_FAILED_START (Device cannot start)",
+        12: "CM_PROB_NORMAL_CONFLICT (Cannot find enough free resources)",
+        14: "CM_PROB_NEED_RESTART (Restart required)",
+        18: "CM_PROB_REINSTALL (Reinstall drivers for this device)",
+        22: "CM_PROB_DISABLED (Device is disabled)",
+        28: "CM_PROB_FAILED_INSTALL (Drivers for this device are not installed)",
+        31: "CM_PROB_FAILED_ADD (Device is not working properly; driver load failed)",
+        37: "CM_PROB_FAILED_DRIVER_ENTRY (Windows cannot initialize device driver)",
+        39: "CM_PROB_DRIVER_FAILED_LOAD (Driver corrupted or missing)",
+        43: "CM_PROB_FAILED_POST_START (Windows stopped device because it reported problems)",
+        45: "CM_PROB_PHANTOM (Hardware device not currently connected)",
+        48: "CM_PROB_BLOCKED_DRIVER (Software/driver blocked from starting)",
+        52: "CM_PROB_UNSIGNED_DRIVER (Cannot verify digital signature for drivers)",
+    }
+
+    @classmethod
+    def describe_problem_code(cls, code: int) -> str:
+        return cls.CM_PROB_DESCRIPTIONS.get(int(code), f"CM_PROB_{int(code)}")
+
     DIGCF_PRESENT = 0x00000002
     DIGCF_ALLCLASSES = 0x00000004
 
@@ -155,7 +178,7 @@ class NativeDeviceInspector:
         cls,
         filter_problems_only: bool = False,
         class_filter: Optional[str] = None,
-        max_devices: int = 256
+        max_devices: int = 1024
     ) -> List[Dict[str, Any]]:
         """
         Enumerates live PnP device instances from the Windows kernel.
@@ -217,8 +240,8 @@ class NativeDeviceInspector:
             driver = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_DRIVER)
             mfg = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_MFG)
 
-            if class_filter and cls_name:
-                if class_filter.lower() not in cls_name.lower():
+            if class_filter:
+                if not cls_name or class_filter.lower() not in cls_name.lower():
                     continue
 
             name_repr = friendly_name or dev_desc or "Unknown PnP Device"
@@ -238,6 +261,7 @@ class NativeDeviceInspector:
                 "is_started": bool(dev_status.value & cls.DN_STARTED) if status_available else False,
                 "has_problem": has_problem,
                 "problem_code": prob_num,
+                "problem_description": cls.describe_problem_code(prob_num) if has_problem else "Healthy",
                 "problem_name": cls.CM_PROBLEM_NAMES.get(prob_num, f"CM_PROB_{prob_num}"),
                 "status_available": status_available
             })

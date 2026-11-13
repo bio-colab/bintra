@@ -41,7 +41,7 @@ WEIGHT_COMMANDS = {
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless", "ghidra-bridge"}
-WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct"}
+WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations"}
 
 
 def print_help():
@@ -299,6 +299,63 @@ def _dispatch_cli():
                 print(json.dumps(report, indent=2, ensure_ascii=False))
             return
 
+        elif cmd == "evidence-graph":
+            parser = argparse.ArgumentParser(description="Synthesize cross-layer evidence causality dossier and Mermaid graph")
+            parser.add_argument("command")
+            parser.add_argument("--target", "--file", dest="target", required=True, help="Target PE/DLL or dump path")
+            parser.add_argument("--format", choices=["json", "mermaid"], default="json", help="Output format")
+            args = parser.parse_args()
+
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="evidence-graph",
+                target=args.target,
+                capability=Capability.FILE_READ,
+                access_mode="READ",
+            )
+            from windows_intelligence.evidence_engine import CausalitySynthesizer
+            dossier = CausalitySynthesizer.synthesize_dossier(target_path=args.target)
+            if args.format == "mermaid":
+                print(dossier.get("evidence_graph", {}).get("mermaid", "flowchart TD"))
+            else:
+                print(json.dumps(dossier, indent=2, default=str))
+
+        elif cmd == "registry-read":
+            parser = argparse.ArgumentParser(description="Read-only Windows Registry hive/key inspection")
+            parser.add_argument("command")
+            parser.add_argument("--hive", default="HKLM", help="Registry hive (HKLM, HKCU, HKCR)")
+            parser.add_argument("--key", required=True, help="Registry subkey path")
+            args = parser.parse_args()
+
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="registry-read",
+                target=f"{args.hive}\\{args.key}",
+                capability=Capability.REGISTRY_READ,
+                access_mode="READ",
+            )
+            res = WindowsRegistryReader.read_key(args.hive, args.key)
+            print(json.dumps(res, indent=2, default=str))
+
+        elif cmd == "process-mitigations":
+            parser = argparse.ArgumentParser(description="Inspect Windows process exploit mitigations (DEP, ASLR, CFG)")
+            parser.add_argument("command")
+            parser.add_argument("--pid", type=int, required=True, help="Target process ID")
+            args = parser.parse_args()
+
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="process-mitigations",
+                target=f"pid:{args.pid}",
+                capability=Capability.PROCESS_QUERY,
+                access_mode="QUERY",
+            )
+            res = ProcessMitigationInspector.inspect_process_mitigations(args.pid)
+            print(json.dumps(res, indent=2, default=str))
+
         elif cmd == "resolve-deps":
             parser = argparse.ArgumentParser(description="Audit Windows dynamic link library dependencies")
             parser.add_argument("command")
@@ -459,10 +516,28 @@ def _dispatch_cli():
             parser = argparse.ArgumentParser(description="Live hardware and PnP device audit via SetupAPI and CfgMgr32")
             parser.add_argument("command")
             parser.add_argument("--problems-only", action="store_true", help="Filter for devices with non-zero problem codes")
+            parser.add_argument("--class-filter", default=None, help="Filter PnP devices by Setup class (e.g. MEDIA, Display, USB)")
             parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
             args = parser.parse_args()
 
-            report = NativeDeviceInspector.audit_hardware_health()
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="hw-audit",
+                target=args.class_filter or "AllDevices",
+                capability=Capability.DEVICE_QUERY,
+                access_mode="QUERY",
+            )
+            if args.problems_only or args.class_filter:
+                filtered = NativeDeviceInspector.enumerate_devices(
+                    filter_problems_only=args.problems_only,
+                    class_filter=args.class_filter,
+                )
+                report = NativeDeviceInspector.audit_hardware_health()
+                report["filtered_devices"] = filtered
+                report["filtered_count"] = len(filtered)
+            else:
+                report = NativeDeviceInspector.audit_hardware_health()
             if args.format == "md":
                 if report.get("status") == "not_applicable" or "is_hardware_healthy" not in report:
                     lines = [

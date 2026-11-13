@@ -229,3 +229,8 @@ graph TD
    نظراً لثقل WMI واعتمادها على خدمات COM، يتم الاعتماد حصراً على واجهات Win32 خفيفة الوزن (`SetupAPI`, `CfgMgr32`, `PSAPI`, `Restart Manager`).
 5. **استقلالية النظام وعدم فرض تبعيات Sysinternals:**
    الاستغناء عن الأدوات الخارجية بالاعتماد التام على دوال Windows الأصلية (مثل `RstrtMgr.dll` لكشف أقفال الملفات بديلاً لـ `handle.exe`).
+
+## Read-Only Reverse Engineering & Hardware Subsystem Upgrades
+- **PE/COFF Directory Coverage (`src/binary_neural_engine.py`):** `BinaryFormatInspector._parse_pe()` extracts Rich Header (`_parse_pe_rich_header`), TLS callbacks (`_parse_pe_tls`), Load Config (`_parse_pe_load_config`), Authenticode (`_parse_pe_security`), and CLR metadata (`_parse_pe_clr`) alongside chunked C-string reads and vectorized checksums.
+- **P-Code & Live Bridge (`src/ghidra_pcode_vectorizer.py`, `src/ghidra_live_bridge.py`):** `PcodeVectorizer.vectorize_high_function()` folds `ControlFlowGraphAnalyzer` cyclomatic complexity and back-edge density into 64-D embeddings; `GhidraLiveBridgeServer` exposes `ghidra.query_cached_functions` with lock-protected LRU state and `deque` command buffering.
+- **Hardware & Offline Driver Correlation (`src/windows_intelligence/device_intelligence/`, `system_introspection/device_inspector.py`):** `NativeDeviceInspector` decodes `CM_PROB_*` codes and frees `HDEVINFO` handles via `SetupDiDestroyDeviceInfoList`; `DriverPackageInventory.parse_inf_text()` and `DriverMatcher.match_offline_device_to_infs()` enable cross-platform `.inf` Driver Rank matching.

@@ -55,8 +55,7 @@ class TestTaskManagerInspector(unittest.TestCase):
         with patch("os.name", "nt"):
             with patch("windows_intelligence.process_intelligence.process_inventory.ProcessInventory.enumerate_processes", return_value=fake_procs):
                 with patch.object(TaskManagerInspector, "_get_architecture", return_value="x64 (Native)"):
-                    # Mock OpenProcess to fail safely (no handle)
-                    with patch("ctypes.windll.kernel32.OpenProcess", return_value=0):
+                    with patch.object(TaskManagerInspector, "_get_k32", return_value=None):
                         # 1. Search by name
                         res_name = TaskManagerInspector.search_processes("shamela")
                         self.assertEqual(res_name["matched_processes"], 1)

@@ -81,6 +81,28 @@ class TaskManagerInspector:
     TOKEN_QUERY = 0x0008
 
     @classmethod
+    def _get_k32(cls):
+        windll = getattr(ctypes, "windll", None)
+        return getattr(windll, "kernel32", None) if windll else None
+
+    @classmethod
+    def _get_psapi(cls):
+        windll = getattr(ctypes, "windll", None)
+        if not windll:
+            return None
+        return getattr(windll, "psapi", getattr(windll, "kernel32", None))
+
+    @classmethod
+    def _get_advapi32(cls):
+        windll = getattr(ctypes, "windll", None)
+        return getattr(windll, "advapi32", None) if windll else None
+
+    @classmethod
+    def _get_ntdll(cls):
+        windll = getattr(ctypes, "windll", None)
+        return getattr(windll, "ntdll", None) if windll else None
+
+    @classmethod
     def _filetime_to_int(cls, ft: FILETIME) -> int:
         return (ft.dwHighDateTime << 32) | ft.dwLowDateTime
 
@@ -109,7 +131,13 @@ class TaskManagerInspector:
                 "reason": "System performance inspection requires Windows NT."
             }
 
-        k32 = ctypes.windll.kernel32
+        k32 = cls._get_k32()
+        if not k32:
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "reason": "Kernel32 not available."
+            }
 
         # 1. Global Memory Status
         mem = MEMORYSTATUSEX()
@@ -182,7 +210,7 @@ class TaskManagerInspector:
     def _get_command_line(cls, h_proc: int) -> Optional[str]:
         """Reads process command line arguments via NtQueryInformationProcess (Class 60)."""
         try:
-            ntdll = getattr(ctypes.windll, "ntdll", None)
+            ntdll = cls._get_ntdll()
             if not ntdll or not hasattr(ntdll, "NtQueryInformationProcess"):
                 return None
 
@@ -213,8 +241,12 @@ class TaskManagerInspector:
             "integrity_rid": "0x0"
         }
         try:
-            advapi32 = ctypes.windll.advapi32
-            k32 = ctypes.windll.kernel32
+            advapi32 = cls._get_advapi32()
+            if not advapi32:
+                return res
+            k32 = cls._get_k32()
+            if not k32:
+                return res
 
             token = wintypes.HANDLE()
             if not advapi32.OpenProcessToken(h_proc, cls.TOKEN_QUERY, ctypes.byref(token)):
@@ -278,7 +310,9 @@ class TaskManagerInspector:
     def _get_architecture(cls, h_proc: int) -> str:
         """Determines if the process is 32-bit (WoW64) or native 64-bit."""
         try:
-            k32 = ctypes.windll.kernel32
+            k32 = cls._get_k32()
+            if not k32:
+                return "Unknown"
             is_wow64 = wintypes.BOOL()
             if hasattr(k32, "IsWow64Process") and k32.IsWow64Process(h_proc, ctypes.byref(is_wow64)):
                 if is_wow64.value:
@@ -310,8 +344,8 @@ class TaskManagerInspector:
                 "processes": []
             }
 
-        k32 = ctypes.windll.kernel32
-        psapi = getattr(ctypes.windll, "psapi", k32)
+        k32 = cls._get_k32()
+        psapi = cls._get_psapi()
 
         from .process_inventory import ProcessInventory
         procs = ProcessInventory.enumerate_processes(resolve_paths=resolve_paths, max_processes=1024)
@@ -334,7 +368,7 @@ class TaskManagerInspector:
             p["architecture"] = "Unknown"
             p["user"] = "Unknown"
 
-            if pid > 4:
+            if k32 and pid > 4:
                 if hasattr(k32, "ProcessIdToSessionId"):
                     if k32.ProcessIdToSessionId(pid, ctypes.byref(sess_id)):
                         p["session_id"] = sess_id.value
@@ -343,7 +377,7 @@ class TaskManagerInspector:
                 if h:
                     try:
                         # Memory
-                        if psapi.GetProcessMemoryInfo(h, ctypes.byref(mc), mc.cb):
+                        if psapi and psapi.GetProcessMemoryInfo(h, ctypes.byref(mc), mc.cb):
                             p["working_set_mb"] = round(mc.WorkingSetSize / (1024 * 1024), 2)
                             p["commit_mb"] = round(mc.PagefileUsage / (1024 * 1024), 2)
 
@@ -426,8 +460,14 @@ class TaskManagerInspector:
                 "reason": "Process details inspection requires Windows NT."
             }
 
-        k32 = ctypes.windll.kernel32
-        psapi = getattr(ctypes.windll, "psapi", k32)
+        k32 = cls._get_k32()
+        if not k32:
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "reason": "Kernel32 not available."
+            }
+        psapi = cls._get_psapi()
 
         from .process_inventory import ProcessInventory
         from ..system_introspection.process_inspector import ProcessMitigationInspector

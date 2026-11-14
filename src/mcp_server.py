@@ -464,6 +464,19 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
+        "name": "bintra_network_connections",
+        "description": "Audits active TCP network connections, local/remote IP and port pairs, connection states, and owning process PIDs via Win32 GetExtendedTcpTable.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pid": {
+                    "type": "integer",
+                    "description": "Optional owning process PID filter (e.g. 10324)"
+                }
+            }
+        }
+    },
+    {
         "name": "bintra_driver_audit",
         "description": "Enumerates all currently loaded Windows kernel drivers, their kernel virtual base addresses, image filenames, and highlights display and audio drivers via PSAPI.",
         "inputSchema": {
@@ -1250,6 +1263,7 @@ class BintraMcpServer:
         "bintra_hardware_topology": ("cap.device.query", "QUERY", "bus_filter"),
         "bintra_network_audit": ("cap.device.query", "QUERY", None),
         "bintra_network_hardware_dissect": ("cap.device.query", "QUERY", "target_query"),
+        "bintra_network_connections": ("cap.device.query", "QUERY", "pid"),
         "bintra_driver_audit": ("cap.driver.query", "QUERY", None),
         "bintra_service_audit": ("cap.service.query", "QUERY", None),
         "bintra_dmp_inspect": ("cap.minidump.read", "READ", "dmp_path"),
@@ -1683,6 +1697,11 @@ class BintraMcpServer:
             from windows_intelligence import NetworkHardwareInspector
             target = args.get("target_query", "wifi")
             return NetworkHardwareInspector.deep_dissect_network_device(target_query=target)
+
+        elif name == "bintra_network_connections":
+            from windows_intelligence import NetworkHardwareInspector
+            pid = args.get("pid")
+            return NetworkHardwareInspector.audit_tcp_connections(pid=pid)
 
         elif name == "bintra_driver_audit":
             from windows_intelligence import KernelDriverInspector
@@ -2207,7 +2226,7 @@ class BintraMcpServer:
             win_tools = {
                 "bintra_windows_env_audit", "bintra_resolve_dependencies", "bintra_inspect_crash_reports",
                 "bintra_win_catalog_cmd", "bintra_registry_audit", "bintra_hardware_audit",
-                "bintra_port_audit", "bintra_hardware_topology", "bintra_network_audit", "bintra_network_hardware_dissect",
+                "bintra_port_audit", "bintra_hardware_topology", "bintra_network_audit", "bintra_network_hardware_dissect", "bintra_network_connections",
                 "bintra_driver_audit", "bintra_service_audit", "bintra_etw_audit",
                 "bintra_vad_inspect", "bintra_memory_scan", "bintra_pointer_scan",
                 "bintra_struct_dissect", "bintra_etw_capture", "bintra_device_driver_intelligence",

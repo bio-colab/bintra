@@ -78,6 +78,17 @@ IP_ADAPTER_ADDRESSES._fields_ = [
 ]
 
 
+class MIB_TCPROW_OWNER_PID(ctypes.Structure):
+    _fields_ = [
+        ("dwState", wintypes.DWORD),
+        ("dwLocalAddr", wintypes.DWORD),
+        ("dwLocalPort", wintypes.DWORD),
+        ("dwRemoteAddr", wintypes.DWORD),
+        ("dwRemotePort", wintypes.DWORD),
+        ("dwOwningPid", wintypes.DWORD),
+    ]
+
+
 class NetworkHardwareInspector:
     """
     Authoritative read-only hardware intelligence engine for Windows network adapters
@@ -87,6 +98,22 @@ class NetworkHardwareInspector:
     SOCKET_ADDRESS = SOCKET_ADDRESS
     IP_ADAPTER_UNICAST_ADDRESS = IP_ADAPTER_UNICAST_ADDRESS
     IP_ADAPTER_ADDRESSES = IP_ADAPTER_ADDRESSES
+    MIB_TCPROW_OWNER_PID = MIB_TCPROW_OWNER_PID
+
+    TCP_STATE_NAMES = {
+        1: "CLOSED",
+        2: "LISTEN",
+        3: "SYN_SENT",
+        4: "SYN_RCVD",
+        5: "ESTABLISHED",
+        6: "FIN_WAIT1",
+        7: "FIN_WAIT2",
+        8: "CLOSE_WAIT",
+        9: "CLOSING",
+        10: "LAST_ACK",
+        11: "TIME_WAIT",
+        12: "DELETE_TCB",
+    }
 
     IF_TYPE_NAMES = {
         1: "OTHER",
@@ -129,6 +156,17 @@ class NetworkHardwareInspector:
             ctypes.c_void_p,
             ctypes.POINTER(wintypes.ULONG),
         ]
+        # Authoritative Win32 API signature for GetExtendedTcpTable
+        if hasattr(iphlpapi, "GetExtendedTcpTable"):
+            iphlpapi.GetExtendedTcpTable.restype = wintypes.DWORD
+            iphlpapi.GetExtendedTcpTable.argtypes = [
+                ctypes.c_void_p,
+                ctypes.POINTER(wintypes.DWORD),
+                wintypes.BOOL,
+                wintypes.ULONG,
+                ctypes.c_int,
+                wintypes.ULONG,
+            ]
         return iphlpapi
 
     @classmethod
@@ -278,6 +316,112 @@ class NetworkHardwareInspector:
             "total_adapters": len(adapters),
             "adapters": adapters,
             "epistemic_classification": "WIN32_IPHLPAPI_ADAPTERS_ADDRESSES"
+        }
+
+    @classmethod
+    def audit_tcp_connections(cls, pid: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Authoritative read-only inspection of active TCP connections via Win32 iphlpapi.GetExtendedTcpTable.
+        Extracts local/remote endpoints, port numbers, connection state, and owning process PID.
+        Optionally filters by owning process PID.
+        """
+        if os.name != "nt":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "message": "TCP connections inspection requires a Windows NT host.",
+                "total_connections": 0,
+                "connections": []
+            }
+
+        try:
+            iphlpapi = cls._load_iphlpapi()
+            if not iphlpapi or not hasattr(iphlpapi, "GetExtendedTcpTable"):
+                return {
+                    "status": "error",
+                    "message": "iphlpapi.GetExtendedTcpTable is not available on this platform.",
+                    "total_connections": 0,
+                    "connections": []
+                }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Failed to initialize iphlpapi Win32 API: {e}",
+                "total_connections": 0,
+                "connections": []
+            }
+
+        size = wintypes.DWORD(0)
+        AF_INET = 2
+        TCP_TABLE_OWNER_PID_ALL = 5
+        size_ptr = ctypes.pointer(size)
+        ret = iphlpapi.GetExtendedTcpTable(None, size_ptr, True, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0)
+        if size.value == 0:
+            return {
+                "status": "success",
+                "filter_pid": pid,
+                "total_connections": 0,
+                "connections": [],
+                "epistemic_classification": "WIN32_IPHLPAPI_EXTENDED_TCP_TABLE"
+            }
+
+        buf = (ctypes.c_ubyte * size.value)()
+        ret = iphlpapi.GetExtendedTcpTable(buf, size_ptr, True, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0)
+        if ret != 0:
+            return {
+                "status": "error",
+                "message": f"GetExtendedTcpTable failed with Win32 error code {ret}.",
+                "total_connections": 0,
+                "connections": []
+            }
+
+        raw_bytes = bytes(buf)
+        if len(raw_bytes) < 4:
+            return {
+                "status": "success",
+                "filter_pid": pid,
+                "total_connections": 0,
+                "connections": [],
+                "epistemic_classification": "WIN32_IPHLPAPI_EXTENDED_TCP_TABLE"
+            }
+
+        num_entries = struct.unpack('<I', raw_bytes[:4])[0]
+        row_size = ctypes.sizeof(MIB_TCPROW_OWNER_PID)
+        connections = []
+
+        for i in range(num_entries):
+            offset = 4 + i * row_size
+            if offset + row_size > len(raw_bytes):
+                break
+            row = MIB_TCPROW_OWNER_PID.from_buffer_copy(raw_bytes[offset:offset+row_size])
+            if pid is not None and row.dwOwningPid != pid:
+                continue
+
+            local_ip = socket.inet_ntoa(struct.pack('<I', row.dwLocalAddr))
+            remote_ip = socket.inet_ntoa(struct.pack('<I', row.dwRemoteAddr))
+            local_port = socket.ntohs(row.dwLocalPort & 0xffff)
+            remote_port = socket.ntohs(row.dwRemotePort & 0xffff)
+            state_code = int(row.dwState)
+            state_str = cls.TCP_STATE_NAMES.get(state_code, f"UNKNOWN_{state_code}")
+
+            connections.append({
+                "pid": int(row.dwOwningPid),
+                "local_address": f"{local_ip}:{local_port}",
+                "local_ip": local_ip,
+                "local_port": local_port,
+                "remote_address": f"{remote_ip}:{remote_port}",
+                "remote_ip": remote_ip,
+                "remote_port": remote_port,
+                "state": state_str,
+                "state_code": state_code
+            })
+
+        return {
+            "status": "success",
+            "filter_pid": pid,
+            "total_connections": len(connections),
+            "connections": connections,
+            "epistemic_classification": "WIN32_IPHLPAPI_EXTENDED_TCP_TABLE"
         }
 
     @classmethod

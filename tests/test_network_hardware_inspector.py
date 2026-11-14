@@ -10,7 +10,7 @@ Covers:
 6. Virtual adapter classification & deterministic filtering (including wireless virtual miniports)
 7. Multi-layer completeness accounting (FULL_6_LAYER_TRACE vs PARTIAL_TRACE)
 8. DriverStore path expansion and driver filename mismatch resolution (e1dexpress -> e1d.sys)
-9. MCP tool registration, 46-tool security mediation, and CLI registration
+9. MCP tool registration, 47-tool security mediation, and CLI registration
 10. Live read-only Windows NT execution sanity check (when on Windows host)
 """
 
@@ -353,9 +353,10 @@ class TestNetworkHardwareInspector(unittest.TestCase):
     def test_mcp_registration_and_dispatch(self):
         from mcp_server import TOOLS_REGISTRY, BintraMcpServer
         tool_names = [t["name"] for t in TOOLS_REGISTRY]
-        self.assertEqual(len(tool_names), 46)
+        self.assertEqual(len(tool_names), 47)
         self.assertIn("bintra_network_audit", tool_names)
         self.assertIn("bintra_network_hardware_dissect", tool_names)
+        self.assertIn("bintra_network_connections", tool_names)
 
         # Verify capability / security metadata map
         server = BintraMcpServer()
@@ -367,10 +368,69 @@ class TestNetworkHardwareInspector(unittest.TestCase):
         self.assertIsNotNone(cap_entry_dissect)
         self.assertEqual(cap_entry_dissect[0], "cap.device.query")
 
+        cap_entry_conns = server.TOOL_SECURITY_METADATA.get("bintra_network_connections")
+        self.assertIsNotNone(cap_entry_conns)
+        self.assertEqual(cap_entry_conns[0], "cap.device.query")
+
     def test_cli_command_registration(self):
         from cli import WIN_INTEL_COMMANDS
         self.assertIn("hw-net", WIN_INTEL_COMMANDS)
         self.assertIn("hw-dissect", WIN_INTEL_COMMANDS)
+        self.assertIn("net-conns", WIN_INTEL_COMMANDS)
+
+    def test_audit_tcp_connections_synthetic_and_degradation(self):
+        """Verifies TCP connections inspection, PID filtering, and non-NT degradation."""
+        # Non-NT degradation
+        with patch("os.name", "posix"):
+            res = NetworkHardwareInspector.audit_tcp_connections()
+            self.assertEqual(res["status"], "not_applicable")
+            self.assertEqual(res["total_connections"], 0)
+
+        # Synthetic buffer mocking
+        from windows_intelligence.system_introspection.network_inspector import MIB_TCPROW_OWNER_PID
+        row1 = MIB_TCPROW_OWNER_PID()
+        row1.dwState = 5  # ESTABLISHED
+        row1.dwLocalAddr = struct.unpack("<I", socket.inet_aton("192.168.1.50"))[0]
+        row1.dwLocalPort = socket.htons(5000)
+        row1.dwRemoteAddr = struct.unpack("<I", socket.inet_aton("188.114.97.7"))[0]
+        row1.dwRemotePort = socket.htons(443)
+        row1.dwOwningPid = 10324
+
+        row2 = MIB_TCPROW_OWNER_PID()
+        row2.dwState = 2  # LISTEN
+        row2.dwLocalAddr = struct.unpack("<I", socket.inet_aton("0.0.0.0"))[0]
+        row2.dwLocalPort = socket.htons(8080)
+        row2.dwRemoteAddr = 0
+        row2.dwRemotePort = 0
+        row2.dwOwningPid = 9999
+
+        buf = bytearray(struct.pack("<I", 2)) + bytes(row1) + bytes(row2)
+
+        def fake_get_tcp_table(p_buf, p_size, b_order, ul_af, tbl_cls, rsv):
+            if not p_buf:
+                p_size.contents.value = len(buf)
+                return 122
+            ctypes.memmove(p_buf, bytes(buf), len(buf))
+            return 0
+
+        mock_dll = MagicMock()
+        mock_dll.GetExtendedTcpTable.side_effect = fake_get_tcp_table
+
+        with patch("os.name", "nt"):
+            with patch.object(NetworkHardwareInspector, "_load_iphlpapi", return_value=mock_dll):
+                # Filter by PID 10324
+                rep_filtered = NetworkHardwareInspector.audit_tcp_connections(pid=10324)
+                self.assertEqual(rep_filtered["status"], "success")
+                self.assertEqual(rep_filtered["total_connections"], 1)
+                conn = rep_filtered["connections"][0]
+                self.assertEqual(conn["pid"], 10324)
+                self.assertEqual(conn["local_address"], "192.168.1.50:5000")
+                self.assertEqual(conn["remote_address"], "188.114.97.7:443")
+                self.assertEqual(conn["state"], "ESTABLISHED")
+
+                # All connections
+                rep_all = NetworkHardwareInspector.audit_tcp_connections()
+                self.assertEqual(rep_all["total_connections"], 2)
 
     def test_live_execution_on_windows_host(self):
         """When executed on a live Windows NT machine, validates that live calls succeed without crashing."""

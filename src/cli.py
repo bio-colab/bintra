@@ -41,7 +41,7 @@ WEIGHT_COMMANDS = {
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless", "ghidra-bridge"}
-WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "port-audit", "hw-tree", "hw-net", "hw-dissect", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations"}
+WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "port-audit", "hw-tree", "hw-net", "hw-dissect", "net-conns", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations"}
 
 
 def print_help():
@@ -813,6 +813,40 @@ def _dispatch_cli():
                     f"- **KASLR Active:** `{l6.get('aslr_mitigation_active')}`",
                     f"- **Scope:** `{l6.get('kaslr_scope', 'STATIC_DYNAMIC_BASE_DISPLACEMENT')}`"
                 ]
+                print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "net-conns":
+            parser = argparse.ArgumentParser(prog="bintra net-conns", description="Audit active TCP network connections via Win32 extended TCP table.")
+            parser.add_argument("command")
+            parser.add_argument("--pid", type=int, default=None, help="Filter by owning process PID")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args()
+
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="net-conns",
+                target=str(args.pid) if args.pid else "all",
+                capability=Capability.DEVICE_QUERY,
+                access_mode="QUERY",
+            )
+            from windows_intelligence import NetworkHardwareInspector
+            report = NetworkHardwareInspector.audit_tcp_connections(pid=args.pid)
+            if args.format == "md":
+                lines = [
+                    "# Active TCP Network Connections",
+                    f"- **Filtered PID:** `{report.get('filter_pid')}`",
+                    f"- **Total Connections:** {report.get('total_connections')}",
+                    f"- **Epistemic Classification:** `{report.get('epistemic_classification')}`",
+                    "",
+                    "| PID | Local Endpoint | Remote Endpoint | State |",
+                    "| :--- | :--- | :--- | :--- |"
+                ]
+                for c in report.get("connections", []):
+                    lines.append(f"| {c.get('pid')} | `{c.get('local_address')}` | `{c.get('remote_address')}` | {c.get('state')} |")
                 print("\n".join(lines))
             else:
                 print(json.dumps(report, indent=2, ensure_ascii=False))

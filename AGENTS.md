@@ -124,6 +124,10 @@ Bintra provides **7 specialized sub-skills** (plus the [`bintra`](skills/bintra/
 | `etw-audit` | Audit ETW sessions & providers | `[--session <s>] [--format json\|md]` | `standard_sessions_probed`, `active_sessions`, `providers` |
 | `file-locks` | Detect processes holding file locks | `--file <path>` | `status`, `is_locked`, `usage_classifications`, `locking_processes` |
 | `proc-modules` | Find processes hosting loaded DLL | `--module <name>` | `status`, `query`, `hosting_processes_count`, `hosting_processes` |
+| `sys-perf` | Task Manager Performance tab metrics | `[--format md\|json]` | `status`, `cpu_utilization_percent`, `memory`, `uptime`, `topology` |
+| `proc-list` | Live Task Manager process table | `[--limit N] [--sort s] [--query q]` | `status`, `total_processes`, `matched_processes`, `processes` |
+| `proc-search` | Search processes by keyword / PID | `--query <q> [--limit N]` | `status`, `total_processes`, `matched_processes`, `processes` |
+| `proc-info` | Deep Task Manager telemetry for PID | `--pid <pid>` | `status`, `memory`, `cpu_and_timing`, `io_counters`, `security`, `mitigations` |
 | `dev-match` | Match PnP devices with Driver Store | `[--query <name>] [--problems-only]` | `status`, `devices_audited`, `driver_packages_cataloged`, `device_reports` |
 | `vad-inspect` | Passive virtual memory (VAD) inspection | `--pid <pid> [--address 0x...] [--regions]` | `status`, `is_simulated`, `architecture`, `summary`, `module_count` |
 | `mem-scan` | Read-only value scan (`PROCESS_VM_READ`) | `--pid <pid> --type <t> --mode <m> [--value <v>] [--session-file <f>]` | `session_id`, `data_type`, `scan_type`, `total_candidates`, `candidates_sample` |

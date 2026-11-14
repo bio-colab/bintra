@@ -117,6 +117,10 @@ bintra match --func1 <hex1> --func2 <hex2>
 bintra patch-binary --file <src> --output <dst> --offset <off> --patch-hex <hex>
 bintra file-locks --file <path>
 bintra proc-modules --module <name>
+bintra sys-perf [--format md]
+bintra proc-list [--limit 50] [--sort memory|commit|threads|handles|pid|name] [--resolve-users]
+bintra proc-search --query <name_or_pid> [--limit 25]
+bintra proc-info --pid <pid> [--format md]
 bintra dev-match --query <query> --problems-only
 bintra dmp-inspect --file <path>
 bintra wsp-audit --model <model.safetensors>

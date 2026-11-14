@@ -9,10 +9,12 @@ from .file_usage_inspector import FileUsageInspector
 from .process_inventory import ProcessInventory
 from .module_inventory import ModuleInventory
 from .service_process_mapper import ServiceProcessMapper
+from .task_manager import TaskManagerInspector
 
 __all__ = [
     "FileUsageInspector",
     "ProcessInventory",
     "ModuleInventory",
-    "ServiceProcessMapper"
+    "ServiceProcessMapper",
+    "TaskManagerInspector"
 ]

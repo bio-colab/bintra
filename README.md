@@ -322,6 +322,12 @@ bintra file-locks --file target.dll
 # Find processes currently hosting a loaded DLL
 bintra proc-modules --module kernel32.dll
 
+# Windows Task Manager Intelligence: system performance, process tables, query search & deep telemetry
+bintra sys-perf
+bintra proc-list --limit 20 --sort memory
+bintra proc-search --query "shamela"
+bintra proc-info --pid 10324
+
 # Match PnP devices against Driver Store packages and evaluate driver ranks
 bintra dev-match --query "PCI" --problems-only
 ```

@@ -898,14 +898,23 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
     },
     {
         "name": "bintra_process_resource_audit",
-        "description": "Inspects running processes, in-memory loaded modules, file lock handles via Windows Restart Manager, and service-to-process hosting mappings.",
+        "description": "Inspects running processes, in-memory loaded modules, file lock handles via Windows Restart Manager, service-to-process hosting mappings, and Windows Task Manager telemetry (RAM, CPU, I/O, handles, threads, performance tab).",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["find_file_locks", "find_module_holders", "process_tree", "service_process_map", "audit_process"],
-                    "description": "Action: 'find_file_locks' (discover processes locking a file), 'find_module_holders' (find processes with DLL loaded), 'process_tree' (parent-child tree), 'service_process_map' (services hosted in processes), 'audit_process' (inspect PID)",
+                    "enum": [
+                        "find_file_locks",
+                        "find_module_holders",
+                        "process_tree",
+                        "service_process_map",
+                        "audit_process",
+                        "list_processes",
+                        "search_processes",
+                        "system_performance"
+                    ],
+                    "description": "Action: 'find_file_locks', 'find_module_holders', 'process_tree', 'service_process_map', 'audit_process' (Task Manager deep dive on PID), 'list_processes' (live Task Manager process table), 'search_processes' (filter processes by query), 'system_performance' (Task Manager Performance tab)",
                     "default": "find_file_locks"
                 },
                 "file_path": {
@@ -919,6 +928,19 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                 "pid": {
                     "type": "integer",
                     "description": "Process ID for detailed inspection"
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Search query (process name, PID, username, command line) for 'search_processes' or 'list_processes'"
+                },
+                "sort_by": {
+                    "type": "string",
+                    "enum": ["memory", "commit", "threads", "handles", "pid", "name"],
+                    "description": "Sorting metric for 'list_processes' (default: memory)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum processes to return (default: 50)"
                 }
             }
         }
@@ -2102,11 +2124,20 @@ class BintraMcpServer:
             )
 
         elif name == "bintra_process_resource_audit":
-            from windows_intelligence.process_intelligence import FileUsageInspector, ModuleInventory, ProcessInventory, ServiceProcessMapper
+            from windows_intelligence.process_intelligence import (
+                FileUsageInspector,
+                ModuleInventory,
+                ProcessInventory,
+                ServiceProcessMapper,
+                TaskManagerInspector
+            )
             action = args.get("action", "find_file_locks")
             f_path = args.get("file_path")
             pid = args.get("pid")
             mod_q = args.get("module_query")
+            query = args.get("query")
+            sort_by = args.get("sort_by", "memory")
+            limit = int(args.get("limit", 50))
 
             if action == "find_file_locks":
                 if not f_path:
@@ -2120,19 +2151,17 @@ class BintraMcpServer:
                 return ProcessInventory.get_process_tree()
             elif action == "service_process_map":
                 return ServiceProcessMapper.get_service_process_mapping()
+            elif action == "list_processes":
+                return TaskManagerInspector.list_processes(limit=limit, sort_by=sort_by, query=query)
+            elif action == "search_processes":
+                if not query:
+                    return {"status": "error", "error": "query parameter is required for action 'search_processes'"}
+                return TaskManagerInspector.search_processes(query=query, max_results=limit)
+            elif action == "system_performance":
+                return TaskManagerInspector.get_system_performance()
             elif action == "audit_process":
                 target_pid = pid or os.getpid()
-                mod_res = ModuleInventory.get_modules_for_process(target_pid)
-                svcs = ServiceProcessMapper.get_services_for_process(target_pid)
-                img = ProcessInventory.get_process_image_path(target_pid)
-                return {
-                    "status": "success",
-                    "process_id": target_pid,
-                    "image_path": img,
-                    "hosted_services": svcs,
-                    "loaded_modules_count": mod_res.get("modules_count", 0),
-                    "modules_sample": mod_res.get("modules", [])[:15]
-                }
+                return TaskManagerInspector.get_process_details(target_pid)
             else:
                 return {"status": "error", "error": f"Unknown action: '{action}'"}
 

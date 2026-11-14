@@ -149,7 +149,7 @@ bintra/
 ├── README.md                      # Comprehensive guide
 ├── src/
 │   ├── cli.py                     # Unified CLI entry point (`bintra`) with self-update
-│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`bintra-mcp`, 42 tools)
+│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`bintra-mcp`, 44 tools)
 │   ├── binary_neural_engine.py    # PE binary analysis, deobfuscator & patcher
 │   ├── bintra_engine.py       # Weight-space SVD & circuit decompiler
 │   ├── sensory_cortex.py          # 10 Metaphorical Senses evaluation cortex
@@ -161,7 +161,7 @@ bintra/
 ├── skills/
 │   └── bintra/ # Agent-native skill specification
 ├── schemas/                       # Agent MCP tool definitions
-├── tests/                         # 245 automated unit, sensory, telemetry & security tests
+├── tests/                         # 252 automated unit, sensory, telemetry & security tests
 └── docs/                          # Architecture, Roadmap & mathematical foundations
     ├── architecture.md            # Master architecture & formal model
     └── ROADMAP.md                 # Strategic direction, tech evaluation & roadmap
@@ -237,7 +237,7 @@ bintra sense --hex "55 48 89 e5 90 5d c3"
 
 ## Agent-Native MCP (Model Context Protocol) Integration
 
-`Bintra` ships with a production-ready **JSON-RPC 2.0 stdio MCP server** (`bintra-mcp`) offering **42 mediated reverse engineering and Windows intelligence tools** to AI agents (Claude Desktop, Cursor, Antigravity, Windsurf).
+`Bintra` ships with a production-ready **JSON-RPC 2.0 stdio MCP server** (`bintra-mcp`) offering **44 mediated reverse engineering and Windows intelligence tools** to AI agents (Claude Desktop, Cursor, Antigravity, Windsurf).
 
 ### 1. Claude Desktop Configuration
 Add the `bintra` server to your `%APPDATA%\Claude\claude_desktop_config.json`:
@@ -351,7 +351,7 @@ bintra update --yes
 
 ### Running the Test Suite
 ```powershell
-# Run the complete test suite (245 unit, sensory, runtime telemetry, and security remediation tests)
+# Run the complete test suite (252 unit, sensory, runtime telemetry, and security remediation tests)
 python -m unittest discover -s tests -p "test_*.py"
 ```
 

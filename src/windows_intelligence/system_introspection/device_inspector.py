@@ -8,6 +8,8 @@ and hardware problem codes (CM_PROB_*).
 
 import os
 import sys
+import collections
+import struct
 import ctypes
 from ctypes import wintypes
 from typing import Dict, Any, List, Optional
@@ -132,6 +134,22 @@ class NativeDeviceInspector:
                 ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD), wintypes.DWORD, wintypes.DWORD
             ]
 
+            if hasattr(cfgmgr32, "CM_Get_Parent"):
+                cfgmgr32.CM_Get_Parent.restype = wintypes.DWORD
+                cfgmgr32.CM_Get_Parent.argtypes = [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD, wintypes.DWORD]
+
+            if hasattr(cfgmgr32, "CM_Get_Child"):
+                cfgmgr32.CM_Get_Child.restype = wintypes.DWORD
+                cfgmgr32.CM_Get_Child.argtypes = [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD, wintypes.DWORD]
+
+            if hasattr(cfgmgr32, "CM_Get_Sibling"):
+                cfgmgr32.CM_Get_Sibling.restype = wintypes.DWORD
+                cfgmgr32.CM_Get_Sibling.argtypes = [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD, wintypes.DWORD]
+
+            if hasattr(cfgmgr32, "CM_Get_Device_IDW"):
+                cfgmgr32.CM_Get_Device_IDW.restype = wintypes.DWORD
+                cfgmgr32.CM_Get_Device_IDW.argtypes = [wintypes.DWORD, wintypes.LPWSTR, wintypes.ULONG, wintypes.ULONG]
+
             return setupapi, cfgmgr32
         except Exception:
             return None, None
@@ -244,11 +262,29 @@ class NativeDeviceInspector:
                 if not cls_name or class_filter.lower() not in cls_name.lower():
                     continue
 
+            # Query parent DevNode and canonical parent instance ID
+            parent_devnode_val = None
+            parent_id_str = None
+            if hasattr(cfgmgr32, "CM_Get_Parent"):
+                p_inst = wintypes.DWORD()
+                cr_p = cfgmgr32.CM_Get_Parent(ctypes.byref(p_inst), dev_data.DevInst, 0)
+                if cr_p == 0:
+                    parent_devnode_val = p_inst.value
+                    if hasattr(cfgmgr32, "CM_Get_Device_IDW"):
+                        p_buf = (ctypes.c_wchar * 512)()
+                        cr_pid = cfgmgr32.CM_Get_Device_IDW(p_inst.value, p_buf, 512, 0)
+                        if cr_pid == 0 and p_buf.value:
+                            parent_id_str = p_buf.value
+                        else:
+                            parent_id_str = f"DevNode_{p_inst.value}"
+
             name_repr = friendly_name or dev_desc or "Unknown PnP Device"
 
             devices.append({
                 "device_instance_id": inst_id_str,
                 "devnode_handle": dev_data.DevInst,
+                "parent_devnode": parent_devnode_val,
+                "parent_device_id": parent_id_str,
                 "name": name_repr,
                 "description": dev_desc,
                 "class": cls_name,
@@ -305,3 +341,371 @@ class NativeDeviceInspector:
     def get_problem_description(cls, code: int) -> str:
         """Returns the symbolic name for a PnP problem code (CM_PROB_*)."""
         return cls.CM_PROBLEM_NAMES.get(code, f"CM_PROB_UNKNOWN_{code}")
+
+    STORAGE_BUS_TYPES = {
+        0: "Unknown", 1: "SCSI", 2: "ATAPI", 3: "ATA", 4: "1394",
+        5: "SSA", 6: "Fibre", 7: "USB", 8: "RAID", 9: "iSCSI",
+        10: "SAS", 11: "SATA", 12: "SD", 13: "MMC", 14: "Virtual",
+        15: "FileBackedVirtual", 16: "Spaces", 17: "NVMe", 18: "SCM", 19: "UFS"
+    }
+
+    DRIVE_TYPES = {
+        0: "DRIVE_UNKNOWN",
+        1: "DRIVE_NO_ROOT_DIR",
+        2: "DRIVE_REMOVABLE",
+        3: "DRIVE_FIXED",
+        4: "DRIVE_REMOTE",
+        5: "DRIVE_CDROM",
+        6: "DRIVE_RAMDISK"
+    }
+
+    @classmethod
+    def build_device_topology(
+        cls,
+        max_devices: int = 500,
+        bus_filter: Optional[str] = None,
+        problems_only: bool = False,
+        format: str = "json"
+    ) -> Dict[str, Any]:
+        """
+        Constructs an authoritative bus hierarchy and dependency tree of live PnP devices
+        from Windows Kernel DevNodes and SetupAPI.
+
+        Args:
+            max_devices: Upper bound on devices to enumerate (default: 500).
+            bus_filter: Optional substring filter on bus / root instance prefix (e.g. 'USB', 'PCI', 'ACPI').
+            problems_only: When True, filters topology to only display branches containing CM_PROB_* errors.
+            format: Output representation: 'json' (nested dict tree), 'tree' (indented ASCII), or 'mermaid' (Mermaid graph TD).
+        """
+        if os.name != "nt":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "reason": "NativeDeviceInspector requires a Windows NT host.",
+                "total_nodes": 0,
+                "roots": [],
+                "rendered": ""
+            }
+
+        raw_devices = cls.enumerate_devices(filter_problems_only=False, max_devices=max_devices)
+        if not raw_devices:
+            return {
+                "status": "empty",
+                "total_nodes": 0,
+                "roots": [],
+                "rendered": "No PnP devices enumerated."
+            }
+
+        device_map = {d["device_instance_id"]: d for d in raw_devices}
+        children_map = collections.defaultdict(list)
+
+        for d in raw_devices:
+            parent_id = d.get("parent_device_id")
+            if parent_id and parent_id in device_map:
+                children_map[parent_id].append(d["device_instance_id"])
+
+        # Determine retained nodes based on filters
+        retained_ids = set(device_map.keys())
+
+        if problems_only:
+            problem_ids = {d["device_instance_id"] for d in raw_devices if d.get("has_problem") or d.get("problem_code", 0) > 0}
+            needed_ids = set()
+            for pid in problem_ids:
+                curr = pid
+                while curr:
+                    needed_ids.add(curr)
+                    p_dev = device_map.get(curr)
+                    curr = p_dev.get("parent_device_id") if p_dev else None
+            retained_ids &= needed_ids
+
+        if bus_filter:
+            bf_upper = bus_filter.strip().upper()
+            matched_roots = set()
+            for did, d in device_map.items():
+                inst_match = bf_upper in did.upper()
+                class_match = bool(d.get("class") and bf_upper in d["class"].upper())
+                service_match = bool(d.get("service") and bf_upper in d["service"].upper())
+                if inst_match or class_match or service_match:
+                    matched_roots.add(did)
+
+            # Include matched roots and all their descendants
+            descendant_ids = set()
+            def _collect_descendants(curr_id):
+                descendant_ids.add(curr_id)
+                for child_id in children_map.get(curr_id, []):
+                    if child_id not in descendant_ids:
+                        _collect_descendants(child_id)
+
+            for m_id in matched_roots:
+                _collect_descendants(m_id)
+
+            retained_ids &= descendant_ids
+
+        # Identify roots among retained IDs
+        root_ids = []
+        for did in raw_devices:
+            inst_id = did["device_instance_id"]
+            if inst_id not in retained_ids:
+                continue
+            parent_id = did.get("parent_device_id")
+            # A node is a root if it has no parent, parent is HTREE\ROOT\0, or parent is not in retained_ids
+            if not parent_id or parent_id.upper() == r"HTREE\ROOT\0" or parent_id not in retained_ids:
+                root_ids.append(inst_id)
+
+        # 1. JSON Nested Hierarchy
+        visited = set()
+        def _build_json_node(dev_id):
+            if dev_id in visited:
+                return None
+            visited.add(dev_id)
+            d = device_map[dev_id]
+            child_nodes = []
+            for cid in children_map.get(dev_id, []):
+                if cid in retained_ids and cid not in visited:
+                    c_dict = _build_json_node(cid)
+                    if c_dict:
+                        child_nodes.append(c_dict)
+            return {
+                "device_instance_id": d["device_instance_id"],
+                "name": d["name"],
+                "class": d.get("class"),
+                "hardware_id": d.get("hardware_id"),
+                "service": d.get("service"),
+                "is_started": d.get("is_started", False),
+                "has_problem": d.get("has_problem", False),
+                "problem_code": d.get("problem_code", 0),
+                "problem_name": d.get("problem_name", "Healthy"),
+                "problem_description": d.get("problem_description", "Healthy"),
+                "children": child_nodes
+            }
+
+        json_roots = []
+        for r_id in root_ids:
+            r_node = _build_json_node(r_id)
+            if r_node:
+                json_roots.append(r_node)
+
+        # 2. Indented ASCII Tree
+        tree_lines = []
+        tree_visited = set()
+        def _render_tree_node(dev_id, prefix="", is_last=True):
+            if dev_id in tree_visited:
+                return
+            tree_visited.add(dev_id)
+            d = device_map[dev_id]
+            connector = "└── " if is_last else "├── "
+            cls_str = f" [{d['class']}]" if d.get("class") else ""
+            prob_str = f" [!] {d.get('problem_name')}" if d.get("has_problem") else ""
+            tree_lines.append(f"{prefix}{connector}{d['name']}{cls_str} ({d['device_instance_id']}){prob_str}")
+
+            child_prefix = prefix + ("    " if is_last else "│   ")
+            child_ids = [cid for cid in children_map.get(dev_id, []) if cid in retained_ids and cid not in tree_visited]
+            for idx, cid in enumerate(child_ids):
+                _render_tree_node(cid, child_prefix, idx == len(child_ids) - 1)
+
+        for idx, r_id in enumerate(root_ids):
+            _render_tree_node(r_id, "", idx == len(root_ids) - 1)
+
+        tree_str = "\n".join(tree_lines)
+
+        # 3. Mermaid Flowchart
+        mermaid_lines = ["graph TD"]
+        node_aliases = {}
+        for idx, did in enumerate(retained_ids):
+            node_aliases[did] = f"dev_{idx}"
+
+        for did in retained_ids:
+            d = device_map[did]
+            alias = node_aliases[did]
+            clean_name = d["name"].replace('"', "'").replace("[", "(").replace("]", ")")
+            leaf_id = did.split("\\")[-1][:25].replace('"', "'")
+            mermaid_lines.append(f'  {alias}["{clean_name}<br/><code>{leaf_id}</code>"]')
+            if d.get("has_problem"):
+                mermaid_lines.append(f"  style {alias} fill:#ffcccc,stroke:#e74c3c,stroke-width:2px")
+
+        for pid, cids in children_map.items():
+            if pid in node_aliases:
+                for cid in cids:
+                    if cid in node_aliases:
+                        mermaid_lines.append(f"  {node_aliases[pid]} --> {node_aliases[cid]}")
+
+        mermaid_str = "\n".join(mermaid_lines)
+
+        selected_render = json_roots if format == "json" else (mermaid_str if format == "mermaid" else tree_str)
+
+        return {
+            "status": "success",
+            "format": format,
+            "total_nodes": len(retained_ids),
+            "root_nodes_count": len(root_ids),
+            "roots": json_roots,
+            "rendered": selected_render
+        }
+
+    @classmethod
+    def audit_storage_devices(cls, max_drives: int = 16) -> Dict[str, Any]:
+        """
+        Conducts read-only kernel inspection of physical disk drives and mounted logical volumes.
+        Interrogates IOCTL_STORAGE_QUERY_PROPERTY to identify physical bus interfaces (NVMe, SATA, USB),
+        drive models, firmware revisions, and volume mount configurations.
+        Strictly zero mutation, fail-closed read-only access.
+        """
+        if os.name != "nt":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "message": "Storage device inspection requires a Windows NT host.",
+                "physical_drives": [],
+                "logical_volumes": [],
+                "summary": {"total_physical_drives": 0, "total_logical_volumes": 0}
+            }
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        FILE_SHARE_READ = 0x00000001
+        FILE_SHARE_WRITE = 0x00000002
+        OPEN_EXISTING = 3
+        IOCTL_STORAGE_QUERY_PROPERTY = 0x002D1400
+
+        class STORAGE_PROPERTY_QUERY(ctypes.Structure):
+            _fields_ = [
+                ("PropertyId", wintypes.DWORD),
+                ("QueryType", wintypes.DWORD),
+                ("AdditionalParameters", ctypes.c_byte * 1)
+            ]
+
+        # 1. Enumerate Physical Drives via IOCTL_STORAGE_QUERY_PROPERTY
+        physical_drives = []
+        for drive_idx in range(max_drives):
+            drive_path = f"\\\\.\\PhysicalDrive{drive_idx}"
+            handle = kernel32.CreateFileW(
+                drive_path,
+                0,  # Query metadata only (no read/write data access required)
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                None,
+                OPEN_EXISTING,
+                0,
+                None
+            )
+            if handle == -1 or handle == 0:
+                continue
+
+            try:
+                query = STORAGE_PROPERTY_QUERY(0, 0)  # StorageDeviceProperty, PropertyStandardQuery
+                out_buf = (ctypes.c_byte * 1024)()
+                bytes_returned = wintypes.DWORD()
+                ok = kernel32.DeviceIoControl(
+                    handle,
+                    IOCTL_STORAGE_QUERY_PROPERTY,
+                    ctypes.byref(query),
+                    ctypes.sizeof(query),
+                    ctypes.byref(out_buf),
+                    len(out_buf),
+                    ctypes.byref(bytes_returned),
+                    None
+                )
+                if ok and bytes_returned.value >= 28:
+                    raw = bytes(out_buf)
+                    version, size, dev_type, dev_mod, removable, queueing, v_off, p_off, r_off, s_off, bus_type = struct.unpack_from(
+                        "<IIBB??IIIII", raw, 0
+                    )
+
+                    def _extract_str(offset: int) -> str:
+                        if 0 < offset < len(raw):
+                            end = raw.find(b"\x00", offset)
+                            if end != -1:
+                                return raw[offset:end].decode("latin1", errors="replace").strip()
+                            return raw[offset:].decode("latin1", errors="replace").strip()
+                        return ""
+
+                    bus_name = cls.STORAGE_BUS_TYPES.get(bus_type, f"Bus_{bus_type}")
+                    physical_drives.append({
+                        "device_path": drive_path,
+                        "drive_index": drive_idx,
+                        "bus_type": bus_name,
+                        "bus_type_raw": bus_type,
+                        "vendor_id": _extract_str(v_off),
+                        "product_id": _extract_str(p_off),
+                        "product_revision": _extract_str(r_off),
+                        "serial_number": _extract_str(s_off),
+                        "is_removable": removable,
+                        "command_queueing": queueing
+                    })
+            except Exception:
+                pass
+            finally:
+                kernel32.CloseHandle(handle)
+
+        # 2. Enumerate Logical Volumes
+        logical_volumes = []
+        try:
+            drives_mask = kernel32.GetLogicalDrives()
+            for i in range(26):
+                if drives_mask & (1 << i):
+                    drive_letter = f"{chr(ord('A') + i)}:\\"
+                    vol_name_buf = (ctypes.c_wchar * 260)()
+                    fs_name_buf = (ctypes.c_wchar * 260)()
+                    serial_num = wintypes.DWORD()
+                    max_component_len = wintypes.DWORD()
+                    fs_flags = wintypes.DWORD()
+
+                    vol_ok = kernel32.GetVolumeInformationW(
+                        drive_letter,
+                        vol_name_buf,
+                        260,
+                        ctypes.byref(serial_num),
+                        ctypes.byref(max_component_len),
+                        ctypes.byref(fs_flags),
+                        fs_name_buf,
+                        260
+                    )
+
+                    free_bytes = ctypes.c_ulonglong()
+                    total_bytes = ctypes.c_ulonglong()
+                    total_free_bytes = ctypes.c_ulonglong()
+                    space_ok = kernel32.GetDiskFreeSpaceExW(
+                        drive_letter,
+                        ctypes.byref(free_bytes),
+                        ctypes.byref(total_bytes),
+                        ctypes.byref(total_free_bytes)
+                    )
+
+                    drive_type_code = kernel32.GetDriveTypeW(drive_letter)
+                    drive_type_str = cls.DRIVE_TYPES.get(drive_type_code, f"DRIVE_{drive_type_code}")
+
+                    total_gb = round(total_bytes.value / (1024 ** 3), 2) if space_ok else 0.0
+                    free_gb = round(free_bytes.value / (1024 ** 3), 2) if space_ok else 0.0
+                    used_gb = round(total_gb - free_gb, 2)
+                    used_pct = round((used_gb / total_gb * 100), 1) if total_gb > 0 else 0.0
+
+                    logical_volumes.append({
+                        "drive_letter": drive_letter,
+                        "volume_name": vol_name_buf.value if vol_ok else "",
+                        "file_system": fs_name_buf.value if vol_ok else "Unknown",
+                        "drive_type": drive_type_str,
+                        "total_bytes": total_bytes.value if space_ok else 0,
+                        "free_bytes": free_bytes.value if space_ok else 0,
+                        "total_gb": total_gb,
+                        "free_gb": free_gb,
+                        "used_gb": used_gb,
+                        "used_percentage": used_pct
+                    })
+        except Exception:
+            pass
+
+        # 3. Summary Classification
+        bus_counts = collections.Counter(d["bus_type"] for d in physical_drives)
+        summary = {
+            "total_physical_drives": len(physical_drives),
+            "total_logical_volumes": len(logical_volumes),
+            "nvme_drives_count": bus_counts.get("NVMe", 0),
+            "sata_drives_count": bus_counts.get("SATA", 0),
+            "usb_drives_count": bus_counts.get("USB", 0),
+            "bus_type_distribution": dict(bus_counts)
+        }
+
+        return {
+            "status": "success",
+            "physical_drives": physical_drives,
+            "logical_volumes": logical_volumes,
+            "summary": summary
+        }

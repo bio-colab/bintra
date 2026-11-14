@@ -133,7 +133,7 @@ class TestAuditRemediations(unittest.TestCase):
 
         srv = BintraMcpServer()
         tools = srv.handle_tools_list({})["tools"]
-        self.assertEqual(len(tools), 42)
+        self.assertEqual(len(tools), 44)
         for t in tools:
             self.assertIn(t["name"], srv.TOOL_SECURITY_METADATA)
             self.assertIn("inputSchema", t)
@@ -637,7 +637,7 @@ class TestAuditRemediations(unittest.TestCase):
         import numpy as np
         import mcp_server as mcp_mod
 
-        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 42)
+        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 44)
         dispatch_src = inspect.getsource(mcp_mod.BintraMcpServer.dispatch_tool)
 
         with tempfile.TemporaryDirectory() as td:
@@ -838,7 +838,7 @@ class TestAuditRemediations(unittest.TestCase):
         import mcp_server as mcp_mod
 
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 42)
+        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 44)
 
         discovered_count = unittest.defaultTestLoader.discover(
             os.path.join(repo_root, "tests"), pattern="test_*.py"
@@ -911,7 +911,7 @@ class TestAuditRemediations(unittest.TestCase):
             "skills/bintra/SKILL.md",
             "docs/RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md",
         ):
-            self.assertTrue(any(c in texts[rel] for c in ("42", "40", "34")), f"Expected '42' (or '40'/'34') tool count in {rel}")
+            self.assertTrue(any(c in texts[rel] for c in ("44", "42", "40", "34")), f"Expected '44' (or '42'/'40'/'34') tool count in {rel}")
             self.assertNotIn("31 أداة", texts[rel])
             self.assertNotIn("31 MCP", texts[rel])
 
@@ -923,7 +923,7 @@ class TestAuditRemediations(unittest.TestCase):
             "docs/releases/v1.0.0.md",
             ".github/PULL_REQUEST_TEMPLATE.md",
         ):
-            self.assertTrue(any(c in texts[rel] for c in ("245", "240", "236", "231", "230", "227", "195")), f"Expected '245' (or '240'/'236'/'231'/'230'/'227'/'195') test count in {rel}")
+            self.assertTrue(any(c in texts[rel] for c in ("252", "245", "240", "236", "231", "230", "227", "195")), f"Expected '252' (or '245'/'240'/'236'/'231'/'230'/'227'/'195') test count in {rel}")
             self.assertNotIn("160 Tests", texts[rel])
 
         # 4. EtwTimelineCorrelator canonical event categories exist in source

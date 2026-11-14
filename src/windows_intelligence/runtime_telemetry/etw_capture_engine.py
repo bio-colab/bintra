@@ -37,8 +37,13 @@ KNOWN_PROVIDER_GUIDS = {
     "Microsoft-Windows-Kernel-Process": "{22FB2CD6-0E7B-422B-A0C7-2FAD1FD0E716}",
     "Microsoft-Windows-Kernel-Memory": "{D1D93CCC-6125-4F09-9B14-34FF42788A32}",
     "Microsoft-Windows-Kernel-File": "{EDD08927-9CC4-4E65-B970-C2560F5C4C82}",
+    "Microsoft-Windows-Kernel-Network": "{7DD42A49-5329-4832-8DFD-43D979153A88}",
     "Microsoft-Windows-Direct3D11": "{DB6F6DDB-AC77-4E88-8E81-8B010C2C31E9}",
     "Microsoft-Windows-DXGI": "{CA11C036-0102-4503-AC64-283040314001}",
+    "Microsoft-Windows-Kernel-PnP": "{9C205A39-1250-487D-ABD7-E831C62907E2}",
+    "Microsoft-Windows-USB-USBHUB3": "{AC52AD17-CC01-4F07-BE22-83AAF68F7EF8}",
+    "Microsoft-Windows-USB-UCX": "{36DA065A-25EF-42A7-BD1B-38BB878633D9}",
+    "Microsoft-Windows-Kernel-Disk": "{C7BDE69A-E1E0-4142-B506-1E00F13196E6}",
 }
 
 
@@ -110,6 +115,67 @@ class EtwLiveCaptureSession:
         self._consumer_thread: Optional[threading.Thread] = None
         self._consumer_errors: deque = deque(maxlen=25)
         self._stop_event = threading.Event()
+
+    @staticmethod
+    def decode_raw_payload(raw: bytes) -> Dict[str, Any]:
+        """
+        Decodes raw UserData buffer from an ETW event record.
+        Extracts UTF-16LE / ASCII strings, file paths, driver modules, and hardware IDs.
+        """
+        if not raw:
+            return {"decoded": False}
+        try:
+            extracted_strings = []
+            is_utf16 = len(raw) >= 4 and (raw[1::2].count(0) > len(raw) // 4)
+
+            if is_utf16:
+                # UTF-16LE 2-byte word aligned strings
+                curr_words = []
+                for i in range(0, len(raw) - 1, 2):
+                    word = raw[i:i + 2]
+                    if word == b"\x00\x00":
+                        if curr_words:
+                            chunk_b = b"".join(curr_words)
+                            try:
+                                s = chunk_b.decode("utf-16le", errors="ignore").strip()
+                                if len(s) >= 3 and any(c.isalnum() for c in s) and all(c.isprintable() or c in " \t\r\n" for c in s):
+                                    extracted_strings.append(s)
+                            except Exception:
+                                pass
+                            curr_words = []
+                    else:
+                        curr_words.append(word)
+
+                if curr_words:
+                    try:
+                        s = b"".join(curr_words).decode("utf-16le", errors="ignore").strip()
+                        if len(s) >= 3 and any(c.isalnum() for c in s) and all(c.isprintable() or c in " \t\r\n" for c in s):
+                            extracted_strings.append(s)
+                    except Exception:
+                        pass
+            else:
+                # ASCII null-delimited strings
+                for chunk in raw.split(b"\x00"):
+                    if len(chunk) >= 4:
+                        try:
+                            s = chunk.decode("ascii", errors="ignore").strip()
+                            if len(s) >= 4 and all(c.isprintable() or c in " \t\r\n" for c in s):
+                                extracted_strings.append(s)
+                        except Exception:
+                            pass
+            res = {"decoded": bool(extracted_strings)}
+            if extracted_strings:
+                res["strings"] = extracted_strings[:5]
+                for s in extracted_strings:
+                    if any(ext in s.lower() for ext in (".dll", ".exe", ".sys", ".inf", ".pdb")):
+                        res["target_module"] = s
+                    elif any(pfx in s for pfx in ("\\Device\\", "C:\\", "\\??\\", "UNC\\")):
+                        res["target_path"] = s
+                    elif any(pfx in s.upper() for pfx in ("USB\\", "PCI\\", "HID\\", "ACPI\\")):
+                        res["hardware_id"] = s
+            return res
+        except Exception:
+            return {"decoded": False}
 
     def start_session(self, providers: Optional[List[str]] = None) -> Dict[str, Any]:
         """
@@ -402,6 +468,16 @@ class EtwLiveCaptureSession:
                 if ole32.CLSIDFromString(ctypes.c_wchar_p(g_str), ctypes.byref(g)) == 0:
                     guid_to_name[(g.Data1, g.Data2, g.Data3, tuple(g.Data4))] = p_name
 
+            def _decode_event_payload(rec_ptr) -> Dict[str, Any]:
+                if not rec_ptr or not rec_ptr.contents.UserData or rec_ptr.contents.UserDataLength <= 0:
+                    return {"decoded": False}
+                try:
+                    u_len = min(int(rec_ptr.contents.UserDataLength), 2048)
+                    raw = ctypes.string_at(rec_ptr.contents.UserData, u_len)
+                    return EtwLiveCaptureSession.decode_raw_payload(raw)
+                except Exception:
+                    return {"decoded": False}
+
             def _on_event_record(rec_ptr):
                 if self._stop_event.is_set() or not rec_ptr:
                     return
@@ -440,6 +516,21 @@ class EtwLiveCaptureSession:
                     elif p_name in ("Microsoft-Windows-Direct3D11", "Microsoft-Windows-DXGI"):
                         if hdr.EventDescriptor.Level <= 2:
                             ev_type = "DEVICE_REMOVED" if ev_id in (10, 11, 20) else "ERROR"
+                    elif p_name == "Microsoft-Windows-Kernel-PnP":
+                        ev_type = "PNP_DEVICE_EVENT" if ev_id in (1, 2, 3) else f"PNP_EVENT_{ev_id}"
+                    elif p_name in ("Microsoft-Windows-USB-USBHUB3", "Microsoft-Windows-USB-UCX"):
+                        ev_type = "USB_PORT_EVENT"
+
+                    event_details = {"native_etw": True, "user_data_length": int(rec_ptr.contents.UserDataLength)}
+                    payload_dec = _decode_event_payload(rec_ptr)
+                    if payload_dec.get("decoded"):
+                        event_details["payload_decoded"] = payload_dec
+                        if "target_module" in payload_dec:
+                            event_details["target_module"] = payload_dec["target_module"]
+                        if "target_path" in payload_dec:
+                            event_details["target_path"] = payload_dec["target_path"]
+                        if "hardware_id" in payload_dec:
+                            event_details["hardware_id"] = payload_dec["hardware_id"]
 
                     self.record_event(EtwEventRecord(
                         timestamp=ts,
@@ -449,7 +540,7 @@ class EtwLiveCaptureSession:
                         tid=ev_tid,
                         event_type=ev_type,
                         opcode=opcode,
-                        details={"native_etw": True, "user_data_length": int(rec_ptr.contents.UserDataLength)},
+                        details=event_details,
                         source="etw_native",
                     ))
                 except Exception as cb_err:

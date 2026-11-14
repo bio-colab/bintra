@@ -9,10 +9,12 @@ from .device_inspector import NativeDeviceInspector
 from .driver_inspector import KernelDriverInspector
 from .service_inspector import ServiceManagerInspector
 from .process_inspector import ProcessMitigationInspector
+from .port_inspector import PortInspector
 
 __all__ = [
     "NativeDeviceInspector",
     "KernelDriverInspector",
     "ServiceManagerInspector",
-    "ProcessMitigationInspector"
+    "ProcessMitigationInspector",
+    "PortInspector",
 ]

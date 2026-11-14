@@ -390,6 +390,54 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
+        "name": "bintra_port_audit",
+        "description": "Conducts authoritative read-only audit of Windows serial communication ports (COM), parallel printer ports (LPT), and USB-to-UART bridge controllers (FTDI, CH340, CP210x, PL2303) with passive DCB and modem control line inspection (CTS/DSR/RING/DCD).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "port_name": {
+                    "type": "string",
+                    "description": "Optional specific COM port name to inspect (e.g. 'COM1', 'COM3')"
+                },
+                "include_modem_status": {
+                    "type": "boolean",
+                    "description": "If true, queries DCB line configuration and modem control signals non-disruptively (default: true)"
+                },
+                "port_type": {
+                    "type": "string",
+                    "enum": ["all", "serial", "parallel"],
+                    "description": "Filter by port type: 'all' (default), 'serial', or 'parallel'"
+                }
+            }
+        }
+    },
+    {
+        "name": "bintra_hardware_topology",
+        "description": "Generates an authoritative PnP bus topology tree and directed hardware graph from Windows Kernel DevNodes and SetupAPI. Supports nested JSON hierarchy, ASCII indented tree, or Mermaid diagram (graph TD), with optional bus filtering (USB, PCI, ACPI) and problem pruning (CM_PROB_*).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "bus_filter": {
+                    "type": "string",
+                    "description": "Optional substring filter on bus / root instance prefix (e.g. 'USB', 'PCI', 'ACPI')"
+                },
+                "problems_only": {
+                    "type": "boolean",
+                    "description": "If true, only renders branches containing devices with non-zero CM_PROB_* error codes"
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["tree", "json", "mermaid"],
+                    "description": "Output representation: 'tree' (indented ASCII, default), 'json' (nested hierarchy), or 'mermaid' (graph TD)"
+                },
+                "max_devices": {
+                    "type": "integer",
+                    "description": "Upper bound on devices to interrogate (default 300)"
+                }
+            }
+        }
+    },
+    {
         "name": "bintra_driver_audit",
         "description": "Enumerates all currently loaded Windows kernel drivers, their kernel virtual base addresses, image filenames, and highlights display and audio drivers via PSAPI.",
         "inputSchema": {
@@ -1172,6 +1220,8 @@ class BintraMcpServer:
         "bintra_win_catalog_cmd": ("cap.subprocess.catalog_exec", "EXECUTE", "command_id"),
         "bintra_registry_audit": ("cap.registry.read", "READ", "domain"),
         "bintra_hardware_audit": ("cap.device.query", "QUERY", None),
+        "bintra_port_audit": ("cap.device.query", "QUERY", "port_name"),
+        "bintra_hardware_topology": ("cap.device.query", "QUERY", "bus_filter"),
         "bintra_driver_audit": ("cap.driver.query", "QUERY", None),
         "bintra_service_audit": ("cap.service.query", "QUERY", None),
         "bintra_dmp_inspect": ("cap.minidump.read", "READ", "dmp_path"),
@@ -1570,6 +1620,31 @@ class BintraMcpServer:
                     "problem_devices": report.get("problem_devices", [])
                 }
             return report
+
+        elif name == "bintra_port_audit":
+            from windows_intelligence import PortInspector
+            port_name = args.get("port_name")
+            include_modem = args.get("include_modem_status", True)
+            p_type = args.get("port_type", "all")
+            if p_type == "parallel":
+                return PortInspector.audit_parallel_ports()
+            elif p_type == "serial":
+                return PortInspector.audit_serial_ports(include_modem_status=include_modem, target_port=port_name)
+            else:
+                return PortInspector.audit_all_ports(include_modem_status=include_modem)
+
+        elif name == "bintra_hardware_topology":
+            from windows_intelligence import NativeDeviceInspector
+            bus_filter = args.get("bus_filter")
+            problems_only = args.get("problems_only", False)
+            fmt = args.get("format", "tree")
+            max_devs = args.get("max_devices", 300)
+            return NativeDeviceInspector.build_device_topology(
+                max_devices=max_devs,
+                bus_filter=bus_filter,
+                problems_only=problems_only,
+                format=fmt
+            )
 
         elif name == "bintra_driver_audit":
             from windows_intelligence import KernelDriverInspector
@@ -2094,6 +2169,7 @@ class BintraMcpServer:
             win_tools = {
                 "bintra_windows_env_audit", "bintra_resolve_dependencies", "bintra_inspect_crash_reports",
                 "bintra_win_catalog_cmd", "bintra_registry_audit", "bintra_hardware_audit",
+                "bintra_port_audit", "bintra_hardware_topology",
                 "bintra_driver_audit", "bintra_service_audit", "bintra_etw_audit",
                 "bintra_vad_inspect", "bintra_memory_scan", "bintra_pointer_scan",
                 "bintra_struct_dissect", "bintra_etw_capture", "bintra_device_driver_intelligence",

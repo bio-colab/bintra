@@ -41,7 +41,7 @@ WEIGHT_COMMANDS = {
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless", "ghidra-bridge"}
-WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations"}
+WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "port-audit", "hw-tree", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations"}
 
 
 def print_help():
@@ -92,7 +92,9 @@ Windows System Intelligence & Failure Diagnostic Commands:
   diagnose          Correlate host OS environment, crash records, and PE structure into Evidence Dossier
   win-cmd           Safely execute pre-registered read-only Windows catalog commands (or 'list')
   reg-audit         Dual-view (32/64-bit) audit across 11 Windows Registry functional domains
-  hw-audit          Inspect live PnP devices and problem codes (CM_PROB_*) via SetupAPI & CfgMgr32
+  hw-audit          Inspect live PnP devices, problem codes (CM_PROB_*), and physical storage drives
+  port-audit        Audit active COM and LPT ports with USB bridge matching and modem line status
+  hw-tree           Render authoritative PnP bus hierarchy tree (ASCII tree, Mermaid, or JSON)
   driver-audit      Enumerate loaded kernel drivers and execution image bases via PSAPI
   service-audit     Inspect Windows Service Control Manager (SCM) service states via Advapi32
   dmp-inspect       Multi-stream MiniDump (.dmp) inspection and access violation root-cause analysis
@@ -560,6 +562,7 @@ def _dispatch_cli():
             parser.add_argument("command")
             parser.add_argument("--problems-only", action="store_true", help="Filter for devices with non-zero problem codes")
             parser.add_argument("--class-filter", default=None, help="Filter PnP devices by Setup class (e.g. MEDIA, Display, USB)")
+            parser.add_argument("--storage", action="store_true", help="Include physical storage drives and volume partition inspection")
             parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
             args = parser.parse_args()
 
@@ -581,6 +584,10 @@ def _dispatch_cli():
                 report["filtered_count"] = len(filtered)
             else:
                 report = NativeDeviceInspector.audit_hardware_health()
+
+            if args.storage:
+                report["storage_devices"] = NativeDeviceInspector.audit_storage_devices()
+
             if args.format == "md":
                 if report.get("status") == "not_applicable" or "is_hardware_healthy" not in report:
                     lines = [
@@ -601,7 +608,94 @@ def _dispatch_cli():
                         lines.append("\n## Faulting Devices (CM_PROB_*):")
                         for p in report["problem_devices"]:
                             lines.append(f"- **{p.get('name', 'Unknown')}**: `{p.get('problem_name', 'Unknown')}` (Service: `{p.get('service')}`)")
+                    if "storage_devices" in report and report["storage_devices"].get("status") == "success":
+                        st = report["storage_devices"]
+                        lines.append("\n## Physical Storage Drives:")
+                        for d in st.get("physical_drives", []):
+                            lines.append(f"- **Drive {d.get('drive_index')}** (`{d.get('bus_type')}`): `{d.get('product_id')}` (Rev: `{d.get('product_revision')}`)")
                 print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "port-audit":
+            parser = argparse.ArgumentParser(description="Live COM and LPT port audit via Windows kernel DEVICEMAP and PnP correlation")
+            parser.add_argument("command")
+            parser.add_argument("--port", default=None, help="Target specific port (e.g. COM1, COM3)")
+            parser.add_argument("--type", choices=["all", "serial", "parallel"], default="all", help="Filter by port type")
+            parser.add_argument("--no-modem-status", action="store_true", help="Disable non-disruptive DCB/modem control line queries")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args()
+
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="port-audit",
+                target=args.port or "AllPorts",
+                capability=Capability.DEVICE_QUERY,
+                access_mode="QUERY",
+            )
+            from windows_intelligence import PortInspector
+            inc_modem = not args.no_modem_status
+            if args.type == "serial":
+                report = PortInspector.audit_serial_ports(include_modem_status=inc_modem, target_port=args.port)
+            elif args.type == "parallel":
+                report = PortInspector.audit_parallel_ports()
+            else:
+                report = PortInspector.audit_all_ports(include_modem_status=inc_modem)
+
+            if args.format == "md":
+                if report.get("status") == "not_applicable":
+                    print(f"# Port Audit\n- **Status:** `not_applicable`\n- **Note:** {report.get('message')}")
+                else:
+                    lines = [
+                        "# Communication & Hardware Port Audit",
+                        f"- **Status:** `{report.get('status')}`",
+                        f"- **Active COM Ports:** {report.get('total_serial_ports', report.get('total_ports', 0))}",
+                        f"- **Parallel Ports (LPT):** {report.get('total_parallel_ports', 0)}",
+                    ]
+                    ports = report.get("ports") or report.get("serial_ports", [])
+                    if ports:
+                        lines.append("\n## Detected Communication Ports:")
+                        for p in ports:
+                            p_name = p.get("port_name", "Unknown")
+                            b_info = p.get("bridge_identity") or {}
+                            bridge_desc = f" ({b_info.get('controller_name', 'Standard')})" if b_info else ""
+                            lines.append(f"- **`{p_name}`**{bridge_desc}: Type `{p.get('port_type')}`, Path `{p.get('device_map_path')}`")
+                            if "comm_state" in p and p["comm_state"].get("status") == "active":
+                                cs = p["comm_state"]
+                                lines.append(f"  - Baud: {cs.get('baud_rate')}, DataBits: {cs.get('byte_size')}, Parity: {cs.get('parity')}, StopBits: {cs.get('stop_bits')}")
+                    print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "hw-tree":
+            parser = argparse.ArgumentParser(description="Authoritative PnP bus topology tree and directed hardware graph")
+            parser.add_argument("command")
+            parser.add_argument("--bus", default=None, help="Filter by bus or subsystem (e.g. USB, PCI, ACPI)")
+            parser.add_argument("--problems-only", action="store_true", help="Only render branches containing devices with error codes")
+            parser.add_argument("--format", choices=["tree", "json", "mermaid"], default="tree", help="Output format")
+            parser.add_argument("--max-devices", type=int, default=300, help="Maximum devices to query")
+            args = parser.parse_args()
+
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="hw-tree",
+                target=args.bus or "AllBuses",
+                capability=Capability.DEVICE_QUERY,
+                access_mode="QUERY",
+            )
+            from windows_intelligence import NativeDeviceInspector
+            report = NativeDeviceInspector.build_device_topology(
+                max_devices=args.max_devices,
+                bus_filter=args.bus,
+                problems_only=args.problems_only,
+                format=args.format
+            )
+            if args.format in ("tree", "mermaid"):
+                print(report.get("rendered", ""))
             else:
                 print(json.dumps(report, indent=2, ensure_ascii=False))
             return

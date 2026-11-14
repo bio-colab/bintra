@@ -37,7 +37,8 @@ from .system_introspection import (
     NativeDeviceInspector,
     KernelDriverInspector,
     ServiceManagerInspector,
-    ProcessMitigationInspector
+    ProcessMitigationInspector,
+    PortInspector
 )
 
 # Runtime Telemetry & Crash Intelligence Submodule (Phase 3)

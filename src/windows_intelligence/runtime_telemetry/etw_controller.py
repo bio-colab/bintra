@@ -97,6 +97,30 @@ class EtwController:
             "category": "AppCompat & Shims",
             "keywords": ["SHIM_APPLIED", "COMPAT_EVAL"],
             "diagnostic_value": "Traces AppCompatFlags runtime emulation layers applied to binaries."
+        },
+        "Microsoft-Windows-Kernel-PnP": {
+            "guid": "{9C205A39-1250-487D-ABD7-E831C62907E2}",
+            "category": "Hardware & PnP Lifecycle",
+            "keywords": ["PNP_ENUMERATION", "PNP_DRIVER_START", "PNP_PROBLEM"],
+            "diagnostic_value": "Tracks hardware device attachment, removal, driver binding, and CM_PROB_* errors."
+        },
+        "Microsoft-Windows-USB-USBHUB3": {
+            "guid": "{AC52AD17-CC01-4F07-BE22-83AAF68F7EF8}",
+            "category": "Hardware Ports (USB 3.0 Hub)",
+            "keywords": ["PORT_STATUS", "DEVICE_CONNECT", "POWER_STATE"],
+            "diagnostic_value": "Audits SuperSpeed USB 3.0 Hub port state transitions and peripheral handshakes."
+        },
+        "Microsoft-Windows-USB-UCX": {
+            "guid": "{36DA065A-25EF-42A7-BD1B-38BB878633D9}",
+            "category": "Hardware Ports (USB Host Controller)",
+            "keywords": ["CONTROLLER_RESET", "ENDPOINT_PIPE"],
+            "diagnostic_value": "Diagnoses USB host controller driver faults and endpoint pipe stalls."
+        },
+        "Microsoft-Windows-Kernel-Disk": {
+            "guid": "{C7BDE69A-E1E0-4142-B506-1E00F13196E6}",
+            "category": "Storage & Physical Disk",
+            "keywords": ["DISK_IO", "DRIVER_LATENCY"],
+            "diagnostic_value": "Measures physical disk I/O request packets, response latency, and storage hardware health."
         }
     }
     # Backward compatibility alias

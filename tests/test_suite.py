@@ -795,7 +795,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
         tools_res = server.handle_tools_list({})
         self.assertIn("tools", tools_res)
-        self.assertEqual(len(tools_res["tools"]), 42)
+        self.assertEqual(len(tools_res["tools"]), 44)
         tool_names = [t["name"] for t in tools_res["tools"]]
         self.assertIn("bintra_memory_scan", tool_names)
         self.assertIn("bintra_pointer_scan", tool_names)
@@ -1071,7 +1071,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
             with open(skill_file, "r", encoding="utf-8") as sf:
                 skill_content = sf.read()
                 self.assertTrue('version: "1.1.0"' in skill_content or 'version: "1.0.0"' in skill_content)
-                self.assertIn('tool_count: 42', skill_content)
+                self.assertIn('tool_count: 44', skill_content)
 
 
     def test_ssa_analyzer_negative_same_seq_different_address(self):

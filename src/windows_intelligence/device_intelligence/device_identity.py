@@ -51,6 +51,38 @@ KNOWN_USB_VENDORS = {
     "B58E": "Blue Microphones",
     "1038": "SteelSeries ApS",
     "0763": "M-Audio / Midiman",
+    # USB-to-UART / Serial / Microcontroller Bridge Vendors
+    "0403": "Future Technology Devices International, Ltd. (FTDI)",
+    "1A86": "QinHeng Electronics (CH340/CH341/CH343/CH347)",
+    "10C4": "Silicon Laboratories, Inc. (CP210x Family)",
+    "067B": "Prolific Technology, Inc. (PL2303)",
+    "04B4": "Cypress Semiconductor Corp. (USB-Serial / EZ-USB)",
+    "0483": "STMicroelectronics (Virtual COM Port / ST-Link)",
+    "303A": "Espressif Systems (ESP32 USB JTAG/Serial)",
+    "2E8A": "Raspberry Pi Trading Ltd (RP2040 / Pico CDC)",
+    "2341": "Arduino SA (CDC Serial)",
+    "1366": "SEGGER Microcontroller GmbH (J-Link CDC)",
+}
+
+KNOWN_SERIAL_BRIDGES = {
+    ("0403", "6001"): "FTDI FT232R USB-to-UART Bridge",
+    ("0403", "6010"): "FTDI FT2232D/H Dual USB-to-UART/FIFO",
+    ("0403", "6011"): "FTDI FT4232H Quad USB-to-UART",
+    ("0403", "6014"): "FTDI FT232H Hi-Speed Single Channel USB-to-UART",
+    ("0403", "6015"): "FTDI FT230X / FT231X Basic USB-UART",
+    ("1A86", "7523"): "QinHeng CH340 / CH340G USB-to-Serial",
+    ("1A86", "5523"): "QinHeng CH341 USB-to-Serial / Parallel",
+    ("1A86", "55D4"): "QinHeng CH343 High-Speed USB-to-UART",
+    ("10C4", "EA60"): "Silicon Labs CP2102/CP2103/CP2104 USB-to-UART Bridge",
+    ("10C4", "EA70"): "Silicon Labs CP2105 Dual USB-to-UART",
+    ("10C4", "EA71"): "Silicon Labs CP2108 Quad USB-to-UART",
+    ("067B", "2303"): "Prolific PL2303 USB-to-Serial Bridge",
+    ("067B", "23A3"): "Prolific PL2303GC USB-to-Serial Bridge",
+    ("0483", "374B"): "STMicroelectronics ST-LINK/V2.1 Virtual COM Port",
+    ("0483", "5740"): "STMicroelectronics Virtual COM Port (CDC)",
+    ("303A", "1001"): "Espressif ESP32-C3/S3 Built-in USB JTAG/Serial",
+    ("2E8A", "000A"): "Raspberry Pi Pico RP2040 USB CDC Serial",
+    ("2341", "0043"): "Arduino Uno R3 CDC Serial",
 }
 
 
@@ -162,6 +194,10 @@ class DeviceIdentity:
             elif "BTH\\" in hid_upper or "BTHENUM\\" in hid_upper:
                 bus_type = "BLUETOOTH"
 
+        serial_bridge = None
+        if vendor_id and device_id:
+            serial_bridge = KNOWN_SERIAL_BRIDGES.get((vendor_id.upper(), device_id.upper()))
+
         return {
             "device_name": dev_name,
             "device_class": cls_name,
@@ -170,6 +206,7 @@ class DeviceIdentity:
             "vendor_id": vendor_id,
             "vendor_name": vendor_name or device_record.get("manufacturer") or "Unknown Vendor",
             "device_id": device_id,
+            "serial_bridge_model": serial_bridge,
             "subsystem_id": subsys_id,
             "revision": revision,
             "primary_hardware_id": hw_ids[0] if hw_ids else None,

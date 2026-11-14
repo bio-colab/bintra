@@ -22,11 +22,71 @@ except ImportError:
     winreg = None
 
 
+class SOCKET_ADDRESS(ctypes.Structure):
+    _fields_ = [
+        ("lpSockaddr", ctypes.c_void_p),
+        ("iSockaddrLength", ctypes.c_int),
+    ]
+
+
+class IP_ADAPTER_UNICAST_ADDRESS(ctypes.Structure):
+    pass
+
+
+IP_ADAPTER_UNICAST_ADDRESS._fields_ = [
+    ("Length", wintypes.ULONG),
+    ("Flags", wintypes.DWORD),
+    ("Next", ctypes.POINTER(IP_ADAPTER_UNICAST_ADDRESS)),
+    ("Address", SOCKET_ADDRESS),
+    ("PrefixOrigin", ctypes.c_int),
+    ("SuffixOrigin", ctypes.c_int),
+    ("DadState", ctypes.c_int),
+    ("ValidLifetime", wintypes.ULONG),
+    ("PreferredLifetime", wintypes.ULONG),
+    ("LeaseLifetime", wintypes.ULONG),
+    ("OnLinkPrefixLength", ctypes.c_uint8),
+]
+
+
+class IP_ADAPTER_ADDRESSES(ctypes.Structure):
+    pass
+
+
+IP_ADAPTER_ADDRESSES._fields_ = [
+    ("Length", wintypes.ULONG),
+    ("IfIndex", wintypes.DWORD),
+    ("Next", ctypes.POINTER(IP_ADAPTER_ADDRESSES)),
+    ("AdapterName", ctypes.c_char_p),
+    ("FirstUnicastAddress", ctypes.POINTER(IP_ADAPTER_UNICAST_ADDRESS)),
+    ("FirstAnycastAddress", ctypes.c_void_p),
+    ("FirstMulticastAddress", ctypes.c_void_p),
+    ("FirstDnsServerAddress", ctypes.c_void_p),
+    ("DnsSuffix", wintypes.LPWSTR),
+    ("Description", wintypes.LPWSTR),
+    ("FriendlyName", wintypes.LPWSTR),
+    ("PhysicalAddress", ctypes.c_ubyte * 8),
+    ("PhysicalAddressLength", wintypes.DWORD),
+    ("Flags", wintypes.DWORD),
+    ("Mtu", wintypes.DWORD),
+    ("IfType", wintypes.DWORD),
+    ("OperStatus", ctypes.c_int),
+    ("Ipv6IfIndex", wintypes.DWORD),
+    ("ZoneIndices", wintypes.DWORD * 16),
+    ("FirstPrefix", ctypes.c_void_p),
+    ("TransmitLinkSpeed", ctypes.c_uint64),
+    ("ReceiveLinkSpeed", ctypes.c_uint64),
+]
+
+
 class NetworkHardwareInspector:
     """
     Authoritative read-only hardware intelligence engine for Windows network adapters
     and NDIS kernel driver reverse engineering.
     """
+
+    SOCKET_ADDRESS = SOCKET_ADDRESS
+    IP_ADAPTER_UNICAST_ADDRESS = IP_ADAPTER_UNICAST_ADDRESS
+    IP_ADAPTER_ADDRESSES = IP_ADAPTER_ADDRESSES
 
     IF_TYPE_NAMES = {
         1: "OTHER",
@@ -68,64 +128,22 @@ class NetworkHardwareInspector:
 
         try:
             iphlpapi = ctypes.WinDLL("iphlpapi", use_last_error=True)
+            # Authoritative Win32 API signature for GetAdaptersAddresses
+            iphlpapi.GetAdaptersAddresses.restype = wintypes.ULONG
+            iphlpapi.GetAdaptersAddresses.argtypes = [
+                wintypes.ULONG,
+                wintypes.ULONG,
+                ctypes.c_void_p,
+                ctypes.c_void_p,
+                ctypes.POINTER(wintypes.ULONG),
+            ]
         except Exception as e:
             return {
                 "status": "error",
-                "message": f"Failed to load iphlpapi.dll: {e}",
+                "message": f"Failed to initialize iphlpapi.dll Win32 API: {e}",
                 "total_adapters": 0,
                 "adapters": []
             }
-
-        class SOCKET_ADDRESS(ctypes.Structure):
-            _fields_ = [
-                ("lpSockaddr", ctypes.c_void_p),
-                ("iSockaddrLength", ctypes.c_int),
-            ]
-
-        class IP_ADAPTER_UNICAST_ADDRESS(ctypes.Structure):
-            pass
-
-        IP_ADAPTER_UNICAST_ADDRESS._fields_ = [
-            ("Length", wintypes.ULONG),
-            ("Flags", wintypes.DWORD),
-            ("Next", ctypes.POINTER(IP_ADAPTER_UNICAST_ADDRESS)),
-            ("Address", SOCKET_ADDRESS),
-            ("PrefixOrigin", ctypes.c_int),
-            ("SuffixOrigin", ctypes.c_int),
-            ("DadState", ctypes.c_int),
-            ("ValidLifetime", wintypes.ULONG),
-            ("PreferredLifetime", wintypes.ULONG),
-            ("LeaseLifetime", wintypes.ULONG),
-            ("OnLinkPrefixLength", ctypes.c_uint8),
-        ]
-
-        class IP_ADAPTER_ADDRESSES(ctypes.Structure):
-            pass
-
-        IP_ADAPTER_ADDRESSES._fields_ = [
-            ("Length", wintypes.ULONG),
-            ("IfIndex", wintypes.DWORD),
-            ("Next", ctypes.POINTER(IP_ADAPTER_ADDRESSES)),
-            ("AdapterName", ctypes.c_char_p),
-            ("FirstUnicastAddress", ctypes.POINTER(IP_ADAPTER_UNICAST_ADDRESS)),
-            ("FirstAnycastAddress", ctypes.c_void_p),
-            ("FirstMulticastAddress", ctypes.c_void_p),
-            ("FirstDnsServerAddress", ctypes.c_void_p),
-            ("DnsSuffix", wintypes.LPWSTR),
-            ("Description", wintypes.LPWSTR),
-            ("FriendlyName", wintypes.LPWSTR),
-            ("PhysicalAddress", ctypes.c_ubyte * 8),
-            ("PhysicalAddressLength", wintypes.DWORD),
-            ("Flags", wintypes.DWORD),
-            ("Mtu", wintypes.DWORD),
-            ("IfType", wintypes.DWORD),
-            ("OperStatus", ctypes.c_int),
-            ("Ipv6IfIndex", wintypes.DWORD),
-            ("ZoneIndices", wintypes.DWORD * 16),
-            ("FirstPrefix", ctypes.c_void_p),
-            ("TransmitLinkSpeed", ctypes.c_uint64),
-            ("ReceiveLinkSpeed", ctypes.c_uint64),
-        ]
 
         AF_UNSPEC = 0
         GAA_FLAG_INCLUDE_PREFIX = 0x0010
@@ -154,41 +172,64 @@ class NetworkHardwareInspector:
         curr = ctypes.cast(buf, ctypes.POINTER(IP_ADAPTER_ADDRESSES))
         while curr:
             addr = curr.contents
+
+            # 1. Length validation (Microsoft SDK versioning specification)
+            min_base_size = IP_ADAPTER_ADDRESSES.FirstPrefix.offset + ctypes.sizeof(ctypes.c_void_p)
+            if addr.Length < min_base_size:
+                curr = curr.contents.Next
+                continue
+
             name_guid = addr.AdapterName.decode("ascii", errors="ignore") if addr.AdapterName else ""
             friendly = addr.FriendlyName or ""
             desc = addr.Description or ""
             mac_len = min(addr.PhysicalAddressLength, 8)
             mac = "-".join(f"{b:02X}" for b in addr.PhysicalAddress[:mac_len]) if mac_len > 0 else ""
 
-            rx_speed = addr.ReceiveLinkSpeed
-            tx_speed = addr.TransmitLinkSpeed
-            # When unplugged, Windows returns ~18.4 TB/s (0xFFFFFFFFFFFFFFFF // 1M)
-            rx_mbps = round(rx_speed / 1_000_000, 1) if rx_speed < 10_000_000_000_000 else 0.0
-            tx_mbps = round(tx_speed / 1_000_000, 1) if tx_speed < 10_000_000_000_000 else 0.0
+            # Check if Length covers Vista+ speed fields
+            min_vista_size = IP_ADAPTER_ADDRESSES.ReceiveLinkSpeed.offset + ctypes.sizeof(ctypes.c_uint64)
+            if addr.Length >= min_vista_size:
+                rx_speed = addr.ReceiveLinkSpeed
+                tx_speed = addr.TransmitLinkSpeed
+                # When unplugged, Windows returns ~18.4 TB/s (0xFFFFFFFFFFFFFFFF // 1M)
+                rx_mbps = round(rx_speed / 1_000_000, 1) if rx_speed < 10_000_000_000_000 else 0.0
+                tx_mbps = round(tx_speed / 1_000_000, 1) if tx_speed < 10_000_000_000_000 else 0.0
+            else:
+                rx_mbps = 0.0
+                tx_mbps = 0.0
 
-            # Collect Unicast IP Addresses
+            # 2. Collect Unicast IP Addresses with Length validation
             ipv4_list = []
             ipv6_list = []
             u_curr = addr.FirstUnicastAddress
             while u_curr:
-                sa_ptr = u_curr.contents.Address.lpSockaddr
-                sa_len = u_curr.contents.Address.iSockaddrLength
-                if sa_ptr and sa_len >= 16:
-                    sa_family = ctypes.cast(sa_ptr, ctypes.POINTER(ctypes.c_uint16)).contents.value
-                    if sa_family == 2:  # AF_INET
-                        ip_raw = ctypes.string_at(sa_ptr + 4, 4)
-                        ipv4_list.append(socket.inet_ntoa(ip_raw))
-                    elif sa_family == 23 and sa_len >= 28:  # AF_INET6
-                        ip6_raw = ctypes.string_at(sa_ptr + 8, 16)
-                        ipv6_list.append(socket.inet_ntop(socket.AF_INET6, ip6_raw))
+                u_addr = u_curr.contents
+                min_u_size = IP_ADAPTER_UNICAST_ADDRESS.Address.offset + ctypes.sizeof(SOCKET_ADDRESS)
+                if u_addr.Length >= min_u_size:
+                    sa_ptr = u_addr.Address.lpSockaddr
+                    sa_len = u_addr.Address.iSockaddrLength
+                    if sa_ptr and sa_len >= 16:
+                        sa_family = ctypes.cast(sa_ptr, ctypes.POINTER(ctypes.c_uint16)).contents.value
+                        if sa_family == 2:  # AF_INET
+                            ip_raw = ctypes.string_at(sa_ptr + 4, 4)
+                            ipv4_list.append(socket.inet_ntoa(ip_raw))
+                        elif sa_family == 23 and sa_len >= 28:  # AF_INET6
+                            ip6_raw = ctypes.string_at(sa_ptr + 8, 16)
+                            ipv6_list.append(socket.inet_ntop(socket.AF_INET6, ip6_raw))
                 u_curr = u_curr.contents.Next
 
             if_type_name = cls.IF_TYPE_NAMES.get(addr.IfType, f"IF_TYPE_{addr.IfType}")
             oper_name = cls.OPER_STATUS_NAMES.get(addr.OperStatus, f"OPER_{addr.OperStatus}")
             is_wireless = (addr.IfType == 71)
-            is_virtual = ("virtual" in desc.lower() or "loopback" in desc.lower() or "miniport" in desc.lower())
 
-            if not include_virtual and is_virtual and not is_wireless:
+            # 3. Robust classification of virtual vs physical network adapters
+            is_virtual_type = (addr.IfType in (23, 24, 131))  # PPP, Software Loopback, Tunnel
+            desc_lower = desc.lower()
+            friendly_lower = friendly.lower()
+            virtual_keywords = ("virtual", "loopback", "wan miniport", "hyper-v", "vmware", "virtualbox", "tap-windows", "teredo", "wsl", "vpn")
+            is_virtual_name = any(kw in desc_lower or kw in friendly_lower for kw in virtual_keywords)
+            is_virtual = is_virtual_type or is_virtual_name
+
+            if not include_virtual and is_virtual:
                 curr = curr.contents.Next
                 continue
 
@@ -297,18 +338,36 @@ class NetworkHardwareInspector:
 
         # Select highest scored device, or fallback to first physical PCIe net adapter
         target_pnp = None
-        if scored_candidates:
+        selection_method = "UNKNOWN"
+        match_confidence = 0.0
+
+        for d in pnp_devs:
+            inst_id = str(d.get("device_instance_id") or "").lower()
+            hw_id = str(d.get("hardware_id") or "").lower()
+            svc = str(d.get("service") or "").lower()
+            if q_norm and (q_norm == inst_id or q_norm == hw_id or (svc and q_norm == svc)):
+                target_pnp = d
+                selection_method = "EXACT_IDENTIFIER_MATCH"
+                match_confidence = 1.0
+                break
+
+        if not target_pnp and scored_candidates:
             scored_candidates.sort(key=lambda x: x[0], reverse=True)
-            target_pnp = scored_candidates[0][1]
-        else:
+            top_score, target_pnp = scored_candidates[0]
+            selection_method = "HEURISTIC_WEIGHTED_CANDIDATE_MATCH"
+            match_confidence = min(round(top_score / 100.0, 2), 0.99)
+        elif not target_pnp:
             for d in pnp_devs:
                 if "PCI\\" in str(d.get("device_instance_id", "")).upper():
                     target_pnp = d
+                    selection_method = "FALLBACK_FIRST_PHYSICAL_PCIE"
+                    match_confidence = 0.50
                     break
 
         if not target_pnp:
             return {
                 "status": "error",
+                "dossier_completeness": "TARGET_NOT_FOUND",
                 "message": f"No network device matching query '{target_query}' found."
             }
 
@@ -453,46 +512,107 @@ class NetworkHardwareInspector:
                 "imported_modules": imports_summary,
             }
 
+        # Compile Layer 1: Physical DevNode & PCIe Topology
+        l1_data = {
+            "device_instance_id": target_pnp.get("device_instance_id"),
+            "hardware_id": target_pnp.get("hardware_id"),
+            "hardware_ids": target_pnp.get("hardware_ids", []),
+            "compatible_ids": target_pnp.get("compatible_ids", []),
+            "class": target_pnp.get("class"),
+            "parent_device_id": target_pnp.get("parent_device_id"),
+            "is_started": target_pnp.get("is_started"),
+            "has_problem": target_pnp.get("has_problem"),
+            "problem_code": target_pnp.get("problem_code"),
+            "problem_description": target_pnp.get("problem_description"),
+            "bus_type": "PCIe" if "pci\\" in str(target_pnp.get("device_instance_id", "")).lower() else ("USB" if "usb\\" in str(target_pnp.get("device_instance_id", "")).lower() else "OTHER"),
+        }
+        l1_status = "COMPLETE" if l1_data.get("device_instance_id") else "UNAVAILABLE"
+        l1_data["layer_status"] = l1_status
+
+        # Compile Layer 2: NDIS Stack & Link Layer Telemetry
+        if matched_ip_adapter:
+            l2_data = dict(matched_ip_adapter)
+            l2_status = "COMPLETE"
+        else:
+            l2_data = {
+                "message": "No matching active NDIS IP interface could be correlated."
+            }
+            l2_status = "UNAVAILABLE"
+        l2_data["layer_status"] = l2_status
+
+        # Compile Layer 3: PnP Driver Registry & INF Provenance
+        has_reg = bool(driver_reg_info.get("DriverVersion") or driver_reg_info.get("DriverDesc"))
+        l3_data = {
+            "driver_key": driver_key,
+            "driver_description": driver_reg_info.get("DriverDesc"),
+            "driver_version": driver_reg_info.get("DriverVersion"),
+            "driver_date": driver_reg_info.get("DriverDate"),
+            "provider_name": driver_reg_info.get("ProviderName"),
+            "net_cfg_instance_id": driver_reg_info.get("NetCfgInstanceId"),
+            "inf_path": driver_reg_info.get("InfPath"),
+            "characteristics": driver_reg_info.get("Characteristics"),
+            "bus_type": driver_reg_info.get("BusType"),
+        }
+        l3_status = "COMPLETE" if has_reg else "UNAVAILABLE"
+        l3_data["layer_status"] = l3_status
+
+        # Compile Layer 4: SCM Driver Service State
+        has_scm = bool(svc_name and (svc_state or scm_config))
+        l4_data = {
+            "service_name": svc_name,
+            "display_name": scm_config.get("display_name") if scm_config else (svc_state.get("display_name") if svc_state else None),
+            "state": svc_state.get("state") if svc_state else "UNKNOWN",
+            "start_type": scm_config.get("start_type") if scm_config else None,
+            "binary_path": scm_config.get("binary_path") if scm_config else None,
+        }
+        l4_status = "COMPLETE" if has_scm else "UNAVAILABLE"
+        l4_data["layer_status"] = l4_status
+
+        # Compile Layer 5: Kernel Driver PE32+ Binary Forensics
+        has_l5 = bool(binary_dissection.get("format") and binary_dissection.get("sections"))
+        l5_data = dict(binary_dissection) if has_l5 else {
+            "driver_file_path": driver_file_path,
+            "message": "Driver binary could not be located on disk or parsed as PE32+."
+        }
+        l5_status = "COMPLETE" if has_l5 else "UNAVAILABLE"
+        l5_data["layer_status"] = l5_status
+
+        # Compile Layer 6: Ring-0 Kernel Runtime Memory & KASLR Displacement
+        has_l6 = bool(kaslr_analysis.get("kaslr_slide_hex"))
+        l6_data = dict(kaslr_analysis) if has_l6 else {
+            "message": "Kernel driver is not currently loaded or live memory base could not be resolved via PSAPI."
+        }
+        l6_status = "COMPLETE" if has_l6 else "UNAVAILABLE"
+        l6_data["layer_status"] = l6_status
+        l6_data["kaslr_scope"] = "STATIC_DYNAMIC_BASE_DISPLACEMENT"
+        l6_data["note"] = "KASLR slide represents the displacement between the PE preferred ImageBase and the live driver kernel base reported by PSAPI; does not perform direct ring-0 memory dereference."
+
+        # Evaluate Overall Multi-Layer Completeness
+        layer_statuses = [l1_status, l2_status, l3_status, l4_status, l5_status, l6_status]
+        complete_count = layer_statuses.count("COMPLETE")
+        if complete_count == 6:
+            overall_status = "SUCCESS"
+            dossier_completeness = "FULL_6_LAYER_TRACE"
+        elif complete_count >= 1:
+            overall_status = "PARTIAL"
+            dossier_completeness = f"PARTIAL_TRACE_{complete_count}_OF_6"
+        else:
+            overall_status = "UNAVAILABLE"
+            dossier_completeness = "ZERO_LAYERS_RESOLVED"
+
         return {
-            "status": "success",
+            "status": overall_status,
+            "dossier_completeness": dossier_completeness,
+            "selection_method": selection_method,
+            "match_confidence": match_confidence,
             "target_query": target_query,
             "device_name": target_pnp.get("name"),
-            "layer_1_physical_bus": {
-                "device_instance_id": target_pnp.get("device_instance_id"),
-                "hardware_id": target_pnp.get("hardware_id"),
-                "hardware_ids": target_pnp.get("hardware_ids"),
-                "compatible_ids": target_pnp.get("compatible_ids"),
-                "class": target_pnp.get("class"),
-                "parent_device_id": target_pnp.get("parent_device_id"),
-                "is_started": target_pnp.get("is_started"),
-                "has_problem": target_pnp.get("has_problem"),
-                "problem_code": target_pnp.get("problem_code"),
-                "problem_description": target_pnp.get("problem_description"),
-            },
-            "layer_2_ndis_telemetry": matched_ip_adapter or {
-                "status": "not_correlated",
-                "message": "No matching active IP interface could be correlated."
-            },
-            "layer_3_driver_registry": {
-                "driver_key": driver_key,
-                "driver_description": driver_reg_info.get("DriverDesc"),
-                "driver_version": driver_reg_info.get("DriverVersion"),
-                "driver_date": driver_reg_info.get("DriverDate"),
-                "provider_name": driver_reg_info.get("ProviderName"),
-                "net_cfg_instance_id": driver_reg_info.get("NetCfgInstanceId"),
-                "inf_path": driver_reg_info.get("InfPath"),
-                "characteristics": driver_reg_info.get("Characteristics"),
-                "bus_type": driver_reg_info.get("BusType"),
-            },
-            "layer_4_scm_service": {
-                "service_name": svc_name,
-                "display_name": scm_config.get("display_name") if scm_config else (svc_state.get("display_name") if svc_state else None),
-                "state": svc_state.get("state") if svc_state else "UNKNOWN",
-                "start_type": scm_config.get("start_type") if scm_config else None,
-                "binary_path": scm_config.get("binary_path") if scm_config else None,
-            },
-            "layer_5_driver_binary_forensics": binary_dissection,
-            "layer_6_runtime_kaslr": kaslr_analysis,
+            "layer_1_physical_bus": l1_data,
+            "layer_2_ndis_telemetry": l2_data,
+            "layer_3_driver_registry": l3_data,
+            "layer_4_scm_service": l4_data,
+            "layer_5_driver_binary_forensics": l5_data,
+            "layer_6_runtime_kaslr": l6_data,
             "epistemic_scope": "MULTI_LAYER_HARDWARE_TO_KERNEL_CORRELATION",
-            "epistemic_classification": "DETERMINISTIC_HARDWARE_REVERSE_ENGINEERING"
+            "epistemic_classification": "CORRELATED_STATIC_AND_RUNTIME_DEVICE_TRACE"
         }

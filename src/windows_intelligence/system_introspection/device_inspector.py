@@ -95,7 +95,7 @@ class NativeDeviceInspector:
         52: "CM_PROB_UNSIGNED_DRIVER (Cannot verify digital signature for drivers)",
         53: "CM_PROB_USED_BY_DEBUGGER (Device disabled because kernel debugger uses it)",
         54: "CM_PROB_DEVICE_RESET (Device is not working properly because Windows cannot reset it)",
-        55: "CM_PROB_CONSOLE_LOCK (Console lock required)",
+        55: "CM_PROB_CONSOLE_LOCKED (Console lock required / Session locked)",
         56: "CM_PROB_NEED_CLASS_CONFIG (Device class configuration in progress)",
         57: "CM_PROB_GUEST_ASSIGNMENT_FAILED (Guest assignment failed)",
     }
@@ -184,7 +184,7 @@ class NativeDeviceInspector:
         52: "CM_PROB_UNSIGNED_DRIVER",
         53: "CM_PROB_USED_BY_DEBUGGER",
         54: "CM_PROB_DEVICE_RESET",
-        55: "CM_PROB_CONSOLE_LOCK",
+        55: "CM_PROB_CONSOLE_LOCKED",
         56: "CM_PROB_NEED_CLASS_CONFIG",
         57: "CM_PROB_GUEST_ASSIGNMENT_FAILED",
     }

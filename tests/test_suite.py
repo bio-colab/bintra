@@ -1057,21 +1057,21 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         pyproj = os.path.join(repo_root, "pyproject.toml")
         with open(pyproj, "r", encoding="utf-8") as f:
             pyproj_text = f.read()
-            self.assertTrue('version = "1.1.0"' in pyproj_text or 'version = "1.0.0"' in pyproj_text)
+            self.assertIn('version = "1.1.0"', pyproj_text)
         # package.json
         pkg_json = os.path.join(repo_root, "package.json")
         with open(pkg_json, "r", encoding="utf-8") as f:
-            self.assertIn(json.load(f)["version"], ("1.1.0", "1.0.0"))
+            self.assertEqual(json.load(f)["version"], "1.1.0")
         # mcp_server.py
         from mcp_server import SERVER_VERSION
-        self.assertIn(SERVER_VERSION, ("1.1.0", "1.0.0"))
+        self.assertEqual(SERVER_VERSION, "1.1.0")
         # SKILL.md
         skill_file = os.path.join(repo_root, "skills", "bintra", "SKILL.md")
         if os.path.exists(skill_file):
             with open(skill_file, "r", encoding="utf-8") as sf:
                 skill_content = sf.read()
-                self.assertTrue('version: "1.1.0"' in skill_content or 'version: "1.0.0"' in skill_content)
-                self.assertTrue('tool_count: 46' in skill_content or 'tool_count: 44' in skill_content)
+                self.assertIn('version: "1.1.0"', skill_content)
+                self.assertIn('tool_count: 46', skill_content)
 
 
     def test_ssa_analyzer_negative_same_seq_different_address(self):

@@ -21,7 +21,7 @@ Launch the native zero-dependency MCP server via stdio:
   }
 }
 ```
-Exposes **44 type-safe tools**:
+Exposes **46 type-safe tools**:
 - **Core Binary & Decompilation (13 Tools):** `bintra_inspect_binary`, `bintra_dump_bytes`, `bintra_deobfuscate_binary`, `bintra_match_functions`, `bintra_patch_binary`, `bintra_scan_hybrid`, `bintra_sensory_audit`, `bintra_match_pcode`, `bintra_deobfuscate_pcode`, `bintra_ghidra_analyze`, `bintra_ghidra_headless`, `bintra_wsp_audit`, `bintra_patch_weights`.
 - **Windows System Intelligence & Forensics (16 Tools):** `bintra_windows_env_audit`, `bintra_resolve_dependencies`, `bintra_inspect_crash_reports`, `bintra_correlate_failure_evidence`, `bintra_win_catalog_cmd`, `bintra_registry_audit`, `bintra_hardware_audit`, `bintra_port_audit`, `bintra_hardware_topology`, `bintra_driver_audit`, `bintra_service_audit`, `bintra_dmp_inspect`, `bintra_etw_audit`, `bintra_evidence_graph`, `bintra_device_driver_intelligence`, `bintra_process_resource_audit`.
 - **Runtime Telemetry, Crash RCA & Live Ghidra Bridge (7 Tools):** `bintra_vad_inspect`, `bintra_memory_scan`, `bintra_pointer_scan`, `bintra_struct_dissect`, `bintra_crash_rca`, `bintra_etw_capture`, `bintra_ghidra_live_bridge`.
@@ -180,7 +180,7 @@ All 6 new tools below are **strictly read-only** (`cap.file.read`) and work **cr
 
 | MCP Tool | CLI Command | Purpose |
 |:---|:---|:---|
-| `bintra_list_capabilities` | `bintra capabilities` | Self-describing JSON manifest of all 44 tools, environment compatibility (`cross_platform` / `windows_native` / `ghidra_required`), and workflows. |
+| `bintra_list_capabilities` | `bintra capabilities` | Self-describing JSON manifest of all 46 tools, environment compatibility (`cross_platform` / `windows_native` / `ghidra_required`), and workflows. |
 | `bintra_pe_deep_forensics` | `bintra pe-forensics` | x64 `.pdata` `RUNTIME_FUNCTION` boundary recovery, MSVC RTTI (`TypeDescriptor`, `CompleteObjectLocator`, `vftable`), and offline local PDB/RSDS verification. |
 | `bintra_binary_diff` | `bintra diff-binaries` | Semantic diffing across two PE binaries or two Ghidra exports (WL-CFG subtree hash + 64-D P-Code cosine + API/String anchor Jaccard). |
 | `bintra_ghidra_call_graph` | `bintra ghidra-callgraph` | Caller/callee topology, indirect calls, XREFs, and sensitive Win32 API reachability paths. |

@@ -35,7 +35,7 @@ class TestHardwareIntelligenceAudit(unittest.TestCase):
             52: "CM_PROB_UNSIGNED_DRIVER",
             53: "CM_PROB_USED_BY_DEBUGGER",
             54: "CM_PROB_DEVICE_RESET",
-            55: "CM_PROB_CONSOLE_LOCK",
+            55: "CM_PROB_CONSOLE_LOCKED",
             56: "CM_PROB_NEED_CLASS_CONFIG",
             57: "CM_PROB_GUEST_ASSIGNMENT_FAILED",
         }

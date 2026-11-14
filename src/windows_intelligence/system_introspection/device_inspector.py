@@ -382,6 +382,7 @@ class NativeDeviceInspector:
                 "status": "not_applicable",
                 "platform": sys.platform,
                 "reason": "NativeDeviceInspector requires a Windows NT host.",
+                "format": format,
                 "total_nodes": 0,
                 "roots": [],
                 "rendered": ""

@@ -276,6 +276,18 @@ class PortInspector:
         """
         Unified audit combining serial COM ports, parallel ports, and detected hardware controllers.
         """
+        if os.name != "nt":
+            return {
+                "status": "not_applicable",
+                "host_os": sys.platform,
+                "message": "Port inspection requires a Windows NT host.",
+                "total_ports": 0,
+                "serial_ports_count": 0,
+                "serial_ports": [],
+                "parallel_ports_count": 0,
+                "parallel_ports": [],
+            }
+
         ser = cls.audit_serial_ports(include_modem_status=include_modem_status)
         par = cls.audit_parallel_ports()
 

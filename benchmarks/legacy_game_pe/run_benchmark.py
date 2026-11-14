@@ -98,6 +98,7 @@ def run_benchmark(target_path: str, output_json: str, output_report: str) -> Dic
         "deep_forensics": {
             "architecture": deep_forensics.get("architecture"),
             "rtti_type_descriptors_count": deep_forensics.get("msvc_rtti", {}).get("type_descriptors_count"),
+            "rtti_class_hierarchy_descriptors_count": deep_forensics.get("msvc_rtti", {}).get("class_hierarchy_descriptors_count"),
             "rtti_vftables_count": deep_forensics.get("msvc_rtti", {}).get("vftables_count"),
             "rtti_classes_sample": [
                 t.get("demangled_hint")
@@ -218,9 +219,21 @@ if __name__ == "__main__":
     parser.add_argument("--out-report", default="benchmarks/legacy_game_pe/README.md")
     args = parser.parse_args()
 
-    if not args.target:
+    target = args.target
+    if not target:
+        try:
+            from target_helper import get_target_binary_path
+            target = get_target_binary_path()
+        except ImportError:
+            try:
+                from benchmarks.legacy_game_pe.target_helper import get_target_binary_path
+                target = get_target_binary_path()
+            except ImportError:
+                pass
+
+    if not target:
         print("[!] Target path not provided via --target or BINTRA_TARGET_PE environment variable.")
         sys.exit(1)
 
-    res = run_benchmark(args.target, args.out_json, args.out_report)
+    res = run_benchmark(target, args.out_json, args.out_report)
     print(f"[+] Benchmark completed successfully! Verdict: {res['dependency_resolution']['verdict']}")

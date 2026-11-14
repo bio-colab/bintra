@@ -77,7 +77,9 @@ def _parse_pe_layout(data: bytes) -> Dict[str, Any]:
         if entry_off + 40 > len(data):
             break
         raw_name = data[entry_off:entry_off + 8]
-        name = raw_name.split(b"\x00", 1)[0].decode("ascii", errors="replace")
+        name = raw_name.rstrip(b"\x00").replace(b"\x00", b"").decode("ascii", errors="replace")
+        if not name:
+            name = f"sec_{i}"
         vsize, va, rsize, roff, _, _, _, _, chars = struct.unpack_from("<IIIIIIHHI", data, entry_off + 8)
         sections.append({
             "name": name,
@@ -260,8 +262,58 @@ class PeDeepForensicsInspector:
         # 2. Scan .rdata / .data for CompleteObjectLocator (COL) structs pointing to discovered TypeDescriptors
         col_matches: List[Dict[str, Any]] = []
         vftables: List[Dict[str, Any]] = []
+        class_hierarchy_descriptors: Dict[str, Dict[str, Any]] = {}
         ptr_size = 8 if is_pe64 else 4
         ptr_fmt = "<Q" if is_pe64 else "<I"
+
+        def _parse_chd(chd_addr: int) -> Optional[Dict[str, Any]]:
+            if chd_addr == 0:
+                return None
+            chd_rva = chd_addr if is_pe64 else _va_to_rva(chd_addr, image_base)
+            if chd_rva < 0:
+                return None
+            chd_off = _rva_to_offset(chd_rva, sections)
+            if chd_off is None or chd_off + 16 > len(data):
+                return None
+            sig, attr, num_base, p_base_arr = struct.unpack_from("<IIII", data, chd_off)
+            if sig != 0 or num_base == 0 or num_base > 128:
+                return None
+            base_arr_rva = p_base_arr if is_pe64 else _va_to_rva(p_base_arr, image_base)
+            if base_arr_rva < 0:
+                return None
+            base_arr_off = _rva_to_offset(base_arr_rva, sections)
+            if base_arr_off is None or base_arr_off + num_base * 4 > len(data):
+                return None
+
+            base_classes = []
+            for i in range(num_base):
+                p_bcd = struct.unpack_from("<I", data, base_arr_off + i * 4)[0]
+                bcd_rva = p_bcd if is_pe64 else _va_to_rva(p_bcd, image_base)
+                if bcd_rva < 0:
+                    continue
+                bcd_off = _rva_to_offset(bcd_rva, sections)
+                if bcd_off is None or bcd_off + 24 > len(data):
+                    continue
+                p_td, num_cont, mdisp, pdisp, vdisp, bcd_attr = struct.unpack_from("<IIiiiI", data, bcd_off)
+                td_rva = p_td if is_pe64 else _va_to_rva(p_td, image_base)
+                td_info = type_descriptors.get(td_rva, {})
+                base_classes.append({
+                    "td_rva": hex(td_rva) if td_rva >= 0 else None,
+                    "td_va": hex(image_base + td_rva) if td_rva >= 0 else None,
+                    "mangled_name": td_info.get("mangled_name", "unknown"),
+                    "demangled_hint": td_info.get("demangled_hint", "unknown"),
+                    "num_contained_bases": num_cont,
+                    "displacement": {"mdisp": mdisp, "pdisp": pdisp, "vdisp": vdisp},
+                    "attributes": bcd_attr,
+                })
+            return {
+                "chd_rva": hex(chd_rva),
+                "chd_va": hex(image_base + chd_rva),
+                "signature": sig,
+                "attributes": attr,
+                "num_base_classes": num_base,
+                "base_classes": base_classes,
+            }
 
         col_rvas: Dict[int, Dict[str, Any]] = {}
         for sec in sections:
@@ -276,6 +328,9 @@ class PeDeepForensicsInspector:
                     if sig == 1 and p_td in type_descriptors:
                         actual_rva = _off_to_rva(off)
                         if actual_rva is not None and p_self == actual_rva:
+                            chd = _parse_chd(p_cd)
+                            if chd:
+                                class_hierarchy_descriptors[chd["chd_va"]] = chd
                             entry = {
                                 "col_rva": hex(actual_rva),
                                 "col_va": hex(image_base + actual_rva),
@@ -284,6 +339,7 @@ class PeDeepForensicsInspector:
                                 "vtable_offset": v_off,
                                 "cd_offset": cd_off,
                                 "class_hierarchy_rva": hex(p_cd),
+                                "class_hierarchy": chd,
                             }
                             col_rvas[image_base + actual_rva] = entry
                             col_matches.append(entry)
@@ -297,6 +353,9 @@ class PeDeepForensicsInspector:
                     if sig == 0 and p_td_rva in type_descriptors:
                         actual_rva = _off_to_rva(off)
                         if actual_rva is not None:
+                            chd = _parse_chd(p_cd_va)
+                            if chd:
+                                class_hierarchy_descriptors[chd["chd_va"]] = chd
                             entry = {
                                 "col_rva": hex(actual_rva),
                                 "col_va": hex(image_base + actual_rva),
@@ -305,6 +364,7 @@ class PeDeepForensicsInspector:
                                 "vtable_offset": v_off,
                                 "cd_offset": cd_off,
                                 "class_hierarchy_va": hex(p_cd_va),
+                                "class_hierarchy": chd,
                             }
                             col_rvas[image_base + actual_rva] = entry
                             col_matches.append(entry)
@@ -343,6 +403,8 @@ class PeDeepForensicsInspector:
                                 "demangled_hint": col_rvas[cand_col_va]["demangled_hint"],
                                 "vftable_rva": hex(vft_rva) if vft_rva is not None else None,
                                 "vftable_va": hex(image_base + vft_rva) if vft_rva is not None else None,
+                                "col_va": hex(cand_col_va),
+                                "class_hierarchy": col_rvas[cand_col_va].get("class_hierarchy"),
                                 "method_count": len(methods),
                                 "method_vas_sample": methods[:16],
                             })
@@ -352,9 +414,11 @@ class PeDeepForensicsInspector:
         return {
             "type_descriptors_count": len(type_descriptors),
             "complete_object_locators_count": len(col_matches),
+            "class_hierarchy_descriptors_count": len(class_hierarchy_descriptors),
             "vftables_count": len(vftables),
             "type_descriptors": list(type_descriptors.values())[:limit],
             "complete_object_locators": col_matches[:limit],
+            "class_hierarchy_descriptors": list(class_hierarchy_descriptors.values())[:limit],
             "vftables": vftables[:limit],
         }
 

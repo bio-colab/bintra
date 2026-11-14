@@ -75,6 +75,7 @@
   "deep_forensics": {
     "architecture": "x86 (PE32)",
     "rtti_type_descriptors_count": 12,
+    "rtti_class_hierarchy_descriptors_count": 2,
     "rtti_vftables_count": 2,
     "rtti_classes_sample": [
       "class INIException",
@@ -94,6 +95,29 @@
         "demangled_hint": "class type_info",
         "vftable_rva": "0x56ac80",
         "vftable_va": "0x96ac80",
+        "col_va": "0x96af10",
+        "class_hierarchy": {
+          "chd_rva": "0x56af00",
+          "chd_va": "0x96af00",
+          "signature": 0,
+          "attributes": 0,
+          "num_base_classes": 1,
+          "base_classes": [
+            {
+              "td_rva": "0x626ca0",
+              "td_va": "0xa26ca0",
+              "mangled_name": ".?AVtype_info@@",
+              "demangled_hint": "class type_info",
+              "num_contained_bases": 0,
+              "displacement": {
+                "mdisp": 0,
+                "pdisp": -1,
+                "vdisp": 0
+              },
+              "attributes": 0
+            }
+          ]
+        },
         "method_count": 1,
         "method_vas_sample": [
           "0x8e0562"
@@ -104,6 +128,29 @@
         "demangled_hint": "class _com_error",
         "vftable_rva": "0x56ac88",
         "vftable_va": "0x96ac88",
+        "col_va": "0x96af58",
+        "class_hierarchy": {
+          "chd_rva": "0x56af48",
+          "chd_va": "0x96af48",
+          "signature": 0,
+          "attributes": 0,
+          "num_base_classes": 1,
+          "base_classes": [
+            {
+              "td_rva": "0x626cd8",
+              "td_va": "0xa26cd8",
+              "mangled_name": ".?AV_com_error@@",
+              "demangled_hint": "class _com_error",
+              "num_contained_bases": 0,
+              "displacement": {
+                "mdisp": 0,
+                "pdisp": -1,
+                "vdisp": 0
+              },
+              "attributes": 0
+            }
+          ]
+        },
         "method_count": 1,
         "method_vas_sample": [
           "0x8e0954"

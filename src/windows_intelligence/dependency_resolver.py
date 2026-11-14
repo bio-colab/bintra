@@ -219,6 +219,11 @@ class WindowsDependencyResolver:
         )
         imports = custom_imports if custom_imports is not None else pe_info.get("imports", {}).get("modules", {})
         known_dlls = cls.get_known_dlls()
+        app_dirs_to_skip = {
+            os.path.abspath(d)
+            for d in (app_dir, os.path.dirname(os.path.abspath(binary_path)))
+            if d
+        }
 
         resolved_modules = []
         missing_modules = []
@@ -230,8 +235,12 @@ class WindowsDependencyResolver:
             is_known = dll_name.lower() in known_dlls
             search_name = cls.resolve_api_set_target(dll_name) if is_virtual_api_set else dll_name
 
-            # KnownDLLs are loaded directly from system directory
-            effective_search_dirs = search_dirs[1:] if is_known else search_dirs
+            # KnownDLLs are loaded directly from system directory, bypassing all application directories
+            effective_search_dirs = (
+                [d for d in search_dirs if os.path.abspath(d) not in app_dirs_to_skip]
+                if is_known
+                else search_dirs
+            )
             located_path = cls.locate_dll(search_name, effective_search_dirs)
 
             if not located_path:

@@ -44,6 +44,9 @@ class TestLegacyPeFieldValidation(unittest.TestCase):
         self.assertIn(".rdata", section_names)
         self.assertIn(".data", section_names)
         self.assertIn(".rsrc", section_names)
+        self.assertIn("Px7774", section_names)
+        for sname in section_names:
+            self.assertNotIn("\x00", sname)
 
         # 3. WOW64 Dependency Audit
         dep = data["dependency_resolution"]
@@ -57,6 +60,7 @@ class TestLegacyPeFieldValidation(unittest.TestCase):
         rtti = data["deep_forensics"]
         self.assertGreaterEqual(rtti["rtti_type_descriptors_count"], 10)
         self.assertIn("class INIException", rtti["rtti_classes_sample"])
+        self.assertGreaterEqual(rtti.get("rtti_class_hierarchy_descriptors_count", 0), 2)
 
         # 5. Semantic Diffing
         diff = data["semantic_binary_diff"]
@@ -64,8 +68,19 @@ class TestLegacyPeFieldValidation(unittest.TestCase):
         self.assertEqual(diff["pe_semantic_similarity"], 1.0)
         self.assertGreaterEqual(diff["identical_functions_count"], 100)
 
-        # 6. Strict Privacy & Zero Path Leakage Assertions
-        for text in (json.dumps(data), report_text):
+        # 6. Dossier & Extended Reports Verification
+        dossier_path = os.path.join(repo_root, "benchmarks", "legacy_game_pe", "DEEP_FORENSICS_DOSSIER.md")
+        cfg_path = os.path.join(repo_root, "benchmarks", "legacy_game_pe", "CFG_DEOBFUSCATION_REPORT.md")
+        self.assertTrue(os.path.isfile(dossier_path), f"Missing dossier: {dossier_path}")
+        self.assertTrue(os.path.isfile(cfg_path), f"Missing cfg report: {cfg_path}")
+
+        with open(dossier_path, "r", encoding="utf-8") as f:
+            dossier_text = f.read()
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg_text = f.read()
+
+        # 7. Strict Privacy & Zero Path Leakage Assertions
+        for text in (json.dumps(data), report_text, dossier_text, cfg_text):
             self.assertNotIn("R.G. Mechanics", text)
             self.assertNotIn("R.G.", text)
             self.assertNotIn("Mechanics", text)

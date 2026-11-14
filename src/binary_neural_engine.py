@@ -19,11 +19,11 @@ import mmap
 import math
 import tempfile
 import io
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional, Union
 import numpy as np
 try:
     import capstone
-    from capstone import Cs, CS_ARCH_X86, CS_MODE_64, CS_ARCH_ARM64, CS_MODE_ARM
+    from capstone import Cs, CS_ARCH_X86, CS_MODE_64, CS_MODE_32, CS_ARCH_ARM64, CS_MODE_ARM
     HAS_CAPSTONE = True
 except ImportError:
     HAS_CAPSTONE = False
@@ -128,7 +128,7 @@ class BinaryFormatInspector:
         return sha.hexdigest()
 
     @staticmethod
-    def calculate_pe_checksum(file_bytes: bytearray, pe_offset: int) -> int:
+    def calculate_pe_checksum(file_bytes: Union[bytearray, bytes], pe_offset: int) -> int:
         """Computes official Microsoft PE image checksum as defined by CheckSumMappedFile."""
         checksum_offset = pe_offset + 24 + 64
         temp = bytearray(file_bytes)
@@ -284,7 +284,7 @@ class BinaryFormatInspector:
                 sec_bytes = sec_table_bytes[idx * 40 : (idx + 1) * 40]
                 if len(sec_bytes) < 40:
                     break
-                sec_name = sec_bytes[:8].rstrip(b"\x00").decode("latin-1", errors="ignore")
+                sec_name = sec_bytes[:8].rstrip(b"\x00").replace(b"\x00", b"").decode("latin-1", errors="ignore")
                 vsize, vaddr, raw_size, raw_ptr, _, _, _, _, chars = struct.unpack("<IIIIIIHHI", sec_bytes[8:])
 
                 sec_entropy = 0.0
@@ -1104,14 +1104,45 @@ class ContinuousDeobfuscator:
         return False, None
 
     @staticmethod
-    def analyze_opaque_predicates(code_bytes: bytes) -> List[Dict[str, Any]]:
+    def analyze_opaque_predicates(
+        code_bytes: bytes,
+        is_64bit: Optional[bool] = None
+    ) -> List[Dict[str, Any]]:
         """Identifies genuine algebraic zeroing predicates with strict instruction-boundary disassembly."""
         findings = []
 
         if HAS_CAPSTONE:
             try:
-                md = Cs(CS_ARCH_X86, CS_MODE_64)
-                instructions = list(md.disasm(code_bytes, 0))
+                if is_64bit is True:
+                    mode = CS_MODE_64
+                elif is_64bit is False:
+                    mode = CS_MODE_32
+                else:
+                    # Auto-detect architecture: REX.W or 64-bit prefixes vs 32-bit markers
+                    has_rex_w = (b"\x48\x89" in code_bytes or b"\x48\x8b" in code_bytes or b"\x48\x83" in code_bytes or b"\x48\x31" in code_bytes)
+                    has_32_markers = (b"\x55\x8b\xec" in code_bytes or b"\x56\x8b\xf1" in code_bytes or b"\x64\xa1\x00\x00\x00\x00" in code_bytes)
+                    if has_rex_w:
+                        mode = CS_MODE_64
+                    elif has_32_markers:
+                        mode = CS_MODE_32
+                    else:
+                        mode = CS_MODE_64
+
+                md = Cs(CS_ARCH_X86, mode)
+                instructions = []
+                cur_off = 0
+                n_bytes = len(code_bytes)
+                while cur_off < n_bytes:
+                    chunk = code_bytes[cur_off:cur_off + 65536]
+                    chunk_insns = list(md.disasm(chunk, cur_off))
+                    if chunk_insns:
+                        instructions.extend(chunk_insns)
+                        last_insn = chunk_insns[-1]
+                        next_off = last_insn.address + last_insn.size
+                        cur_off = next_off if next_off > cur_off else cur_off + 1
+                    else:
+                        cur_off += 1
+
                 for idx, insn in enumerate(instructions):
                     m = insn.mnemonic.lower()
                     ops = [op.strip() for op in insn.op_str.lower().split(",")]
@@ -1233,6 +1264,25 @@ class ContinuousDeobfuscator:
                             "suggested_simplification": "Replace JNZ with 2x NOP (0x90)"
                         })
                         i = cur_pos + 2
+                        found_jcc = True
+                        break
+                    elif b_cur == 0x0F and cur_pos + 5 <= n and code_bytes[cur_pos + 1] in (0x84, 0x85):
+                        is_jz = (code_bytes[cur_pos + 1] == 0x84)
+                        rel32 = struct.unpack("<i", code_bytes[cur_pos + 2:cur_pos + 6])[0]
+                        total_len = (cur_pos + 6) - insn_start
+                        jname = "JZ" if is_jz else "JNZ"
+                        ttype = "OPAQUE_PREDICATE_ALWAYS_TRUE" if is_jz else "OPAQUE_PREDICATE_ALWAYS_FALSE"
+                        findings.append({
+                            "type": ttype,
+                            "offset": insn_start,
+                            "length": total_len,
+                            "zeroing_instruction": desc,
+                            "jump_type": f"{jname} (Zero Flag set by zeroing)",
+                            "description": f"{desc} guarantees ZF=1. {jname} is {'ALWAYS' if is_jz else 'NEVER'} taken. {'Fallthrough branch' if is_jz else 'Jump target'} is dead code.",
+                            "target_rel_offset": rel32,
+                            "suggested_simplification": f"JMP to target offset (+{rel32}) or NOP fallthrough" if is_jz else f"Replace {jname} with 6x NOP (0x90)"
+                        })
+                        i = cur_pos + 6
                         found_jcc = True
                         break
                     else:
@@ -1460,8 +1510,11 @@ class ContinuousDeobfuscator:
         }
 
     @staticmethod
-    def deobfuscate_cfg(code_bytes: bytes) -> Dict[str, Any]:
-        predicates = ContinuousDeobfuscator.analyze_opaque_predicates(code_bytes)
+    def deobfuscate_cfg(
+        code_bytes: bytes,
+        is_64bit: Optional[bool] = None
+    ) -> Dict[str, Any]:
+        predicates = ContinuousDeobfuscator.analyze_opaque_predicates(code_bytes, is_64bit=is_64bit)
         cff_analysis = ContinuousDeobfuscator.detect_control_flow_flattening(code_bytes)
         dead_bytes = sum(p["length"] for p in predicates)
         return {
@@ -1474,6 +1527,122 @@ class ContinuousDeobfuscator:
         }
 
     @staticmethod
+    def extract_x86_functions(code_bytes: bytes, base_rva: int = 0) -> Dict[str, Any]:
+        """
+        Exhaustively extracts 32-bit x86 function prologues across executable machine code.
+        Recovers standard EBP frames, SEH/EH frames, __thiscall register loads,
+        Frame-Pointer Omitted (FPO) stack reservations, and __fastcall.
+        """
+        n = len(code_bytes)
+        functions: Dict[int, str] = {}
+
+        def _is_boundary(idx: int) -> bool:
+            if idx == 0:
+                return True
+            prev = code_bytes[idx - 1]
+            if prev in (0xCC, 0x90, 0xC3):
+                return True
+            if idx >= 3 and code_bytes[idx - 3] == 0xC2:
+                return True
+            return False
+
+        # Pass 1: Standard EBP frames
+        pos = 0
+        while pos < n - 2:
+            idx = code_bytes.find(b"\x55\x8b\xec", pos)
+            if idx == -1:
+                break
+            sub = code_bytes[idx:idx + 24]
+            cat = "STANDARD_EBP"
+            if b"\x89\x4d\xfc" in sub or b"\x89\x4d\xf8" in sub or b"\x8b\xf1" in sub or b"\x51" in sub[3:6]:
+                cat = "THISCALL_EBP"
+            if (b"\x89\x4d" in sub and b"\x89\x55" in sub) or (b"\x8b\xf1" in sub and b"\x8b\xfa" in sub):
+                cat = "FASTCALL_EBP"
+            functions[idx] = cat
+            pos = idx + 3
+
+        # Pass 2: SEH / EH frames (push -1; push handler; mov eax, fs:[0])
+        pos = 0
+        while pos < n - 8:
+            idx = code_bytes.find(b"\x6a\xff\x68", pos)
+            if idx == -1:
+                break
+            if idx + 12 <= n and code_bytes[idx + 7:idx + 9] == b"\x64\xa1":
+                sub = code_bytes[idx:idx + 32]
+                cat = "SEH_FRAME"
+                if b"\x89\x4d\xfc" in sub or b"\x89\x4c\x24" in sub or b"\x8b\xf1" in sub:
+                    cat = "THISCALL_SEH"
+                functions[idx] = cat
+            pos = idx + 3
+
+        # Pass 3: Direct thiscall register loads
+        thiscall_sigs = [
+            (b"\x56\x8b\xf1", "THISCALL_PUSH_ESI"),
+            (b"\x53\x8b\xd9", "THISCALL_PUSH_EBX"),
+            (b"\x57\x8b\xf9", "THISCALL_PUSH_EDI")
+        ]
+        for sig, name in thiscall_sigs:
+            pos = 0
+            while pos < n - 2:
+                idx = code_bytes.find(sig, pos)
+                if idx == -1:
+                    break
+                if _is_boundary(idx) or idx not in functions:
+                    functions[idx] = name
+                pos = idx + 3
+
+        # Pass 4: Boundary-aligned sub esp / push regs / fastcall
+        for i in range(n - 6):
+            if not _is_boundary(i):
+                continue
+            if i in functions:
+                continue
+            b0 = code_bytes[i]
+            b1 = code_bytes[i + 1]
+            if b0 == 0x83 and b1 == 0xEC:
+                sub = code_bytes[i:i + 16]
+                cat = "FPO_SUB_ESP_IMM8"
+                if b"\x89\x4c\x24" in sub or b"\x8b\xf1" in sub:
+                    cat = "THISCALL_SUB_ESP"
+                functions[i] = cat
+            elif b0 == 0x81 and b1 == 0xEC:
+                functions[i] = "FPO_SUB_ESP_IMM32"
+            elif b0 in (0x53, 0x55, 0x56, 0x57) and b1 in (0x53, 0x55, 0x56, 0x57, 0x83, 0x8b, 0x81):
+                sub = code_bytes[i:i + 16]
+                cat = "PUSH_REGS_PROLOGUE"
+                if b"\x8b\xf1" in sub or b"\x89\x4c\x24" in sub:
+                    cat = "THISCALL_PUSH_REGS"
+                functions[i] = cat
+            elif b0 == 0x8B and b1 == 0xC1:
+                functions[i] = "THISCALL_GETTER"
+            elif b0 == 0x51 and b1 in (0x53, 0x55, 0x56, 0x57, 0x83):
+                functions[i] = "THISCALL_PUSH_ECX"
+            elif b0 == 0x51 and b1 == 0x52:
+                functions[i] = "FASTCALL_PUSH_ECX_EDX"
+
+        category_counts: Dict[str, int] = {}
+        for cat in functions.values():
+            category_counts[cat] = category_counts.get(cat, 0) + 1
+
+        calling_conventions = {
+            "thiscall_total": sum(v for k, v in category_counts.items() if "THISCALL" in k),
+            "standard_ebp_total": sum(v for k, v in category_counts.items() if k in ("STANDARD_EBP", "PUSH_REGS_PROLOGUE")),
+            "fpo_sub_esp_total": sum(v for k, v in category_counts.items() if "FPO" in k),
+            "seh_total": sum(v for k, v in category_counts.items() if "SEH" in k),
+            "fastcall_total": sum(v for k, v in category_counts.items() if "FASTCALL" in k)
+        }
+
+        return {
+            "total_functions_recovered": len(functions),
+            "calling_conventions": calling_conventions,
+            "prologue_categories": category_counts,
+            "functions_sample": [
+                {"rva": hex(base_rva + off), "offset": off, "prologue_type": cat}
+                for off, cat in sorted(functions.items())[:25]
+            ]
+        }
+
+    @staticmethod
     def deobfuscate_file(file_path: str, offset: Optional[int] = None, length: int = 4096) -> Dict[str, Any]:
         """Deobfuscates machine code directly from a binary file at a specified offset or entry point."""
         if not os.path.exists(file_path):
@@ -1482,6 +1651,10 @@ class ContinuousDeobfuscator:
             raise ValueError(f"Length must be positive, got {length}")
 
         pe_info = BinaryFormatInspector.inspect(file_path)
+        is_64bit = True
+        if pe_info.get("format") == "PE" and pe_info.get("pe_type") == "PE32 (32-bit)":
+            is_64bit = False
+
         actual_offset = offset
         if actual_offset is None:
             if pe_info.get("format") == "PE" and pe_info.get("entry_point_file_offset"):
@@ -1502,7 +1675,7 @@ class ContinuousDeobfuscator:
             f.seek(actual_offset)
             code_bytes = f.read(min(length, 65536))
 
-        res = ContinuousDeobfuscator.deobfuscate_cfg(code_bytes)
+        res = ContinuousDeobfuscator.deobfuscate_cfg(code_bytes, is_64bit=is_64bit)
         res["source_file"] = file_path
         res["analysis_file_offset"] = hex(actual_offset)
         res["analysis_window_size"] = len(code_bytes)
@@ -1520,11 +1693,24 @@ class SemanticFunctionMatcher:
     """
 
     @staticmethod
-    def decode_instructions_x86(b: bytes) -> List[str]:
+    def decode_instructions_x86(b: bytes, is_64bit: Optional[bool] = None) -> List[str]:
         """Decodes instruction stream to extract functional categories using Capstone (with pure-Python fallback)."""
         if HAS_CAPSTONE:
             try:
-                md = Cs(CS_ARCH_X86, CS_MODE_64)
+                if is_64bit is True:
+                    mode = CS_MODE_64
+                elif is_64bit is False:
+                    mode = CS_MODE_32
+                else:
+                    # Auto-detect architecture: require explicit 32-bit signature without 64-bit REX.W markers
+                    has_rex_w = (b"\x48\x89" in b or b"\x48\x8b" in b or b"\x48\x83" in b or b"\x48\x31" in b or b"\x55\x48\x89\xe5" in b)
+                    has_32_sig = (b"\x55\x8b\xec" in b or b"\x56\x8b\xf1" in b or b"\x53\x8b\xd9" in b or b"\x64\xa1\x00\x00\x00\x00" in b)
+                    if has_32_sig and not has_rex_w:
+                        mode = CS_MODE_32
+                    else:
+                        mode = CS_MODE_64
+
+                md = Cs(CS_ARCH_X86, mode)
                 raw_insns = list(md.disasm(b, 0))
                 bytes_decoded = sum(len(i.bytes) for i in raw_insns)
                 # If less than 100% of the byte buffer can be disassembled into valid instructions, it is non-code noise or partial stream
@@ -1534,9 +1720,9 @@ class SemanticFunctionMatcher:
                 insns = []
                 for i in raw_insns:
                     m = i.mnemonic.lower()
-                    if m in ("push", "pushfq"):
+                    if m in ("push", "pushfq", "pushfd"):
                         insns.append("push")
-                    elif m in ("pop", "popfq"):
+                    elif m in ("pop", "popfq", "popfd"):
                         insns.append("pop")
                     elif m.startswith("ret"):
                         insns.append("ret")
@@ -1551,7 +1737,7 @@ class SemanticFunctionMatcher:
                     elif m in ("add", "adc", "sub", "sbb", "mul", "imul", "div", "idiv",
                                "and", "or", "xor", "not", "neg", "shl", "shr", "sar",
                                "rol", "ror", "cmp", "test", "inc", "dec",
-                               "xorps", "xorpd", "addps", "addss", "subps", "subss"):
+                               "xorps", "xorpd", "addps", "addss", "subps", "subss") or m.startswith("f"):
                         insns.append("alu")
                     else:
                         insns.append("alu")
@@ -1695,7 +1881,7 @@ class SemanticFunctionMatcher:
         return insns
 
     @staticmethod
-    def vectorize_function(assembly_hex: str) -> np.ndarray:
+    def vectorize_function(assembly_hex: str, is_64bit: Optional[bool] = None) -> np.ndarray:
         """
         Projects assembly into a structured 16-D behavioral vector (including transition bigrams).
         Random noise or unaligned data is strictly rejected with a null vector.
@@ -1706,7 +1892,18 @@ class SemanticFunctionMatcher:
         if len(raw_bytes) < 2:
             return vec
 
-        has_x86_sig = (b"\xc3" in raw_bytes or b"\x55\x48\x89\xe5" in raw_bytes or b"\x48\x83\xec" in raw_bytes)
+        has_x86_sig = (
+            b"\xc3" in raw_bytes or
+            b"\xc2" in raw_bytes or
+            b"\x55\x8b\xec" in raw_bytes or
+            b"\x55\x89\xe5" in raw_bytes or
+            b"\x56\x8b\xf1" in raw_bytes or
+            b"\x53\x8b\xd9" in raw_bytes or
+            b"\x55\x48\x89\xe5" in raw_bytes or
+            b"\x48\x83\xec" in raw_bytes or
+            b"\x83\xec" in raw_bytes or
+            b"\x81\xec" in raw_bytes
+        )
         arm64_words = [
             struct.unpack_from("<I", raw_bytes, i)[0]
             for i in range(0, len(raw_bytes) - (len(raw_bytes) % 4), 4)
@@ -1720,7 +1917,7 @@ class SemanticFunctionMatcher:
         if is_arm64:
             insns = SemanticFunctionMatcher.decode_instructions_arm64(raw_bytes)
         else:
-            insns = SemanticFunctionMatcher.decode_instructions_x86(raw_bytes)
+            insns = SemanticFunctionMatcher.decode_instructions_x86(raw_bytes, is_64bit=is_64bit)
 
         total = len(insns)
         if total < 2:
@@ -1861,6 +2058,11 @@ class SurgicalBinaryPatcher:
         0xC9,                                            # LEAVE
         0xC3, 0xC2, 0xCA, 0xCB                           # RET
     }
+
+    @staticmethod
+    def calculate_pe_checksum(file_bytes: Union[bytearray, bytes], pe_offset: int) -> int:
+        """Computes official Microsoft PE image checksum as defined by CheckSumMappedFile."""
+        return BinaryFormatInspector.calculate_pe_checksum(file_bytes, pe_offset)
 
     @staticmethod
     def compute_stack_proprioception(code_bytes: bytes) -> Dict[str, Any]:

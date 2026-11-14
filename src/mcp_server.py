@@ -2034,35 +2034,32 @@ class BintraMcpServer:
             b_path = args["baseline_path"]
             t_path = args["target_path"]
             if mode_val == "ghidra_export":
-                b_data = json.loads(SafeFileAccess.read_bytes(b_path).decode("utf-8"))
-                t_data = json.loads(SafeFileAccess.read_bytes(t_path).decode("utf-8"))
-                return SemanticBinaryDiffer().diff_function_exports(b_data.get("functions", []), t_data.get("functions", []))
+                from ghidra_export_store import GhidraExportStore
+                b_store = GhidraExportStore.from_path(b_path)
+                t_store = GhidraExportStore.from_path(t_path)
+                b_funcs = list(b_store.iter_functions()) if b_store.is_sqlite else b_store.to_dict().get("functions", [])
+                t_funcs = list(t_store.iter_functions()) if t_store.is_sqlite else t_store.to_dict().get("functions", [])
+                return SemanticBinaryDiffer().diff_function_exports(b_funcs, t_funcs)
             return SemanticBinaryDiffer().diff_pe_binaries(b_path, t_path)
 
         elif name == "bintra_ghidra_call_graph":
             from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
-            from security import SafeFileAccess, TargetScope
+            from ghidra_export_store import GhidraExportStore
             ep = args["export_path"]
-            raw = SafeFileAccess.read_bytes(ep).decode("utf-8")
-            exp_data = json.loads(raw)
+            store = GhidraExportStore.from_path(ep)
             return GhidraDeepAnalyzer().build_call_graph_and_xrefs(
-                exp_data,
+                store,
                 target_function=args.get("target_function"),
                 max_depth=int(args.get("max_depth", 4)),
             )
 
         elif name == "bintra_ghidra_data_flow":
             from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
-            from security import SafeFileAccess, TargetScope
+            from ghidra_export_store import GhidraExportStore
             ep = args["export_path"]
             fn_target = args["function_name"]
-            raw = SafeFileAccess.read_bytes(ep).decode("utf-8")
-            exp_data = json.loads(raw)
-            matched_fn = None
-            for fn in exp_data.get("functions", []):
-                if fn.get("name") == fn_target or fn.get("entry_point") == fn_target or fn.get("address") == fn_target:
-                    matched_fn = fn
-                    break
+            store = GhidraExportStore.from_path(ep)
+            matched_fn = store.get_function(fn_target)
             if not matched_fn:
                 return {"status": "not_found", "function_name": fn_target}
             return GhidraDeepAnalyzer().slice_data_flow(matched_fn, target_var=args.get("target_var"))
@@ -2081,16 +2078,15 @@ class BintraMcpServer:
                 rca_res = CrashRootCauseAnalyzer.analyze_crash(dump_target=args["dmp_path"], binary_path=args.get("binary_path"))
             if args.get("ghidra_export_path"):
                 from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
-                from security import SafeFileAccess, TargetScope
+                from ghidra_export_store import GhidraExportStore
                 gp = args["ghidra_export_path"]
-                g_data = json.loads(SafeFileAccess.read_bytes(gp).decode("utf-8"))
+                store = GhidraExportStore.from_path(gp)
                 analyzer = GhidraDeepAnalyzer()
-                cg_res = analyzer.build_call_graph_and_xrefs(g_data, target_function=args.get("function_name"))
+                cg_res = analyzer.build_call_graph_and_xrefs(store, target_function=args.get("function_name"))
                 if args.get("function_name"):
-                    for fn in g_data.get("functions", []):
-                        if fn.get("name") == args["function_name"]:
-                            df_res = analyzer.slice_data_flow(fn)
-                            break
+                    fn_match = store.get_function(args["function_name"])
+                    if fn_match:
+                        df_res = analyzer.slice_data_flow(fn_match)
             return fuse_static_dynamic_ghidra(pe_forensics=pe_res, crash_rca=rca_res, ghidra_call_graph=cg_res, ghidra_data_flow=df_res)
 
         elif name == "bintra_list_capabilities":

@@ -923,7 +923,7 @@ class TestAuditRemediations(unittest.TestCase):
             "docs/releases/v1.0.0.md",
             ".github/PULL_REQUEST_TEMPLATE.md",
         ):
-            self.assertTrue(any(c in texts[rel] for c in ("240", "236", "231", "230", "227", "195")), f"Expected '240' (or '236'/'231'/'230'/'227'/'195') test count in {rel}")
+            self.assertTrue(any(c in texts[rel] for c in ("245", "240", "236", "231", "230", "227", "195")), f"Expected '245' (or '240'/'236'/'231'/'230'/'227'/'195') test count in {rel}")
             self.assertNotIn("160 Tests", texts[rel])
 
         # 4. EtwTimelineCorrelator canonical event categories exist in source

@@ -140,5 +140,5 @@ bintra ghidra-bridge --start --port 41718 --no-temp-marker
 - **Self-Discovery:** Always start with `bintra_list_capabilities` (`bintra capabilities`) to map all 42 tools by host compatibility (`cross_platform`, `windows_native`, `ghidra_required`).
 - **PE Deep Forensics (`bintra_pe_deep_forensics`):** Recovers x64 `.pdata` `RUNTIME_FUNCTION` boundaries, MSVC RTTI classes/`vftables`, and offline local PDB/RSDS matches.
 - **Semantic Binary Diffing (`bintra_binary_diff`):** Compares PE binaries or Ghidra exports using WL-CFG subtree hashing + 64-D P-Code cosine + API/String anchor Jaccard.
-- **Ghidra Deep Analysis (`bintra_ghidra_call_graph`, `bintra_ghidra_data_flow`):** Extracts caller/callee chains, sensitive API reachability, intra-procedural SSA def-use slices, and Decompiler C AST summaries.
+- **Ghidra Deep Analysis (`bintra_ghidra_call_graph`, `bintra_ghidra_data_flow`):** Extracts caller/callee chains, sensitive API reachability, intra-procedural SSA def-use slices, and Decompiler C AST summaries (supports `.json`, `.jsonl`, and zero-dependency indexed `.db` SQLite stores).
 - **Unified Causal Fusion (`bintra_fuse_evidence`):** Fuses PE forensics, Crash RCA, and Ghidra Call-Graph/Data-Flow into a single `EvidenceGraph`.

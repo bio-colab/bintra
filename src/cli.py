@@ -1239,8 +1239,9 @@ def _dispatch_cli():
         elif cmd == "ghidra-analyze":
             parser = argparse.ArgumentParser(description="Analyze Ghidra exported High P-Code and emit mutation plan")
             parser.add_argument("command")
-            parser.add_argument("--input", "--file", dest="input", required=True, help="Path to exported Ghidra JSON file")
+            parser.add_argument("--input", "--file", dest="input", required=True, help="Path to exported Ghidra JSON/JSONL/DB file")
             parser.add_argument("--output", default=None, help="Path to write the generated mutation plan JSON")
+            parser.add_argument("--to-sqlite", default=None, help="Optional path to convert export to indexed SQLite database")
             parser.add_argument("--workspace", default=None, help="Optional workspace directory override")
             args = parser.parse_args()
 
@@ -1253,10 +1254,15 @@ def _dispatch_cli():
                     capability=Capability.WORKSPACE_WRITE,
                     access_mode="WRITE"
                 )
-            raw_input = SafeFileAccess.read_text(args.input)
-            payload = json.loads(raw_input)
+            from ghidra_export_store import GhidraExportStore
+            if args.to_sqlite:
+                is_jsonl = str(args.input).lower().endswith(".jsonl")
+                GhidraExportStore.ingest_to_sqlite(args.input, args.to_sqlite, is_jsonl=is_jsonl)
+                print(json.dumps({"status": "ok", "action": "exported_to_sqlite", "sqlite_db": args.to_sqlite}, indent=2))
+                return
 
-            plan = GhidraAnnotationPlanner.analyze_program_export(payload)
+            store = GhidraExportStore.from_path(args.input)
+            plan = GhidraAnnotationPlanner.analyze_program_export(store)
             if args.output:
                 SafeFileAccess.write_workspace_file(args.output, json.dumps(plan, indent=2))
             print(json.dumps(plan, indent=2))
@@ -1690,25 +1696,25 @@ def _dispatch_cli():
 
     elif cmd == "ghidra-callgraph":
         ap = argparse.ArgumentParser(prog="bintra ghidra-callgraph")
-        ap.add_argument("--input", required=True)
+        ap.add_argument("--input", required=True, help="Path to Ghidra export (.json, .jsonl, or .db)")
         ap.add_argument("--function", default=None)
         ap.add_argument("--max-depth", type=int, default=4)
         ns = ap.parse_args(sys.argv[2:])
         from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
-        from security import SafeFileAccess, TargetScope
-        exp_d = json.loads(SafeFileAccess.read_bytes(ns.input).decode("utf-8"))
-        print(json.dumps(GhidraDeepAnalyzer().build_call_graph_and_xrefs(exp_d, target_function=ns.function, max_depth=ns.max_depth), indent=2))
+        from ghidra_export_store import GhidraExportStore
+        store = GhidraExportStore.from_path(ns.input)
+        print(json.dumps(GhidraDeepAnalyzer().build_call_graph_and_xrefs(store, target_function=ns.function, max_depth=ns.max_depth), indent=2))
 
     elif cmd == "ghidra-dataflow":
         ap = argparse.ArgumentParser(prog="bintra ghidra-dataflow")
-        ap.add_argument("--input", required=True)
+        ap.add_argument("--input", required=True, help="Path to Ghidra export (.json, .jsonl, or .db)")
         ap.add_argument("--function", required=True)
         ap.add_argument("--var", default=None)
         ns = ap.parse_args(sys.argv[2:])
         from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
-        from security import SafeFileAccess, TargetScope
-        exp_d = json.loads(SafeFileAccess.read_bytes(ns.input).decode("utf-8"))
-        fn_obj = next((f for f in exp_d.get("functions", []) if f.get("name") == ns.function or f.get("entry_point") == ns.function), None)
+        from ghidra_export_store import GhidraExportStore
+        store = GhidraExportStore.from_path(ns.input)
+        fn_obj = store.get_function(ns.function)
         if not fn_obj:
             print(json.dumps({"status": "not_found", "function": ns.function}, indent=2))
             sys.exit(1)

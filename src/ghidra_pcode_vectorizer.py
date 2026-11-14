@@ -16,7 +16,7 @@ Capabilities:
 
 import math
 import json
-from typing import Dict, Any, List, Tuple, Optional, Set
+from typing import Dict, Any, List, Tuple, Optional, Set, Union
 import numpy as np
 
 
@@ -782,15 +782,26 @@ class GhidraAnnotationPlanner:
         return "\n".join(lines)
 
     @classmethod
-    def analyze_program_export(cls, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def analyze_program_export(cls, payload: Union[Dict[str, Any], str, Any]) -> Dict[str, Any]:
         """
         Analyzes full Ghidra exported program payload containing multiple functions:
         - Runs ControlFlowGraphAnalyzer on each function.
         - Runs PcodeSSAAnalyzer on Def-Use chains.
         - Calculates 64-D continuous semantic embedding and effective rank.
         - Produces verified mutation actions (rename_actions, comment_actions, evidence_dossiers).
+        Supports in-memory dicts, .json, .jsonl, and .db via GhidraExportStore.
         """
-        functions = payload.get("functions", [])
+        if isinstance(payload, str) or hasattr(payload, "__fspath__"):
+            from ghidra_export_store import GhidraExportStore
+            payload = GhidraExportStore.from_path(payload)
+
+        if hasattr(payload, "iter_functions"):
+            functions = payload.iter_functions()
+        elif isinstance(payload, dict):
+            functions = payload.get("functions", [])
+        else:
+            functions = []
+
         rename_actions = []
         comment_actions = []
         all_evidence_dossiers = []
@@ -964,8 +975,18 @@ class GhidraDeepAnalyzer:
     )
 
     def build_call_graph_and_xrefs(
-        self, export_data: Dict[str, Any], target_function: Optional[str] = None, max_depth: int = 4
+        self, export_data: Union[Dict[str, Any], str, Any], target_function: Optional[str] = None, max_depth: int = 4
     ) -> Dict[str, Any]:
+        if isinstance(export_data, str) or hasattr(export_data, "__fspath__"):
+            from ghidra_export_store import GhidraExportStore
+            export_data = GhidraExportStore.from_path(export_data)
+
+        if hasattr(export_data, "build_call_graph_and_xrefs") and getattr(export_data, "is_sqlite", False):
+            return export_data.build_call_graph_and_xrefs(target_function=target_function, max_depth=max_depth)
+
+        if hasattr(export_data, "to_dict"):
+            export_data = export_data.to_dict()
+
         funcs = export_data.get("functions", [])
         if not isinstance(funcs, list):
             funcs = []

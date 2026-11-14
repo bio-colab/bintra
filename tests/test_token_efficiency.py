@@ -57,14 +57,17 @@ class TestTokenEfficiency(unittest.TestCase):
         self.assertLess(static_tok, full_tok * 0.25)
 
     def test_cli_compact_and_token_report_flags(self):
+        env = dict(os.environ, PYTHONUTF8="1")
         res_pretty = subprocess.run(
             [sys.executable, os.path.join(SRC_DIR, "cli.py"), "sense", "--hex", "554889e55dc3"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, check=True,
         )
         res_compact = subprocess.run(
             [sys.executable, os.path.join(SRC_DIR, "cli.py"), "sense", "--hex", "554889e55dc3", "--compact", "--token-report"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, check=True,
         )
+        self.assertIsNotNone(res_pretty.stdout)
+        self.assertIsNotNone(res_compact.stdout)
         self.assertLess(len(res_compact.stdout), len(res_pretty.stdout))
         self.assertIn("[TOKEN TELEMETRY]", res_compact.stderr)
         self.assertEqual(

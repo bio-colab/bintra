@@ -235,6 +235,7 @@ def main():
                             except Exception:
                                 pass
                         sys.stdout.write(final_out)
+                        sys.stdout.flush()
                         if token_report_mode and final_out.strip():
                             from token_telemetry import estimate_tokens, estimate_cost_usd
                             base_tok = estimate_tokens(raw_out)
@@ -245,6 +246,7 @@ def main():
                                 f"[TOKEN TELEMETRY] model={model_pricing} tokens={act_tok} "
                                 f"(baseline={base_tok}, saved={saved_tok}) est_cost_usd=${cost_usd:.6f}\n"
                             )
+                            sys.stderr.flush()
                 else:
                     _dispatch_cli()
         except SystemExit:

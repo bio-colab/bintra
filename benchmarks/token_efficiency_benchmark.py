@@ -99,9 +99,10 @@ def run_benchmark(model: str = "claude-3.5-sonnet") -> Dict[str, Any]:
             pretty_txt = json.dumps(raw, indent=2, ensure_ascii=False)
             base_calls[tname] = {"data": raw, "tokens": estimate_tokens(pretty_txt)}
 
+        env = dict(os.environ, PYTHONUTF8="1")
         cli_base = subprocess.run(
             [sys.executable, os.path.join(SRC_DIR, "cli.py"), "sense", "--hex", "554889e54883ec205dc3"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, check=True,
         )
         cli_base_tok = estimate_tokens(cli_base.stdout)
 
@@ -125,7 +126,7 @@ def run_benchmark(model: str = "claude-3.5-sonnet") -> Dict[str, Any]:
 
         cli_opt = subprocess.run(
             [sys.executable, os.path.join(SRC_DIR, "cli.py"), "sense", "--hex", "554889e54883ec205dc3", "--compact"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, check=True,
         )
         cli_opt_tok = estimate_tokens(cli_opt.stdout)
 

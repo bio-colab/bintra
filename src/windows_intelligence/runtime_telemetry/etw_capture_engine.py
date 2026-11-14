@@ -294,6 +294,15 @@ class EtwLiveCaptureSession:
                     "event_consumption_backend": "WEVTAPI_EVENT_LOG_POLLING",
                     "warning": "Real-time kernel trace requires Administrator privileges. Operating in non-elevated EventLog telemetry mode."
                 }
+            elif res == 183:
+                self.status_description = "SESSION_ALREADY_ACTIVE"
+                return {
+                    "status": "already_active",
+                    "session_name": self.session_name,
+                    "win32_code": 183,
+                    "is_simulated": False,
+                    "message": "ETW trace session with this name is already active on host."
+                }
             else:
                 self.status_description = f"START_FAILED_0x{res:X}"
                 return {
@@ -354,7 +363,7 @@ class EtwLiveCaptureSession:
                 ctypes.byref(guid),
                 1,  # EVENT_CONTROL_CODE_ENABLE_PROVIDER
                 5,  # TRACE_LEVEL_VERBOSE
-                0,
+                0xFFFFFFFFFFFFFFFF,  # MatchAnyKeyword: enable all provider keywords
                 0,
                 0,
                 None
@@ -503,9 +512,11 @@ class EtwLiveCaptureSession:
                     ev_id = int(hdr.EventDescriptor.Id)
                     opcode = int(hdr.EventDescriptor.Opcode)
                     g = hdr.ProviderId
+                    d4_1 = "".join(f"{b:02X}" for b in g.Data4[:2])
+                    d4_2 = "".join(f"{b:02X}" for b in g.Data4[2:])
                     p_name = guid_to_name.get(
                         (g.Data1, g.Data2, g.Data3, tuple(g.Data4)),
-                        f"{{{g.Data1:08X}-{g.Data2:04X}-{g.Data3:04X}}}",
+                        f"{{{g.Data1:08X}-{g.Data2:04X}-{g.Data3:04X}-{d4_1}-{d4_2}}}",
                     )
                     # Convert FILETIME (100ns since 1601) when valid, otherwise wall-clock epoch
                     raw_ts = int(hdr.TimeStamp)
@@ -533,6 +544,12 @@ class EtwLiveCaptureSession:
                         ev_type = "PNP_DEVICE_EVENT" if ev_id in (1, 2, 3) else f"PNP_EVENT_{ev_id}"
                     elif p_name in ("Microsoft-Windows-USB-USBHUB3", "Microsoft-Windows-USB-UCX"):
                         ev_type = "USB_PORT_EVENT"
+                    elif p_name == "Microsoft-Windows-Kernel-Disk":
+                        ev_type = {
+                            10: "DISK_IO_READ",
+                            11: "DISK_IO_WRITE",
+                            14: "DISK_IO_FLUSH",
+                        }.get(ev_id, f"DISK_IO_EVENT_{ev_id}")
 
                     event_details = {"native_etw": True, "user_data_length": int(rec_ptr.contents.UserDataLength)}
                     payload_dec = _decode_event_payload(rec_ptr)

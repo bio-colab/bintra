@@ -651,20 +651,26 @@ def _dispatch_cli():
                     lines = [
                         "# Communication & Hardware Port Audit",
                         f"- **Status:** `{report.get('status')}`",
-                        f"- **Active COM Ports:** {report.get('total_serial_ports', report.get('total_ports', 0))}",
-                        f"- **Parallel Ports (LPT):** {report.get('total_parallel_ports', 0)}",
+                        f"- **Active COM Ports:** {report.get('serial_ports_count', report.get('total_serial_ports', report.get('total_ports', 0)))}",
+                        f"- **Parallel Ports (LPT):** {report.get('parallel_ports_count', report.get('total_parallel_ports', 0))}",
                     ]
                     ports = report.get("ports") or report.get("serial_ports", [])
                     if ports:
                         lines.append("\n## Detected Communication Ports:")
                         for p in ports:
                             p_name = p.get("port_name", "Unknown")
-                            b_info = p.get("bridge_identity") or {}
-                            bridge_desc = f" ({b_info.get('controller_name', 'Standard')})" if b_info else ""
+                            b_info = p.get("bridge_identity")
+                            if isinstance(b_info, dict):
+                                bridge_desc = f" ({b_info.get('controller_name', 'Standard')})"
+                            elif isinstance(b_info, str) and b_info:
+                                bridge_desc = f" ({b_info})"
+                            else:
+                                bridge_desc = ""
                             lines.append(f"- **`{p_name}`**{bridge_desc}: Type `{p.get('port_type')}`, Path `{p.get('device_map_path')}`")
-                            if "comm_state" in p and p["comm_state"].get("status") == "active":
-                                cs = p["comm_state"]
-                                lines.append(f"  - Baud: {cs.get('baud_rate')}, DataBits: {cs.get('byte_size')}, Parity: {cs.get('parity')}, StopBits: {cs.get('stop_bits')}")
+                            cs = p.get("comm_state") or {}
+                            if cs.get("accessible") or cs.get("status") == "active":
+                                lc = cs.get("line_config", cs)
+                                lines.append(f"  - Baud: {lc.get('baud_rate')}, DataBits: {lc.get('data_bits', lc.get('byte_size'))}, Parity: {lc.get('parity')}, StopBits: {lc.get('stop_bits')}")
                     print("\n".join(lines))
             else:
                 print(json.dumps(report, indent=2, ensure_ascii=False))

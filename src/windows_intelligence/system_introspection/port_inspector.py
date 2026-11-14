@@ -91,11 +91,12 @@ class PortInspector:
                         if target_port and port_name.upper() != target_port.upper():
                             continue
 
+                        val_upper = str(val_name).upper()
                         port_info = {
                             "port_name": port_name,
                             "device_map_path": str(val_name),
                             "port_type": cls._classify_port_type(val_name, port_name),
-                            "is_virtual_or_usb": bool("VCP" in val_name or "USB" in val_name or "FTDI" in val_name),
+                            "is_virtual_or_usb": any(tok in val_upper for tok in ("VCP", "USB", "FTDI", "SILABSER", "PROLIFIC", "CH34", "WCH", "BTH")),
                         }
 
                         if include_modem_status:
@@ -116,17 +117,21 @@ class PortInspector:
             }
 
         # 2. Correlate with PnP Device Manager to enrich with bridge controller and hardware details
+        pnp_error = None
         try:
             cls._enrich_with_pnp_hardware(ports_list)
-        except Exception:
-            pass
+        except Exception as pnp_exc:
+            pnp_error = str(pnp_exc)
 
-        return {
+        res: Dict[str, Any] = {
             "status": "success",
             "total_ports": len(ports_list),
             "ports": ports_list,
             "epistemic_classification": "WINDOWS_KERNEL_DEVICEMAP_SERIALCOMM"
         }
+        if pnp_error:
+            res["pnp_enrichment_error"] = pnp_error
+        return res
 
     @classmethod
     def audit_parallel_ports(cls) -> Dict[str, Any]:
@@ -246,7 +251,7 @@ class PortInspector:
 
         if handle == INVALID_HANDLE_VALUE or handle is None or handle == 0:
             err = ctypes.get_last_error()
-            is_busy = (err == 5)  # ERROR_ACCESS_DENIED (port opened by another app)
+            is_busy = err in (5, 32)  # ERROR_ACCESS_DENIED or ERROR_SHARING_VIOLATION
             return {
                 "accessible": False,
                 "is_busy_or_locked": is_busy,
@@ -329,6 +334,10 @@ class PortInspector:
             return "FTDI_SERIAL_PORT"
         if "prolific" in d_lower:
             return "PROLIFIC_SERIAL_PORT"
+        if "ch34" in d_lower or "wch" in d_lower:
+            return "WCH_CH34X_SERIAL_PORT"
+        if "bth" in d_lower:
+            return "BLUETOOTH_SERIAL_PORT"
         if "usbser" in d_lower:
             return "USB_CDC_SERIAL_PORT"
         if "serial" in d_lower:
@@ -341,22 +350,27 @@ class PortInspector:
         from windows_intelligence.system_introspection.device_inspector import NativeDeviceInspector
         from windows_intelligence.device_intelligence.device_identity import DeviceIdentity
 
-        devices = NativeDeviceInspector.enumerate_devices(max_devices=512)
+        devices = NativeDeviceInspector.enumerate_devices(max_devices=2048)
         if not devices:
             return
+
+        # Prioritize Ports/Modem PnP classes before falling back to general devices
+        prioritized = sorted(
+            devices,
+            key=lambda d: 0 if str(d.get("class") or "").lower() in ("ports", "modem") else 1,
+        )
 
         for p in ports_list:
             p_name = p.get("port_name", "").upper()
             if not p_name:
                 continue
 
-            # Find matching PnP device
+            token_re = re.compile(rf"(?:^|\b|\(){re.escape(p_name)}(?:\)|$|\b)")
             matched = None
-            for d in devices:
+            for d in prioritized:
                 f_name = str(d.get("friendly_name") or d.get("name") or "").upper()
                 d_desc = str(d.get("description") or "").upper()
-                target_token = f"({p_name})"
-                if target_token in f_name or target_token in d_desc or p_name == f_name or p_name in f_name.split():
+                if token_re.search(f_name) or token_re.search(d_desc):
                     matched = d
                     break
 

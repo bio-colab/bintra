@@ -243,6 +243,8 @@ class EtwController:
 
             for i in range(num_providers):
                 off = 8 + (i * item_size)
+                if off + item_size > buf_size.value:
+                    break
                 item = TRACE_PROVIDER_INFO.from_buffer_copy(buf[off:off+item_size])
                 name_off = item.ProviderNameOffset
                 if name_off < buf_size.value:
@@ -527,10 +529,12 @@ class EtwController:
             }
         elif status == 0:
             import time
-            time.sleep(min(duration_sec, 5.0))
             advapi32.ControlTraceW.argtypes = [ctypes.c_uint64, wintypes.LPCWSTR, ctypes.POINTER(EVENT_TRACE_PROPERTIES), wintypes.ULONG]
             advapi32.ControlTraceW.restype = wintypes.ULONG
-            advapi32.ControlTraceW(trace_handle.value, session_name, prop_ptr, 1)  # EVENT_TRACE_CONTROL_STOP = 1
+            try:
+                time.sleep(min(duration_sec, 5.0))
+            finally:
+                advapi32.ControlTraceW(trace_handle.value, session_name, prop_ptr, 1)  # EVENT_TRACE_CONTROL_STOP = 1
             return {
                 "status": "success",
                 "session_name": session_name,

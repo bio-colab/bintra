@@ -87,14 +87,17 @@ class NativeDeviceInspector:
         44: "CM_PROB_HALTED (Device halted)",
         45: "CM_PROB_PHANTOM (Hardware device not currently connected)",
         46: "CM_PROB_SYSTEM_SHUTDOWN (System is shutting down)",
-        47: "CM_PROB_HELD_VDL (Held VDL)",
-        48: "CM_PROB_NEEDS_VCS (Device driver blocked from starting / needs VCS)",
-        49: "CM_PROB_BOOT_FAILURE (Boot failure)",
-        50: "CM_PROB_VERIFY_FAILED (Driver verification failed)",
-        51: "CM_PROB_FAILED_INITIALIZING_DEVICE (Device initialization failed)",
-        52: "CM_PROB_FAILED_START_RESOURCE_CONFLICT (CM_PROB_UNSIGNED_DRIVER: Cannot verify digital signature for drivers)",
-        53: "CM_PROB_GENERIC_DRIVER_BLOCKED (Driver blocked from starting)",
-        54: "CM_PROB_DRIVER_BLOCKED_UNSAFE (Driver blocked due to security vulnerability)",
+        47: "CM_PROB_HELD_FOR_EJECT (Device prepared for safe removal but not removed)",
+        48: "CM_PROB_DRIVER_BLOCKED (Software for this device has been blocked from starting)",
+        49: "CM_PROB_REGISTRY_TOO_LARGE (System registry hive exceeds size limit)",
+        50: "CM_PROB_SETPROPERTIES_FAILED (Windows cannot apply all device properties)",
+        51: "CM_PROB_WAITING_ON_DEPENDENCY (Device waiting on another device to start)",
+        52: "CM_PROB_UNSIGNED_DRIVER (Cannot verify digital signature for drivers)",
+        53: "CM_PROB_USED_BY_DEBUGGER (Device disabled because kernel debugger uses it)",
+        54: "CM_PROB_DEVICE_RESET (Device is not working properly because Windows cannot reset it)",
+        55: "CM_PROB_CONSOLE_LOCK (Console lock required)",
+        56: "CM_PROB_NEED_CLASS_CONFIG (Device class configuration in progress)",
+        57: "CM_PROB_GUEST_ASSIGNMENT_FAILED (Guest assignment failed)",
     }
 
     @classmethod
@@ -173,14 +176,17 @@ class NativeDeviceInspector:
         44: "CM_PROB_HALTED",
         45: "CM_PROB_PHANTOM",
         46: "CM_PROB_SYSTEM_SHUTDOWN",
-        47: "CM_PROB_HELD_VDL",
-        48: "CM_PROB_NEEDS_VCS",
-        49: "CM_PROB_BOOT_FAILURE",
-        50: "CM_PROB_VERIFY_FAILED",
-        51: "CM_PROB_FAILED_INITIALIZING_DEVICE",
-        52: "CM_PROB_FAILED_START_RESOURCE_CONFLICT",
-        53: "CM_PROB_GENERIC_DRIVER_BLOCKED",
-        54: "CM_PROB_DRIVER_BLOCKED_UNSAFE",
+        47: "CM_PROB_HELD_FOR_EJECT",
+        48: "CM_PROB_DRIVER_BLOCKED",
+        49: "CM_PROB_REGISTRY_TOO_LARGE",
+        50: "CM_PROB_SETPROPERTIES_FAILED",
+        51: "CM_PROB_WAITING_ON_DEPENDENCY",
+        52: "CM_PROB_UNSIGNED_DRIVER",
+        53: "CM_PROB_USED_BY_DEBUGGER",
+        54: "CM_PROB_DEVICE_RESET",
+        55: "CM_PROB_CONSOLE_LOCK",
+        56: "CM_PROB_NEED_CLASS_CONFIG",
+        57: "CM_PROB_GUEST_ASSIGNMENT_FAILED",
     }
 
     @classmethod
@@ -292,103 +298,114 @@ class NativeDeviceInspector:
         if not setupapi or not cfgmgr32:
             return []
 
+        invalid_hdevinfo = ctypes.c_void_p(-1).value
         flags = cls.DIGCF_PRESENT | cls.DIGCF_ALLCLASSES
         dev_info = setupapi.SetupDiGetClassDevsW(None, None, None, flags)
-        if not dev_info or dev_info == -1:
+        if not dev_info or dev_info == invalid_hdevinfo:
             return []
 
         devices = []
-        dev_data = SP_DEVINFO_DATA()
-        dev_data.cbSize = ctypes.sizeof(SP_DEVINFO_DATA)
+        try:
+            dev_data = SP_DEVINFO_DATA()
+            dev_data.cbSize = ctypes.sizeof(SP_DEVINFO_DATA)
 
-        idx = 0
-        while len(devices) < max_devices:
-            if not setupapi.SetupDiEnumDeviceInfo(dev_info, idx, ctypes.byref(dev_data)):
-                break
-            idx += 1
+            idx = 0
+            while len(devices) < max_devices:
+                if not setupapi.SetupDiEnumDeviceInfo(dev_info, idx, ctypes.byref(dev_data)):
+                    break
+                idx += 1
 
-            # Read Device Instance ID (the true canonical string ID, e.g. PCI\VEN_... or USB\VID_...)
-            id_buf = (ctypes.c_wchar * 512)()
-            req_id_sz = wintypes.DWORD()
-            if setupapi.SetupDiGetDeviceInstanceIdW(dev_info, ctypes.byref(dev_data), id_buf, len(id_buf), ctypes.byref(req_id_sz)):
-                inst_id_str = id_buf.value
-            else:
-                inst_id_str = f"DevNode_{dev_data.DevInst}"
+                # Read Device Instance ID (the true canonical string ID, e.g. PCI\VEN_... or USB\VID_...)
+                id_buf = (ctypes.c_wchar * 512)()
+                req_id_sz = wintypes.DWORD()
+                if setupapi.SetupDiGetDeviceInstanceIdW(dev_info, ctypes.byref(dev_data), id_buf, len(id_buf), ctypes.byref(req_id_sz)):
+                    inst_id_str = id_buf.value
+                else:
+                    inst_id_str = f"DevNode_{dev_data.DevInst}"
 
-            # Query device status via Configuration Manager (CfgMgr32)
-            dev_status = wintypes.DWORD()
-            problem_code = wintypes.DWORD()
-            cr = cfgmgr32.CM_Get_DevNode_Status(
-                ctypes.byref(dev_status),
-                ctypes.byref(problem_code),
-                dev_data.DevInst,
-                0
-            )
+                # Query device status via Configuration Manager (CfgMgr32)
+                dev_status = wintypes.DWORD()
+                problem_code = wintypes.DWORD()
+                cr = cfgmgr32.CM_Get_DevNode_Status(
+                    ctypes.byref(dev_status),
+                    ctypes.byref(problem_code),
+                    dev_data.DevInst,
+                    0
+                )
 
-            status_available = (cr == 0)
-            has_problem = (status_available and bool(dev_status.value & cls.DN_HAS_PROBLEM))
-            prob_num = problem_code.value if status_available else 0
+                status_available = (cr == 0)
+                prob_num = problem_code.value if status_available else 0
+                has_problem = (status_available and (bool(dev_status.value & cls.DN_HAS_PROBLEM) or prob_num > 0))
 
-            # Filter out healthy devices when filter_problems_only is requested
-            if filter_problems_only and not has_problem:
-                continue
-
-            # Read device properties
-            dev_desc = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_DEVICEDESC)
-            friendly_name = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_FRIENDLYNAME)
-            hw_ids = cls._read_multi_sz_property(setupapi, dev_info, dev_data, cls.SPDRP_HARDWAREID)
-            compat_ids = cls._read_multi_sz_property(setupapi, dev_info, dev_data, cls.SPDRP_COMPATIBLEIDS)
-            cls_name = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_CLASS)
-            service = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_SERVICE)
-            driver = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_DRIVER)
-            mfg = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_MFG)
-
-            if class_filter:
-                if not cls_name or class_filter.lower() not in cls_name.lower():
+                # Filter out healthy devices when filter_problems_only is requested
+                if filter_problems_only and not has_problem:
                     continue
 
-            # Query parent DevNode and canonical parent instance ID
-            parent_devnode_val = None
-            parent_id_str = None
-            if hasattr(cfgmgr32, "CM_Get_Parent"):
-                p_inst = wintypes.DWORD()
-                cr_p = cfgmgr32.CM_Get_Parent(ctypes.byref(p_inst), dev_data.DevInst, 0)
-                if cr_p == 0:
-                    parent_devnode_val = p_inst.value
-                    if hasattr(cfgmgr32, "CM_Get_Device_IDW"):
-                        p_buf = (ctypes.c_wchar * 512)()
-                        cr_pid = cfgmgr32.CM_Get_Device_IDW(p_inst.value, p_buf, 512, 0)
-                        if cr_pid == 0 and p_buf.value:
-                            parent_id_str = p_buf.value
-                        else:
-                            parent_id_str = f"DevNode_{p_inst.value}"
+                # Read device properties
+                dev_desc = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_DEVICEDESC)
+                friendly_name = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_FRIENDLYNAME)
+                hw_ids = cls._read_multi_sz_property(setupapi, dev_info, dev_data, cls.SPDRP_HARDWAREID)
+                compat_ids = cls._read_multi_sz_property(setupapi, dev_info, dev_data, cls.SPDRP_COMPATIBLEIDS)
+                cls_name = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_CLASS)
+                service = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_SERVICE)
+                driver = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_DRIVER)
+                mfg = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_MFG)
 
-            name_repr = friendly_name or dev_desc or "Unknown PnP Device"
+                if class_filter:
+                    if not cls_name or class_filter.lower() not in cls_name.lower():
+                        continue
 
-            devices.append({
-                "device_instance_id": inst_id_str,
-                "devnode_handle": dev_data.DevInst,
-                "parent_devnode": parent_devnode_val,
-                "parent_device_id": parent_id_str,
-                "name": name_repr,
-                "friendly_name": friendly_name,
-                "description": dev_desc,
-                "class": cls_name,
-                "hardware_id": hw_ids[0] if hw_ids else None,
-                "hardware_ids": hw_ids,
-                "compatible_ids": compat_ids,
-                "service": service,
-                "driver_key": driver,
-                "manufacturer": mfg,
-                "is_started": bool(dev_status.value & cls.DN_STARTED) if status_available else False,
-                "has_problem": has_problem,
-                "problem_code": prob_num,
-                "problem_description": cls.describe_problem_code(prob_num) if has_problem else "Healthy",
-                "problem_name": cls.CM_PROBLEM_NAMES.get(prob_num, f"CM_PROB_{prob_num}"),
-                "status_available": status_available
-            })
+                # Query parent DevNode and canonical parent instance ID
+                parent_devnode_val = None
+                parent_id_str = None
+                if hasattr(cfgmgr32, "CM_Get_Parent"):
+                    p_inst = wintypes.DWORD()
+                    cr_p = cfgmgr32.CM_Get_Parent(ctypes.byref(p_inst), dev_data.DevInst, 0)
+                    if cr_p == 0:
+                        parent_devnode_val = p_inst.value
+                        if hasattr(cfgmgr32, "CM_Get_Device_IDW"):
+                            p_buf = (ctypes.c_wchar * 512)()
+                            cr_pid = cfgmgr32.CM_Get_Device_IDW(p_inst.value, p_buf, 512, 0)
+                            if cr_pid == 0 and p_buf.value:
+                                parent_id_str = p_buf.value
+                            else:
+                                parent_id_str = f"DevNode_{p_inst.value}"
 
-        setupapi.SetupDiDestroyDeviceInfoList(dev_info)
+                name_repr = friendly_name or dev_desc or "Unknown PnP Device"
+                if not status_available:
+                    prob_desc = "Status Unavailable (CM_Get_DevNode_Status failed)"
+                    prob_name = "CM_PROB_STATUS_UNAVAILABLE"
+                elif has_problem:
+                    prob_desc = cls.describe_problem_code(prob_num)
+                    prob_name = cls.CM_PROBLEM_NAMES.get(prob_num, f"CM_PROB_{prob_num}")
+                else:
+                    prob_desc = "Healthy"
+                    prob_name = cls.CM_PROBLEM_NAMES.get(0, "CM_PROB_OK")
+
+                devices.append({
+                    "device_instance_id": inst_id_str,
+                    "devnode_handle": dev_data.DevInst,
+                    "parent_devnode": parent_devnode_val,
+                    "parent_device_id": parent_id_str,
+                    "name": name_repr,
+                    "friendly_name": friendly_name,
+                    "description": dev_desc,
+                    "class": cls_name,
+                    "hardware_id": hw_ids[0] if hw_ids else None,
+                    "hardware_ids": hw_ids,
+                    "compatible_ids": compat_ids,
+                    "service": service,
+                    "driver_key": driver,
+                    "manufacturer": mfg,
+                    "is_started": bool(dev_status.value & cls.DN_STARTED) if status_available else False,
+                    "has_problem": has_problem,
+                    "problem_code": prob_num,
+                    "problem_description": prob_desc,
+                    "problem_name": prob_name,
+                    "status_available": status_available
+                })
+        finally:
+            setupapi.SetupDiDestroyDeviceInfoList(dev_info)
         return devices
 
     @classmethod
@@ -404,20 +421,35 @@ class NativeDeviceInspector:
                 "platform": sys.platform,
                 "reason": "NativeDeviceInspector requires a Windows NT host system."
             }
-        all_devs = cls.enumerate_devices(max_devices=512)
+        all_devs = cls.enumerate_devices(max_devices=2048)
         problem_devs = [d for d in all_devs if d.get("has_problem") or d.get("problem_code", 0) > 0]
+        status_unavailable_devs = [d for d in all_devs if d.get("status_available") is False]
         display_devs = [d for d in all_devs if (d.get("class") or "").lower() == "display"]
         audio_devs = [d for d in all_devs if (d.get("class") or "").lower() in ("media", "audioendpoint")]
 
-        is_healthy = len(problem_devs) == 0
+        soft_problem_codes = {14, 15, 21, 22, 24, 25, 29, 45, 47}
+        if not all_devs:
+            health_classification = "UNKNOWN"
+        elif problem_devs:
+            has_hard_fault = any(int(d.get("problem_code", 0)) not in soft_problem_codes for d in problem_devs)
+            health_classification = "FAULTING" if has_hard_fault else "DEGRADED"
+        elif status_unavailable_devs:
+            health_classification = "UNKNOWN"
+        else:
+            health_classification = "HEALTHY"
+
+        is_healthy = (len(problem_devs) == 0 and len(all_devs) > 0 and len(status_unavailable_devs) == 0)
 
         return {
             "status": "success",
             "is_hardware_healthy": is_healthy,
+            "health_classification": health_classification,
             "total_pnp_devices_enumerated": len(all_devs),
             "problem_devices_count": len(problem_devs),
+            "status_unavailable_count": len(status_unavailable_devs),
             "display_adapters_count": len(display_devs),
             "audio_devices_count": len(audio_devs),
+            "audio_devices_truncated": len(audio_devs) > 5,
             "display_adapters": display_devs,
             "audio_devices": audio_devs[:5],
             "problem_devices": problem_devs
@@ -739,8 +771,8 @@ class NativeDeviceInspector:
                     ctypes.byref(bytes_returned),
                     None
                 )
-                if ok and bytes_returned.value >= 28:
-                    raw = bytes(out_buf)
+                if ok and bytes_returned.value >= 32:
+                    raw = bytes(out_buf[:bytes_returned.value])
                     version, size, dev_type, dev_mod, removable, queueing, v_off, p_off, r_off, s_off, bus_type = struct.unpack_from(
                         "<IIBB??IIIII", raw, 0
                     )
@@ -808,18 +840,21 @@ class NativeDeviceInspector:
                     drive_type_code = kernel32.GetDriveTypeW(drive_letter)
                     drive_type_str = cls.DRIVE_TYPES.get(drive_type_code, f"DRIVE_{drive_type_code}")
 
+                    used_bytes = max(0, total_bytes.value - free_bytes.value) if space_ok else 0
                     total_gb = round(total_bytes.value / (1024 ** 3), 2) if space_ok else 0.0
                     free_gb = round(free_bytes.value / (1024 ** 3), 2) if space_ok else 0.0
-                    used_gb = round(total_gb - free_gb, 2)
-                    used_pct = round((used_gb / total_gb * 100), 1) if total_gb > 0 else 0.0
+                    used_gb = round(used_bytes / (1024 ** 3), 2) if space_ok else 0.0
+                    used_pct = round((used_bytes / total_bytes.value * 100), 1) if (space_ok and total_bytes.value > 0) else 0.0
 
                     logical_volumes.append({
                         "drive_letter": drive_letter,
                         "volume_name": vol_name_buf.value if vol_ok else "",
                         "file_system": fs_name_buf.value if vol_ok else "Unknown",
+                        "volume_serial_number": f"{serial_num.value:08X}" if vol_ok else None,
                         "drive_type": drive_type_str,
                         "total_bytes": total_bytes.value if space_ok else 0,
                         "free_bytes": free_bytes.value if space_ok else 0,
+                        "used_bytes": used_bytes,
                         "total_gb": total_gb,
                         "free_gb": free_gb,
                         "used_gb": used_gb,

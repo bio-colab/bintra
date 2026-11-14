@@ -52,7 +52,7 @@ def print_help():
  | |_) | | | | | |_| | | (_| |
  |____/|_|_| |_|\__|_|  \__,_|
 
- Bintra Unified CLI v1.0.0 (Windows-Native & 10-Sense Edition)
+ Bintra Unified CLI v1.1.0 (Windows-Native & 10-Sense Edition)
  Autonomous Continuous Semantic Reverse Engineering & Binary Analysis
 
 Usage:
@@ -121,7 +121,7 @@ def main():
         print_help()
         sys.exit(0)
     if sys.argv[1] in ("-v", "-V", "--version", "version"):
-        print("Bintra v1.0.0")
+        print("Bintra v1.1.0")
         sys.exit(0)
 
     cmd_lower = sys.argv[1].lower()

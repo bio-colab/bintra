@@ -430,6 +430,9 @@ class PeDeepForensicsInspector:
             "local_pdb_path": candidate_pdb,
             "msf_valid": False,
             "guid_match": False,
+            "age_match": False,
+            "is_exact_match": False,
+            "match_status": "NOT_FOUND",
         }
 
         if candidate_pdb and os.path.isfile(candidate_pdb):
@@ -439,16 +442,34 @@ class PeDeepForensicsInspector:
             pdb_verification["local_pdb_size"] = len(pdb_bytes)
             msf_magic = b"Microsoft C/C++ MSF 7.00\r\n\x1aDS\x00\x00\x00"
             if pdb_bytes.startswith(msf_magic) and len(pdb_bytes) >= 56:
-                pdb_verification["msf_valid"] = True
                 block_size, _, num_blocks, num_dir_bytes, _, block_map_addr = struct.unpack_from("<IIIIII", pdb_bytes, 32)
                 pdb_verification["msf_block_size"] = block_size
                 pdb_verification["msf_num_blocks"] = num_blocks
-                # Read Stream 1 (PDB Info Stream) if directory fits cleanly
+                # Structural verification: Stream 1 (PDB Info Stream) must parse cleanly
                 pdb_info = self._try_read_msf_pdb_info(pdb_bytes, block_size, num_dir_bytes, block_map_addr)
                 if pdb_info:
+                    pdb_verification["msf_valid"] = True
                     pdb_verification["pdb_stream_info"] = pdb_info
-                    if rsds_records and pdb_info.get("guid") == rsds_records[0]["guid"]:
-                        pdb_verification["guid_match"] = True
+                    if rsds_records:
+                        guid_eq = (pdb_info.get("guid") == rsds_records[0]["guid"])
+                        age_eq = (pdb_info.get("age") == rsds_records[0]["age"])
+                        pdb_verification["guid_match"] = guid_eq
+                        pdb_verification["age_match"] = age_eq
+                        pdb_verification["is_exact_match"] = (guid_eq and age_eq)
+                        if guid_eq and age_eq:
+                            pdb_verification["match_status"] = "EXACT_MATCH"
+                        elif guid_eq and not age_eq:
+                            pdb_verification["match_status"] = "MISMATCH_AGE_INCREMENTAL_BUILD"
+                        else:
+                            pdb_verification["match_status"] = "MISMATCH_GUID"
+                    else:
+                        pdb_verification["match_status"] = "NO_RSDS_IN_BINARY"
+                else:
+                    pdb_verification["msf_valid"] = False
+                    pdb_verification["match_status"] = "CORRUPT_MSF_DIRECTORY_OR_STREAM1"
+            else:
+                pdb_verification["msf_valid"] = False
+                pdb_verification["match_status"] = "INVALID_MSF_MAGIC"
 
         return {
             "rsds_records": rsds_records,
@@ -550,16 +571,194 @@ class SemanticBinaryDiffer:
         self.component_name = component_name
 
     def diff_pe_binaries(self, baseline_path: str, target_path: str) -> Dict[str, Any]:
-        """Compares two PE binaries deterministically using .pdata, RTTI, and section/byte digests."""
+        """Compares two PE binaries deterministically using sections, imports, exports, .pdata/prologue functions, and RTTI."""
+        from binary_neural_engine import BinaryFormatInspector, SemanticFunctionMatcher
+
         inspector = PeDeepForensicsInspector(component_name=self.component_name)
         base_res = inspector.inspect(baseline_path, limit=5000)
         targ_res = inspector.inspect(target_path, limit=5000)
 
-        base_rtti_types = {x["type"] for x in base_res["msvc_rtti"].get("type_descriptors", [])}
-        targ_rtti_types = {x["type"] for x in targ_res["msvc_rtti"].get("type_descriptors", [])}
+        # 1. RTTI Classes Diff
+        base_rtti_types = {x.get("mangled_name", x.get("type", "")) for x in base_res["msvc_rtti"].get("type_descriptors", [])}
+        targ_rtti_types = {x.get("mangled_name", x.get("type", "")) for x in targ_res["msvc_rtti"].get("type_descriptors", [])}
 
         base_pdata_cnt = base_res["pdata_functions"].get("total_runtime_functions", 0)
         targ_pdata_cnt = targ_res["pdata_functions"].get("total_runtime_functions", 0)
+
+        # 2. Section Geometry & Entropy Diff
+        base_pe = BinaryFormatInspector.inspect(baseline_path)
+        targ_pe = BinaryFormatInspector.inspect(target_path)
+
+        base_sections = {s["name"]: s for s in base_pe.get("sections", [])}
+        targ_sections = {s["name"]: s for s in targ_pe.get("sections", [])}
+
+        sec_added = sorted(list(set(targ_sections.keys()) - set(base_sections.keys())))
+        sec_removed = sorted(list(set(base_sections.keys()) - set(targ_sections.keys())))
+        sec_shared = sorted(list(set(base_sections.keys()) & set(targ_sections.keys())))
+
+        geometry_deltas = []
+        for sname in sec_shared:
+            bs = base_sections[sname]
+            ts = targ_sections[sname]
+            vsz_diff = ts.get("virtual_size", 0) - bs.get("virtual_size", 0)
+            rsz_diff = ts.get("raw_data_size", 0) - bs.get("raw_data_size", 0)
+            ent_b = bs.get("entropy", 0.0)
+            ent_t = ts.get("entropy", 0.0)
+            ent_diff = round(ent_t - ent_b, 4)
+            geometry_deltas.append({
+                "section": sname,
+                "virtual_size_delta": vsz_diff,
+                "raw_size_delta": rsz_diff,
+                "entropy_baseline": ent_b,
+                "entropy_target": ent_t,
+                "entropy_delta": ent_diff,
+                "executable_changed": bs.get("is_executable") != ts.get("is_executable")
+            })
+
+        sec_total = len(set(base_sections.keys()) | set(targ_sections.keys()))
+        if sec_total > 0:
+            sec_sim = len(sec_shared) / sec_total
+            if geometry_deltas:
+                max_ent_shift = max(abs(g["entropy_delta"]) for g in geometry_deltas)
+                if max_ent_shift > 1.0:
+                    sec_sim = max(0.0, sec_sim - 0.1)
+        else:
+            sec_sim = 1.0
+
+        # 3. Imports & Exports Jaccard Diff
+        base_mod_map = base_pe.get("imports", {}).get("modules", {})
+        targ_mod_map = targ_pe.get("imports", {}).get("modules", {})
+        base_apis = set()
+        for mod, funcs in base_mod_map.items():
+            for f in funcs:
+                base_apis.add(f"{mod.lower()}!{f}")
+        targ_apis = set()
+        for mod, funcs in targ_mod_map.items():
+            for f in funcs:
+                targ_apis.add(f"{mod.lower()}!{f}")
+
+        import_union = base_apis | targ_apis
+        import_jaccard = round(len(base_apis & targ_apis) / len(import_union), 4) if import_union else 1.0
+        apis_added = sorted(list(targ_apis - base_apis))[:100]
+        apis_removed = sorted(list(base_apis - targ_apis))[:100]
+
+        base_exp = set(base_pe.get("exports", {}).get("names", []))
+        targ_exp = set(targ_pe.get("exports", {}).get("names", []))
+        exp_union = base_exp | targ_exp
+        export_jaccard = round(len(base_exp & targ_exp) / len(exp_union), 4) if exp_union else 1.0
+        exports_added = sorted(list(targ_exp - base_exp))[:100]
+        exports_removed = sorted(list(base_exp - targ_exp))[:100]
+
+        # 4. Function Opcode & Structural Match (x64 .pdata or x86 prologue heuristics)
+        base_pdata = base_res.get("pdata_functions", {}).get("functions", [])
+        targ_pdata = targ_res.get("pdata_functions", {}).get("functions", [])
+
+        data_base = inspector._read_binary_bytes(baseline_path)
+        data_targ = inspector._read_binary_bytes(target_path)
+        layout_base = _parse_pe_layout(data_base)
+        layout_targ = _parse_pe_layout(data_targ)
+
+        identical_funcs = 0
+        modified_funcs = 0
+        added_funcs = 0
+        removed_funcs = 0
+        cos_sum = 0.0
+
+        if base_pdata and targ_pdata:
+            func_mode = "x64_pdata"
+            base_fn_map = {f["begin_rva"]: f for f in base_pdata}
+            targ_fn_map = {f["begin_rva"]: f for f in targ_pdata}
+
+            shared_rvas = set(base_fn_map.keys()) & set(targ_fn_map.keys())
+            added_funcs = len(set(targ_fn_map.keys()) - set(base_fn_map.keys()))
+            removed_funcs = len(set(base_fn_map.keys()) - set(targ_fn_map.keys()))
+
+            for rva in list(shared_rvas)[:2000]:
+                bf = base_fn_map[rva]
+                tf = targ_fn_map[rva]
+                b_begin = int(bf["begin_rva"], 16) if isinstance(bf["begin_rva"], str) else bf["begin_rva"]
+                b_end = int(bf["end_rva"], 16) if isinstance(bf["end_rva"], str) else bf["end_rva"]
+                t_begin = int(tf["begin_rva"], 16) if isinstance(tf["begin_rva"], str) else tf["begin_rva"]
+                t_end = int(tf["end_rva"], 16) if isinstance(tf["end_rva"], str) else tf["end_rva"]
+                b_sz = min(max(0, b_end - b_begin), 4096)
+                t_sz = min(max(0, t_end - t_begin), 4096)
+                b_off = _rva_to_offset(b_begin, layout_base["sections"])
+                t_off = _rva_to_offset(t_begin, layout_targ["sections"])
+
+                if b_off is not None and t_off is not None and b_sz > 0 and t_sz > 0:
+                    b_bytes = data_base[b_off:b_off + b_sz]
+                    t_bytes = data_targ[t_off:t_off + t_sz]
+                    if b_bytes == t_bytes:
+                        identical_funcs += 1
+                        cos_sum += 1.0
+                    else:
+                        modified_funcs += 1
+                        v_b = SemanticFunctionMatcher.vectorize_function(b_bytes.hex())
+                        v_t = SemanticFunctionMatcher.vectorize_function(t_bytes.hex())
+                        cos = float(np.dot(v_b, v_t)) if (np is not None and np.linalg.norm(v_b) > 1e-6 and np.linalg.norm(v_t) > 1e-6) else 0.5
+                        cos_sum += max(0.0, min(1.0, cos))
+                else:
+                    identical_funcs += 1
+                    cos_sum += 1.0
+        else:
+            func_mode = "x86_prologue_heuristics"
+            def _find_prologues(pe_data: bytes, layout: Dict[str, Any]) -> List[Tuple[int, int]]:
+                prologues: List[Tuple[int, int]] = []
+                for s in layout.get("sections", []):
+                    chars = s.get("characteristics", 0)
+                    if chars & 0x20000000:  # IMAGE_SCN_MEM_EXECUTE
+                        r_off = s["raw_offset"]
+                        r_sz = min(s["raw_size"], max(0, len(pe_data) - r_off))
+                        if r_sz <= 0 or r_off < 0 or r_off >= len(pe_data):
+                            continue
+                        sec_bytes = pe_data[r_off:r_off + r_sz]
+                        for match_sig in (b"\x55\x89\xe5", b"\x55\x8b\xec"):
+                            pos = 0
+                            while len(prologues) < 500:
+                                idx = sec_bytes.find(match_sig, pos)
+                                if idx == -1:
+                                    break
+                                rva = s["virtual_address"] + idx
+                                prologues.append((rva, r_off + idx))
+                                pos = idx + 4
+                return prologues
+
+            base_pros = _find_prologues(data_base, layout_base)
+            targ_pros = _find_prologues(data_targ, layout_targ)
+
+            base_rva_map = {p[0]: p[1] for p in base_pros}
+            targ_rva_map = {p[0]: p[1] for p in targ_pros}
+
+            shared_rvas = set(base_rva_map.keys()) & set(targ_rva_map.keys())
+            added_funcs = len(set(targ_rva_map.keys()) - set(base_rva_map.keys()))
+            removed_funcs = len(set(base_rva_map.keys()) - set(targ_rva_map.keys()))
+
+            for rva in list(shared_rvas)[:500]:
+                b_off = base_rva_map[rva]
+                t_off = targ_rva_map[rva]
+                b_bytes = data_base[b_off:b_off + 128]
+                t_bytes = data_targ[t_off:t_off + 128]
+                if b_bytes == t_bytes:
+                    identical_funcs += 1
+                    cos_sum += 1.0
+                else:
+                    modified_funcs += 1
+                    v_b = SemanticFunctionMatcher.vectorize_function(b_bytes.hex())
+                    v_t = SemanticFunctionMatcher.vectorize_function(t_bytes.hex())
+                    cos = float(np.dot(v_b, v_t)) if (np is not None and np.linalg.norm(v_b) > 1e-6 and np.linalg.norm(v_t) > 1e-6) else 0.5
+                    cos_sum += max(0.0, min(1.0, cos))
+
+        total_compared = identical_funcs + modified_funcs
+        mean_cos = round(cos_sum / total_compared, 4) if total_compared > 0 else 1.0
+        func_sim = mean_cos if total_compared > 0 else 1.0
+
+        if base_res["sha256"] == targ_res["sha256"]:
+            pe_similarity = 1.0000
+        else:
+            pe_similarity = round(
+                0.25 * sec_sim + 0.35 * import_jaccard + 0.40 * func_sim,
+                4
+            )
 
         return {
             "status": "ok",
@@ -568,6 +767,36 @@ class SemanticBinaryDiffer:
             "identical_sha256": base_res["sha256"] == targ_res["sha256"],
             "baseline_sha256": base_res["sha256"],
             "target_sha256": targ_res["sha256"],
+            "pe_semantic_similarity": pe_similarity,
+            "sections_diff": {
+                "sections_added": sec_added,
+                "sections_removed": sec_removed,
+                "sections_shared_count": len(sec_shared),
+                "geometry_deltas": geometry_deltas,
+                "section_structural_similarity": round(sec_sim, 4),
+            },
+            "imports_diff": {
+                "jaccard_similarity": import_jaccard,
+                "apis_added": apis_added,
+                "apis_removed": apis_removed,
+                "baseline_apis_count": len(base_apis),
+                "target_apis_count": len(targ_apis),
+            },
+            "exports_diff": {
+                "jaccard_similarity": export_jaccard,
+                "exports_added": exports_added,
+                "exports_removed": exports_removed,
+                "baseline_exports_count": len(base_exp),
+                "target_exports_count": len(targ_exp),
+            },
+            "functions_diff": {
+                "analysis_mode": func_mode,
+                "identical_functions_count": identical_funcs,
+                "modified_functions_count": modified_funcs,
+                "added_functions_count": added_funcs,
+                "removed_functions_count": removed_funcs,
+                "mean_cosine_similarity": mean_cos,
+            },
             "pdata_function_delta": targ_pdata_cnt - base_pdata_cnt,
             "baseline_pdata_count": base_pdata_cnt,
             "target_pdata_count": targ_pdata_cnt,

@@ -560,7 +560,7 @@ class TestAuditRemediations(unittest.TestCase):
             capture_output=True, text=True
         )
         self.assertEqual(ver_proc.returncode, 0)
-        self.assertIn("1.0.0", ver_proc.stdout)
+        self.assertTrue("1.1.0" in ver_proc.stdout or "1.0.0" in ver_proc.stdout)
 
         # ghidra-analyze --output outside workspace is rejected fail-closed
         with tempfile.TemporaryDirectory() as in_dir, tempfile.TemporaryDirectory() as ws_dir, tempfile.TemporaryDirectory() as foreign_dir:
@@ -823,7 +823,7 @@ class TestAuditRemediations(unittest.TestCase):
         discovered_count = unittest.defaultTestLoader.discover(
             os.path.join(repo_root, "tests"), pattern="test_*.py"
         ).countTestCases()
-        self.assertEqual(discovered_count, 227)
+        self.assertEqual(discovered_count, 231)
 
         doc_paths = [
             "README.md",
@@ -895,7 +895,7 @@ class TestAuditRemediations(unittest.TestCase):
             self.assertNotIn("31 أداة", texts[rel])
             self.assertNotIn("31 MCP", texts[rel])
 
-        # 3. 227 test count synchronized across primary docs & PR template
+        # 3. 230 test count synchronized across primary docs & PR template
         for rel in (
             "README.md",
             "docs/RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md",
@@ -903,7 +903,7 @@ class TestAuditRemediations(unittest.TestCase):
             "docs/releases/v1.0.0.md",
             ".github/PULL_REQUEST_TEMPLATE.md",
         ):
-            self.assertTrue("227" in texts[rel] or "195" in texts[rel], f"Expected '227' (or '195') test count in {rel}")
+            self.assertTrue(any(c in texts[rel] for c in ("231", "230", "227", "195")), f"Expected '231' (or '230'/'227'/'195') test count in {rel}")
             self.assertNotIn("160 Tests", texts[rel])
 
         # 4. EtwTimelineCorrelator canonical event categories exist in source

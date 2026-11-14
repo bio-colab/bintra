@@ -21,9 +21,11 @@ from typing import Dict, Any, List, Optional
 class _ProcessFileLock:
     """Inter-process cross-process file lock using msvcrt (Windows) or fcntl (POSIX)."""
 
-    def __init__(self, lock_file_path: str, timeout: float = 10.0):
+    def __init__(self, lock_file_path: str, timeout: float = 10.0, fail_closed: Optional[bool] = None):
         self.lock_file_path = lock_file_path
         self.timeout = timeout
+        self.fail_closed = fail_closed
+        self.acquired = False
         self._fd = None
 
     def __enter__(self):
@@ -36,10 +38,16 @@ class _ProcessFileLock:
                 os.makedirs(parent_dir, exist_ok=True)
             except Exception:
                 pass
+
+        strict = self.fail_closed if self.fail_closed is not None else AuditLogger.get_strict_persistence()
+
         try:
             self._fd = open(self.lock_file_path, "a+b")
-        except Exception:
+        except Exception as open_err:
             self._fd = None
+            AuditLogger.mark_degraded(f"Cannot open audit lock file: {open_err}")
+            if strict:
+                raise AuditPersistenceError(f"CRITICAL: Failed to open inter-process audit lock file '{self.lock_file_path}': {open_err}") from open_err
             return self
 
         while True:
@@ -51,18 +59,28 @@ class _ProcessFileLock:
                 else:
                     import fcntl
                     fcntl.flock(self._fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.acquired = True
                 return self
             except (BlockingIOError, OSError, PermissionError):
                 if time.time() - start > self.timeout:
-                    # Timeout fallback - proceed without deadlock
+                    AuditLogger.mark_degraded(f"Timeout ({self.timeout}s) waiting for audit lock '{self.lock_file_path}'")
+                    if strict:
+                        raise AuditPersistenceError(
+                            f"CRITICAL: Timeout ({self.timeout}s) acquiring inter-process audit lock on '{self.lock_file_path}'"
+                        )
                     break
                 time.sleep(0.01)
-            except Exception:
+            except Exception as lock_err:
+                AuditLogger.mark_degraded(f"Unexpected error acquiring audit lock: {lock_err}")
+                if strict:
+                    raise AuditPersistenceError(
+                        f"CRITICAL: Unexpected error acquiring audit lock on '{self.lock_file_path}': {lock_err}"
+                    ) from lock_err
                 break
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._fd:
+        if self._fd and self.acquired:
             try:
                 if os.name == "nt":
                     import msvcrt
@@ -73,11 +91,13 @@ class _ProcessFileLock:
                     fcntl.flock(self._fd.fileno(), fcntl.LOCK_UN)
             except Exception:
                 pass
+        if self._fd:
             try:
                 self._fd.close()
             except Exception:
                 pass
             self._fd = None
+        self.acquired = False
 
 
 class AuditPersistenceError(RuntimeError):
@@ -96,7 +116,7 @@ class AuditLogger:
     Persists audit records to disk and verifies chain integrity.
     """
 
-    _lock = threading.Lock()
+    _lock = threading.RLock()
     _journal: List[Dict[str, Any]] = []
     _sequence: int = 0
     _last_hash: str = "0" * 64

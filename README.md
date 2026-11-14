@@ -159,7 +159,7 @@ bintra/
 ├── skills/
 │   └── bintra/ # Agent-native skill specification
 ├── schemas/                       # Agent MCP tool definitions
-├── tests/                         # 227 automated unit, sensory, telemetry & security tests
+├── tests/                         # 231 automated unit, sensory, telemetry & security tests
 └── docs/                          # Architecture, Roadmap & mathematical foundations
     ├── architecture.md            # Master architecture & formal model
     └── ROADMAP.md                 # Strategic direction, tech evaluation & roadmap
@@ -349,7 +349,7 @@ bintra update --yes
 
 ### Running the Test Suite
 ```powershell
-# Run the complete test suite (227 unit, sensory, runtime telemetry, and security remediation tests)
+# Run the complete test suite (231 unit, sensory, runtime telemetry, and security remediation tests)
 python -m unittest discover -s tests -p "test_*.py"
 ```
 

@@ -1,9 +1,9 @@
 ---
 name: bintra
-description: Master agent skill for Bintra v1.0.0. Autonomous, continuous semantic reverse engineering, deobfuscation, cross-architecture matching (x86-64 vs ARM64), safe surgical binary patching, Windows system forensics (crashes, file locks, driver conflicts), and weight-space neural program analysis for compiled Windows software (.exe, .dll, PE32/PE32+) and embedded AI models (Safetensors, ONNX, DirectML).
+description: Master agent skill for Bintra v1.1.0. Autonomous, continuous semantic reverse engineering, deobfuscation, cross-architecture matching (x86-64 vs ARM64), safe surgical binary patching, Windows system forensics (crashes, file locks, driver conflicts), and weight-space neural program analysis for compiled Windows software (.exe, .dll, PE32/PE32+) and embedded AI models (Safetensors, ONNX, DirectML).
 metadata:
   framework: bintra
-  version: "1.0.0"
+  version: "1.1.0"
   tool_count: 40
   subskills:
     - bintra-binary-dissection

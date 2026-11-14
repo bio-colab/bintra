@@ -49,9 +49,41 @@ class PowerShellExecutor:
                 "error": f"Query '{query_id}' is not in the approved PowerShell cmdlet whitelist."
             }
 
-        ps_exe = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), r"System32\WindowsPowerShell\v1.0\powershell.exe")
-        if not os.path.isfile(ps_exe):
-            ps_exe = "powershell.exe"
+        # Mediate through ExecutionGuard Reference Monitor (Fail-Closed)
+        try:
+            ExecutionGuard.request_access(
+                component="powershell_executor",
+                operation="query_cim",
+                target=f"cim:{query_id}",
+                capability=Capability.SUBPROCESS_CATALOG_EXEC,
+                access_mode="EXEC",
+                metadata={"query_id": query_id, "cmdlet": cmdlet, "timeout": timeout_seconds}
+            )
+        except Exception as guard_err:
+            return {
+                "status": "error",
+                "query_id": query_id,
+                "error": f"ExecutionGuard rejected PowerShell execution: {guard_err}"
+            }
+
+        # Strictly verify powershell.exe inside System32 directory (Never fallback to unverified PATH)
+        sys_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR", r"C:\Windows")
+        candidates = [
+            os.path.join(sys_root, r"System32\WindowsPowerShell\v1.0\powershell.exe"),
+            os.path.join(sys_root, r"System32\powershell.exe"),
+        ]
+        ps_exe = None
+        for cand in candidates:
+            if os.path.isfile(cand):
+                ps_exe = cand
+                break
+
+        if not ps_exe:
+            return {
+                "status": "error",
+                "query_id": query_id,
+                "error": "Verified system powershell.exe not found in Windows System32 directory (fail-closed)."
+            }
 
         command_str = cls.build_command(cmdlet)
         cmd_vector = [

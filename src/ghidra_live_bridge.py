@@ -154,6 +154,7 @@ class GhidraLiveBridgeServer:
         # Bounded LRU cache of decompiled functions pushed by Ghidra
         self._max_cached_functions = 1000
         self._decompiled_functions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        self._cache_lock = threading.Lock()
 
     @staticmethod
     def _write_marker_secure(path: str, payload: Dict[str, Any]) -> bool:

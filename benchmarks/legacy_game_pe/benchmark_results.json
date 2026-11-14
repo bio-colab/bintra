@@ -1,0 +1,232 @@
+{
+  "benchmark_id": "BENCHMARK-LEGACY-PE-GENERALS-001",
+  "target_name": "generals.exe",
+  "file_size_bytes": 6480431,
+  "sha256": "98856e0f439304ac2939c7dfdea21a83be6055b9705c5761d9c8c11bd6e6f0ca",
+  "pe_inspection": {
+    "format": "PE",
+    "pe_type": "PE32 (32-bit)",
+    "machine": "i386 (x86)",
+    "image_base": "0x400000",
+    "entry_point_rva": "0x4e0338",
+    "stored_checksum": "0x0",
+    "sections_count": 6,
+    "sections": [
+      {
+        "name": ".text",
+        "virtual_size": 5472256,
+        "virtual_address": "0x1000",
+        "raw_data_size": 5470593,
+        "entropy": 6.5093,
+        "is_executable": true
+      },
+      {
+        "name": ".rdata",
+        "virtual_size": 552960,
+        "virtual_address": "0x539000",
+        "raw_data_size": 550546,
+        "entropy": 4.9836,
+        "is_executable": false
+      },
+      {
+        "name": ".data",
+        "virtual_size": 720896,
+        "virtual_address": "0x5c0000",
+        "raw_data_size": 424419,
+        "entropy": 5.7226,
+        "is_executable": false
+      },
+      {
+        "name": ".data1",
+        "virtual_size": 4096,
+        "virtual_address": "0x670000",
+        "raw_data_size": 2292,
+        "entropy": 3.9105,
+        "is_executable": false
+      },
+      {
+        "name": ".rsrc",
+        "virtual_size": 24576,
+        "virtual_address": "0x671000",
+        "raw_data_size": 22233,
+        "entropy": 3.8638,
+        "is_executable": false
+      },
+      {
+        "name": "Px7774",
+        "virtual_size": 8239,
+        "virtual_address": "0x677000",
+        "raw_data_size": 8239,
+        "entropy": 4.6243,
+        "is_executable": true
+      }
+    ],
+    "security_mitigations": {
+      "aslr_dynamic_base": false,
+      "high_entropy_64bit_aslr": false,
+      "dep_nx_compat": false,
+      "control_flow_guard_cfg": false,
+      "no_seh": false,
+      "large_address_aware_4gb": true
+    },
+    "imported_dlls_count": 17,
+    "exported_functions_count": 2
+  },
+  "deep_forensics": {
+    "architecture": "x86 (PE32)",
+    "rtti_type_descriptors_count": 12,
+    "rtti_vftables_count": 2,
+    "rtti_classes_sample": [
+      "class INIException",
+      "class .?AW4ErrorCode",
+      "class .?AW4__unnamed",
+      "class exception",
+      "class std::__Named_exception",
+      "class std::logic_error",
+      "class std::out_of_range",
+      "class std::length_error",
+      "class .?AW4SaveCode",
+      "class .?AW4XferStatus"
+    ],
+    "vftables_sample": [
+      {
+        "type": ".?AVtype_info@@",
+        "demangled_hint": "class type_info",
+        "vftable_rva": "0x56ac80",
+        "vftable_va": "0x96ac80",
+        "method_count": 1,
+        "method_vas_sample": [
+          "0x8e0562"
+        ]
+      },
+      {
+        "type": ".?AV_com_error@@",
+        "demangled_hint": "class _com_error",
+        "vftable_rva": "0x56ac88",
+        "vftable_va": "0x96ac88",
+        "method_count": 1,
+        "method_vas_sample": [
+          "0x8e0954"
+        ]
+      }
+    ],
+    "pdb_correlation": {
+      "offline_only": true,
+      "local_pdb_found": false,
+      "local_pdb_path": null,
+      "msf_valid": false,
+      "guid_match": false,
+      "age_match": false,
+      "is_exact_match": false,
+      "match_status": "NOT_FOUND"
+    }
+  },
+  "dependency_resolution": {
+    "verdict": "HEALTHY",
+    "loader_mode": "WOW64 (32-on-64)",
+    "total_imported_dlls": 17,
+    "resolved_dlls_count": 17,
+    "missing_dlls_count": 0,
+    "architecture_mismatches_count": 0,
+    "resolved_modules": [
+      {
+        "imported_name": "ADVAPI32.DLL",
+        "is_known_dll": true,
+        "imported_functions_count": 7
+      },
+      {
+        "imported_name": "AVIFIL32.DLL",
+        "is_known_dll": false,
+        "imported_functions_count": 8
+      },
+      {
+        "imported_name": "DBGHELP.DLL",
+        "is_known_dll": false,
+        "imported_functions_count": 8
+      },
+      {
+        "imported_name": "DINPUT8.DLL",
+        "is_known_dll": false,
+        "imported_functions_count": 1
+      },
+      {
+        "imported_name": "GDI32.DLL",
+        "is_known_dll": true,
+        "imported_functions_count": 18
+      },
+      {
+        "imported_name": "IMM32.DLL",
+        "is_known_dll": true,
+        "imported_functions_count": 12
+      },
+      {
+        "imported_name": "kernel32.dll",
+        "is_known_dll": true,
+        "imported_functions_count": 86
+      },
+      {
+        "imported_name": "MSVCIRT.DLL",
+        "is_known_dll": false,
+        "imported_functions_count": 3
+      },
+      {
+        "imported_name": "msvcrt.dll",
+        "is_known_dll": true,
+        "imported_functions_count": 138
+      },
+      {
+        "imported_name": "OLEAUT32.DLL",
+        "is_known_dll": true,
+        "imported_functions_count": 6
+      },
+      {
+        "imported_name": "SHELL32.DLL",
+        "is_known_dll": true,
+        "imported_functions_count": 3
+      },
+      {
+        "imported_name": "USER32.dll",
+        "is_known_dll": true,
+        "imported_functions_count": 43
+      },
+      {
+        "imported_name": "WINMM.dll",
+        "is_known_dll": false,
+        "imported_functions_count": 3
+      },
+      {
+        "imported_name": "WSOCK32.DLL",
+        "is_known_dll": false,
+        "imported_functions_count": 28
+      },
+      {
+        "imported_name": "BINKW32.DLL",
+        "is_known_dll": false,
+        "imported_functions_count": 11
+      },
+      {
+        "imported_name": "MSS32.DLL",
+        "is_known_dll": false,
+        "imported_functions_count": 60
+      },
+      {
+        "imported_name": "OLE32.DLL",
+        "is_known_dll": true,
+        "imported_functions_count": 6
+      }
+    ],
+    "missing_modules": []
+  },
+  "continuous_deobfuscation": {
+    "total_bytes_analyzed": 4096,
+    "opaque_predicates_detected": 0,
+    "has_control_flow_flattening": false
+  },
+  "semantic_binary_diff": {
+    "identical_sha256": true,
+    "pe_semantic_similarity": 1.0,
+    "functions_diff_mode": "x86_prologue_heuristics",
+    "identical_functions_count": 500,
+    "modified_functions_count": 0
+  }
+}

@@ -51,7 +51,7 @@ except ImportError as err:
 
 
 SERVER_NAME = "bintra"
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "1.1.0"
 PROTOCOL_VERSION = "2024-11-05"
 
 

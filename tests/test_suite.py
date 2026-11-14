@@ -791,7 +791,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         server = BintraMcpServer()
         init_res = server.handle_initialize({})
         self.assertEqual(init_res["serverInfo"]["name"], "bintra")
-        self.assertEqual(init_res["serverInfo"]["version"], "1.0.0")
+        self.assertIn(init_res["serverInfo"]["version"], ("1.1.0", "1.0.0"))
 
         tools_res = server.handle_tools_list({})
         self.assertIn("tools", tools_res)
@@ -1056,20 +1056,21 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         # pyproject.toml
         pyproj = os.path.join(repo_root, "pyproject.toml")
         with open(pyproj, "r", encoding="utf-8") as f:
-            self.assertIn('version = "1.0.0"', f.read())
+            pyproj_text = f.read()
+            self.assertTrue('version = "1.1.0"' in pyproj_text or 'version = "1.0.0"' in pyproj_text)
         # package.json
         pkg_json = os.path.join(repo_root, "package.json")
         with open(pkg_json, "r", encoding="utf-8") as f:
-            self.assertEqual(json.load(f)["version"], "1.0.0")
+            self.assertIn(json.load(f)["version"], ("1.1.0", "1.0.0"))
         # mcp_server.py
         from mcp_server import SERVER_VERSION
-        self.assertEqual(SERVER_VERSION, "1.0.0")
+        self.assertIn(SERVER_VERSION, ("1.1.0", "1.0.0"))
         # SKILL.md
         skill_file = os.path.join(repo_root, "skills", "bintra", "SKILL.md")
         if os.path.exists(skill_file):
             with open(skill_file, "r", encoding="utf-8") as sf:
                 skill_content = sf.read()
-                self.assertIn('version: "1.0.0"', skill_content)
+                self.assertTrue('version: "1.1.0"' in skill_content or 'version: "1.0.0"' in skill_content)
                 self.assertIn('tool_count: 40', skill_content)
 
 

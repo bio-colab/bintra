@@ -214,6 +214,92 @@ class TestDeepReUpgrades(unittest.TestCase):
         self.assertEqual(len(fused["fused_graph"]["nodes"]), 4)
         self.assertEqual(len(fused["fused_graph"]["edges"]), 4)
 
+    def test_pdb_fail_closed_validation_and_incremental_age_match(self):
+        """Verifies GAP-02: Fail-closed PDB validation, age checking, and incremental build detection."""
+        with tempfile.TemporaryDirectory() as tmp:
+            guid_raw = uuid.UUID("AABBCCDD-1122-3344-5566-778899AABBCC").bytes_le
+            # 1. Exact match (age=1 in both PE and PDB)
+            pdb_exact = os.path.join(tmp, "exact.pdb")
+            exe_exact = os.path.join(tmp, "exact.exe")
+            with open(pdb_exact, "wb") as f:
+                f.write(_build_synthetic_msf7_pdb(guid_raw))
+            with open(exe_exact, "wb") as f:
+                f.write(_build_synthetic_pe64_with_forensics(pdb_exact, guid_raw))
+
+            res_exact = PeDeepForensicsInspector().inspect(exe_exact)
+            ver_exact = res_exact["pdb_correlation"]["pdb_verification"]
+            self.assertTrue(ver_exact["msf_valid"])
+            self.assertTrue(ver_exact["guid_match"])
+            self.assertTrue(ver_exact["age_match"])
+            self.assertTrue(ver_exact["is_exact_match"])
+            self.assertEqual(ver_exact["match_status"], "EXACT_MATCH")
+
+            # 2. Incremental build mismatch (GUID matches, but PDB age=2 while PE RSDS age=1)
+            pdb_inc = os.path.join(tmp, "inc.pdb")
+            pdb_inc_bytes = bytearray(_build_synthetic_msf7_pdb(guid_raw))
+            # Offset for Age in Stream 1 (block 5, offset 8)
+            struct.pack_into("<I", pdb_inc_bytes, 512 * 5 + 8, 2)
+            with open(pdb_inc, "wb") as f:
+                f.write(pdb_inc_bytes)
+
+            res_inc = PeDeepForensicsInspector().inspect(exe_exact, pdb_path=pdb_inc)
+            ver_inc = res_inc["pdb_correlation"]["pdb_verification"]
+            self.assertTrue(ver_inc["msf_valid"])
+            self.assertTrue(ver_inc["guid_match"])
+            self.assertFalse(ver_inc["age_match"])
+            self.assertFalse(ver_inc["is_exact_match"])
+            self.assertEqual(ver_inc["match_status"], "MISMATCH_AGE_INCREMENTAL_BUILD")
+
+            # 3. Truncated/corrupt MSF with valid magic header must fail-closed
+            pdb_corrupt = os.path.join(tmp, "corrupt.pdb")
+            corrupt_bytes = bytearray(b"Microsoft C/C++ MSF 7.00\r\n\x1aDS\x00\x00\x00" + b"\x00" * 200)
+            with open(pdb_corrupt, "wb") as f:
+                f.write(corrupt_bytes)
+
+            res_corrupt = PeDeepForensicsInspector().inspect(exe_exact, pdb_path=pdb_corrupt)
+            ver_corrupt = res_corrupt["pdb_correlation"]["pdb_verification"]
+            self.assertFalse(ver_corrupt["msf_valid"])
+            self.assertFalse(ver_corrupt["is_exact_match"])
+            self.assertEqual(ver_corrupt["match_status"], "CORRUPT_MSF_DIRECTORY_OR_STREAM1")
+
+    def test_pe_semantic_binary_differ_deep_features(self):
+        """Verifies GAP-03: Deep PE diffing with section geometry, imports/exports Jaccard, and opcode cosine."""
+        with tempfile.TemporaryDirectory() as tmp:
+            guid_raw = uuid.UUID("DEADBEEF-CAFE-1234-5678-90ABCDEF1234").bytes_le
+            pdb_path = os.path.join(tmp, "base.pdb")
+            exe_base = os.path.join(tmp, "base.exe")
+            exe_targ = os.path.join(tmp, "targ.exe")
+
+            with open(pdb_path, "wb") as f:
+                f.write(_build_synthetic_msf7_pdb(guid_raw))
+            base_bytes = _build_synthetic_pe64_with_forensics(pdb_path, guid_raw)
+            with open(exe_base, "wb") as f:
+                f.write(base_bytes)
+
+            # Target: mutate code byte at raw 0x401
+            targ_bytes = bytearray(base_bytes)
+            targ_bytes[0x401] = targ_bytes[0x401] ^ 0xFF
+            with open(exe_targ, "wb") as f:
+                f.write(targ_bytes)
+
+            differ = SemanticBinaryDiffer()
+            # Test self-diff
+            self_diff = differ.diff_pe_binaries(exe_base, exe_base)
+            self.assertTrue(self_diff["identical_sha256"])
+            self.assertEqual(self_diff["pe_semantic_similarity"], 1.0)
+            self.assertEqual(self_diff["sections_diff"]["section_structural_similarity"], 1.0)
+            self.assertEqual(self_diff["functions_diff"]["identical_functions_count"], 1)
+            self.assertEqual(self_diff["functions_diff"]["modified_functions_count"], 0)
+
+            # Test mutated diff
+            mut_diff = differ.diff_pe_binaries(exe_base, exe_targ)
+            self.assertFalse(mut_diff["identical_sha256"])
+            self.assertIn("sections_diff", mut_diff)
+            self.assertIn("imports_diff", mut_diff)
+            self.assertIn("functions_diff", mut_diff)
+            self.assertEqual(mut_diff["functions_diff"]["modified_functions_count"], 1)
+            self.assertGreater(mut_diff["pe_semantic_similarity"], 0.70)
+
 
 if __name__ == "__main__":
     unittest.main()

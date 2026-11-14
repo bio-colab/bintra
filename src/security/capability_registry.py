@@ -87,6 +87,7 @@ class CapabilityRegistry:
         "crash_rca_engine": {Capability.MINIDUMP_READ, Capability.FILE_READ},
         "command_executor": {Capability.SUBPROCESS_CATALOG_EXEC},
         "cmd_executor": {Capability.SUBPROCESS_CATALOG_EXEC},
+        "powershell_executor": {Capability.SUBPROCESS_CATALOG_EXEC},
 
         # Mutation / Surgery Engines (Confined to Authorized Workspace Only)
         "binary_patcher": {Capability.WORKSPACE_WRITE},

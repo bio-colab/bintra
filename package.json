@@ -1,6 +1,6 @@
 {
   "name": "bintra",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Continuous Semantic Reverse Engineering & Binary Analysis Framework. Extends Bintra to continuous semantic program representations, deobfuscation, cross-architecture matching, surgical binary patching, and weight-space programming.",
   "main": "src/cli.py",
   "bin": {

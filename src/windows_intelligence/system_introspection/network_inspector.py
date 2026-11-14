@@ -8,6 +8,7 @@ PCIe Hardware -> SetupAPI DevNode -> SCM Driver Service -> Driver PE32+ Binary -
 
 import os
 import sys
+import ntpath
 import socket
 import struct
 import ctypes
@@ -363,8 +364,8 @@ class NetworkHardwareInspector:
         driver_file_path = None
         if scm_config and scm_config.get("binary_path"):
             bpath = str(scm_config["binary_path"]).strip()
-            # Extract raw sys filename
-            base_sys = os.path.basename(bpath).lower()
+            # Extract raw sys filename (ntpath for cross-platform Linux CI safety)
+            base_sys = ntpath.basename(bpath).lower()
             if base_sys:
                 target_driver_names.add(base_sys)
 
@@ -372,11 +373,12 @@ class NetworkHardwareInspector:
             windir = os.environ.get("WINDIR", r"C:\Windows")
             b_lower = bpath.lower()
             if b_lower.startswith("\\systemroot\\"):
-                candidate = os.path.join(windir, bpath[12:])
+                rel = bpath[12:]
+                candidate = ntpath.join(windir, rel)
             elif b_lower.startswith("\\??\\"):
                 candidate = bpath[4:]
             elif b_lower.startswith("%systemroot%"):
-                candidate = os.path.join(windir, bpath[13:].lstrip("\\/"))
+                candidate = ntpath.join(windir, bpath[13:].lstrip("\\/"))
             else:
                 candidate = bpath
 
@@ -392,7 +394,7 @@ class NetworkHardwareInspector:
             if kd_name in target_driver_names:
                 matched_kernel_drv = kd
                 break
-            if driver_file_path and kd_path and os.path.normpath(driver_file_path).lower() == os.path.normpath(kd_path):
+            if driver_file_path and kd_path and ntpath.normpath(driver_file_path).lower() == ntpath.normpath(kd_path).lower():
                 matched_kernel_drv = kd
                 break
             if any(t in kd_name for t in target_driver_names if len(t) >= 4):

@@ -795,7 +795,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
         tools_res = server.handle_tools_list({})
         self.assertIn("tools", tools_res)
-        self.assertEqual(len(tools_res["tools"]), 44)
+        self.assertEqual(len(tools_res["tools"]), 46)
         tool_names = [t["name"] for t in tools_res["tools"]]
         self.assertIn("bintra_memory_scan", tool_names)
         self.assertIn("bintra_pointer_scan", tool_names)

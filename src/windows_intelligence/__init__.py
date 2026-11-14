@@ -38,7 +38,8 @@ from .system_introspection import (
     KernelDriverInspector,
     ServiceManagerInspector,
     ProcessMitigationInspector,
-    PortInspector
+    PortInspector,
+    NetworkHardwareInspector
 )
 
 # Runtime Telemetry & Crash Intelligence Submodule (Phase 3)
@@ -91,6 +92,8 @@ __all__ = [
     "KernelDriverInspector",
     "ServiceManagerInspector",
     "ProcessMitigationInspector",
+    "PortInspector",
+    "NetworkHardwareInspector",
     # Runtime Telemetry & Crash Intelligence (Phase 3)
     "MiniDumpParser",
     "EventLogCollector",

@@ -41,7 +41,7 @@ WEIGHT_COMMANDS = {
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless", "ghidra-bridge"}
-WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "port-audit", "hw-tree", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations"}
+WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "port-audit", "hw-tree", "hw-net", "hw-dissect", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations"}
 
 
 def print_help():
@@ -95,6 +95,8 @@ Windows System Intelligence & Failure Diagnostic Commands:
   hw-audit          Inspect live PnP devices, problem codes (CM_PROB_*), and physical storage drives
   port-audit        Audit active COM and LPT ports with USB bridge matching and modem line status
   hw-tree           Render authoritative PnP bus hierarchy tree (ASCII tree, Mermaid, or JSON)
+  hw-net            Audit live network adapters, physical MAC layer, and NDIS link characteristics
+  hw-dissect        Multi-layer hardware-to-ring0 kernel driver reverse engineering dossier (DevNode to KASLR)
   driver-audit      Enumerate loaded kernel drivers and execution image bases via PSAPI
   service-audit     Inspect Windows Service Control Manager (SCM) service states via Advapi32
   dmp-inspect       Multi-stream MiniDump (.dmp) inspection and access violation root-cause analysis
@@ -702,6 +704,114 @@ def _dispatch_cli():
             )
             if args.format in ("tree", "mermaid"):
                 print(report.get("rendered", ""))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "hw-net":
+            parser = argparse.ArgumentParser(description="Authoritative audit of live network adapters and NDIS miniports via iphlpapi")
+            parser.add_argument("command")
+            parser.add_argument("--virtual", action="store_true", help="Include virtual, loopback, and tunnel adapters")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args()
+
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="hw-net",
+                target="NetworkAdapters",
+                capability=Capability.DEVICE_QUERY,
+                access_mode="QUERY",
+            )
+            from windows_intelligence import NetworkHardwareInspector
+            report = NetworkHardwareInspector.audit_network_adapters(include_virtual=args.virtual)
+            if args.format == "md":
+                lines = [
+                    "# Windows Network Adapters & NDIS Telemetry",
+                    f"- **Total Adapters:** {report.get('total_adapters', 0)}",
+                    f"- **Epistemic Classification:** `{report.get('epistemic_classification')}`",
+                    "",
+                    "| Friendly Name | Description | MAC Address | Status | Link Speed | IPv4 Address |",
+                    "| :--- | :--- | :--- | :--- | :--- | :--- |"
+                ]
+                for a in report.get("adapters", []):
+                    ips = ", ".join(a.get("ipv4_addresses", [])) or "None"
+                    rx = a.get("receive_link_speed_mbps", 0.0)
+                    speed_str = f"{rx} Mbps" if rx > 0 else "Disconnected"
+                    lines.append(f"| {a.get('friendly_name')} | {a.get('description')} | `{a.get('physical_mac_address') or 'N/A'}` | {a.get('operational_status')} | {speed_str} | `{ips}` |")
+                print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "hw-dissect":
+            parser = argparse.ArgumentParser(description="Multi-layer hardware-to-ring0 kernel driver reverse engineering dossier")
+            parser.add_argument("command")
+            parser.add_argument("target", nargs="?", default="wifi", help="Target hardware/driver keyword (e.g. 'wifi', 'intel', '8265', 'ethernet')")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args()
+
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="hw-dissect",
+                target=args.target,
+                capability=Capability.DEVICE_QUERY,
+                access_mode="QUERY",
+            )
+            from windows_intelligence import NetworkHardwareInspector
+            report = NetworkHardwareInspector.deep_dissect_network_device(target_query=args.target)
+            if args.format == "md":
+                l1 = report.get("layer_1_physical_bus", {})
+                l2 = report.get("layer_2_ndis_telemetry", {})
+                l3 = report.get("layer_3_driver_registry", {})
+                l4 = report.get("layer_4_scm_service", {})
+                l5 = report.get("layer_5_driver_binary_forensics", {})
+                l6 = report.get("layer_6_runtime_kaslr", {})
+                lines = [
+                    f"# Bintra Multi-Layer Hardware Reverse Engineering Dossier: {report.get('device_name')}",
+                    f"- **Target Query:** `{report.get('target_query')}`",
+                    f"- **Epistemic Classification:** `{report.get('epistemic_classification')}`",
+                    "",
+                    "## Layer 1: Physical DevNode & PCIe Bus Topology",
+                    f"- **Device Instance ID:** `{l1.get('device_instance_id')}`",
+                    f"- **Hardware ID:** `{l1.get('hardware_id')}`",
+                    f"- **Parent Bus Node:** `{l1.get('parent_device_id')}`",
+                    f"- **Operational Status:** Started={l1.get('is_started')}, Problem={l1.get('problem_code')} ({l1.get('problem_description')})",
+                    "",
+                    "## Layer 2: NDIS Stack & Link Layer Telemetry",
+                    f"- **Interface GUID:** `{l2.get('interface_guid')}`",
+                    f"- **Physical MAC Address:** `{l2.get('physical_mac_address')}`",
+                    f"- **Operational Status:** {l2.get('operational_status')}",
+                    f"- **Link Speed:** RX={l2.get('receive_link_speed_mbps')} Mbps, TX={l2.get('transmit_link_speed_mbps')} Mbps",
+                    f"- **IPv4 Addresses:** {', '.join(l2.get('ipv4_addresses', [])) or 'None'}",
+                    "",
+                    "## Layer 3: PnP Driver Registry & INF Metadata",
+                    f"- **Driver Key:** `{l3.get('driver_key')}`",
+                    f"- **Driver Version:** `{l3.get('driver_version')}` (Provider: {l3.get('provider_name')}, Date: {l3.get('driver_date')})",
+                    f"- **INF File:** `{l3.get('inf_path')}`",
+                    "",
+                    "## Layer 4: SCM Driver Service State",
+                    f"- **Service Name:** `{l4.get('service_name')}`",
+                    f"- **Display Name:** `{l4.get('display_name')}`",
+                    f"- **Service State:** `{l4.get('state')}`",
+                    f"- **Driver Binary Path:** `{l4.get('binary_path')}`",
+                    "",
+                    "## Layer 5: Kernel Driver PE32+ Binary Forensics",
+                    f"- **Architecture:** `{l5.get('architecture')}`",
+                    f"- **Preferred Image Base:** `{l5.get('preferred_image_base')}`",
+                    f"- **Entry Point RVA:** `{l5.get('entry_point_rva')}`",
+                    f"- **PE Sections:** {l5.get('total_sections')} sections",
+                    f"- **Runtime Functions (.pdata):** {l5.get('total_pdata_functions')} functions",
+                    f"- **PDB RSDS GUID:** `{l5.get('pdb_correlation', {}).get('rsds_records', [{}])[0].get('guid') if l5.get('pdb_correlation', {}).get('rsds_records') else 'N/A'}`",
+                    "",
+                    "## Layer 6: Ring-0 Kernel Runtime Memory & KASLR",
+                    f"- **Live Kernel Base:** `{l6.get('live_kernel_base_hex')}`",
+                    f"- **KASLR Slide:** `{l6.get('kaslr_slide_hex')}`",
+                    f"- **Live DriverEntry VA:** `{l6.get('live_driver_entry_va')}`",
+                    f"- **KASLR Active:** `{l6.get('aslr_mitigation_active')}`"
+                ]
+                print("\n".join(lines))
             else:
                 print(json.dumps(report, indent=2, ensure_ascii=False))
             return

@@ -149,7 +149,7 @@ bintra/
 ├── README.md                      # Comprehensive guide
 ├── src/
 │   ├── cli.py                     # Unified CLI entry point (`bintra`) with self-update
-│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`bintra-mcp`, 44 tools)
+│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`bintra-mcp`, 46 tools)
 │   ├── binary_neural_engine.py    # PE binary analysis, deobfuscator & patcher
 │   ├── bintra_engine.py       # Weight-space SVD & circuit decompiler
 │   ├── sensory_cortex.py          # 10 Metaphorical Senses evaluation cortex
@@ -237,7 +237,7 @@ bintra sense --hex "55 48 89 e5 90 5d c3"
 
 ## Agent-Native MCP (Model Context Protocol) Integration
 
-`Bintra` ships with a production-ready **JSON-RPC 2.0 stdio MCP server** (`bintra-mcp`) offering **44 mediated reverse engineering and Windows intelligence tools** to AI agents (Claude Desktop, Cursor, Antigravity, Windsurf).
+`Bintra` ships with a production-ready **JSON-RPC 2.0 stdio MCP server** (`bintra-mcp`) offering **46 mediated reverse engineering and Windows intelligence tools** to AI agents (Claude Desktop, Cursor, Antigravity, Windsurf).
 
 ### 1. Claude Desktop Configuration
 Add the `bintra` server to your `%APPDATA%\Claude\claude_desktop_config.json`:

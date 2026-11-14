@@ -46,8 +46,8 @@ class TestTokenEfficiency(unittest.TestCase):
         compact_all = srv.handle_tools_list({"compact": True, "profile": "all"})["tools"]
         static_compact = srv.handle_tools_list({"compact": True, "profile": "static"})["tools"]
 
-        self.assertEqual(len(full), 44)
-        self.assertEqual(len(compact_all), 44)
+        self.assertEqual(len(full), 46)
+        self.assertEqual(len(compact_all), 46)
         self.assertLess(len(static_compact), 15)
 
         full_tok = estimate_tokens(full)

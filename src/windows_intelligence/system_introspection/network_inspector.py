@@ -111,6 +111,27 @@ class NetworkHardwareInspector:
     }
 
     @classmethod
+    def _load_iphlpapi(cls):
+        """
+        Authoritative loader and Win32 API signature typings for iphlpapi.dll.
+        Returns the typed DLL instance or None on non-Windows/unsupported platforms.
+        """
+        windll_cls = getattr(ctypes, "WinDLL", None)
+        if not windll_cls:
+            return None
+        iphlpapi = windll_cls("iphlpapi", use_last_error=True)
+        # Authoritative Win32 API signature for GetAdaptersAddresses
+        iphlpapi.GetAdaptersAddresses.restype = wintypes.ULONG
+        iphlpapi.GetAdaptersAddresses.argtypes = [
+            wintypes.ULONG,
+            wintypes.ULONG,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.POINTER(wintypes.ULONG),
+        ]
+        return iphlpapi
+
+    @classmethod
     def audit_network_adapters(cls, include_virtual: bool = True) -> Dict[str, Any]:
         """
         Enumerates live network adapters using Win32 iphlpapi.GetAdaptersAddresses.
@@ -127,16 +148,14 @@ class NetworkHardwareInspector:
             }
 
         try:
-            iphlpapi = ctypes.WinDLL("iphlpapi", use_last_error=True)
-            # Authoritative Win32 API signature for GetAdaptersAddresses
-            iphlpapi.GetAdaptersAddresses.restype = wintypes.ULONG
-            iphlpapi.GetAdaptersAddresses.argtypes = [
-                wintypes.ULONG,
-                wintypes.ULONG,
-                ctypes.c_void_p,
-                ctypes.c_void_p,
-                ctypes.POINTER(wintypes.ULONG),
-            ]
+            iphlpapi = cls._load_iphlpapi()
+            if not iphlpapi:
+                return {
+                    "status": "error",
+                    "message": "WinDLL/iphlpapi is not available on this platform.",
+                    "total_adapters": 0,
+                    "adapters": []
+                }
         except Exception as e:
             return {
                 "status": "error",
@@ -374,7 +393,21 @@ class NetworkHardwareInspector:
         # 2. Match with IPHelper Adapter
         adapter_guid = None
         driver_reg_info = {}
-        driver_key = target_pnp.get("driver_key")
+        # Pre-seed driver registry info from target_pnp if supplied
+        for k_src, k_dst in [
+            ("driver_version", "DriverVersion"),
+            ("driver_desc", "DriverDesc"),
+            ("driver_date", "DriverDate"),
+            ("provider_name", "ProviderName"),
+            ("net_cfg_instance_id", "NetCfgInstanceId"),
+            ("inf_path", "InfPath"),
+            ("characteristics", "Characteristics"),
+            ("bus_type", "BusType"),
+        ]:
+            if target_pnp.get(k_src):
+                driver_reg_info[k_dst] = target_pnp.get(k_src)
+
+        driver_key = target_pnp.get("driver_key") or target_pnp.get("driver")
         if driver_key and winreg:
             reg_full = rf"SYSTEM\CurrentControlSet\Control\Class\{driver_key}"
             try:
@@ -388,9 +421,9 @@ class NetworkHardwareInspector:
                             driver_reg_info[vname] = vdata
                         except OSError:
                             break
-                    adapter_guid = driver_reg_info.get("NetCfgInstanceId")
             except Exception:
                 pass
+        adapter_guid = driver_reg_info.get("NetCfgInstanceId")
 
         # Query live IP adapters (already cached in all_net)
         matched_ip_adapter = None

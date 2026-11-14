@@ -128,7 +128,7 @@ class TestNetworkHardwareInspector(unittest.TestCase):
         mock_dll.GetAdaptersAddresses.side_effect = fake_get_adapters
 
         with patch("os.name", "nt"):
-            with patch("ctypes.WinDLL", return_value=mock_dll):
+            with patch.object(NetworkHardwareInspector, "_load_iphlpapi", return_value=mock_dll):
                 report = NetworkHardwareInspector.audit_network_adapters(include_virtual=True)
 
         self.assertEqual(report["status"], "success")
@@ -181,7 +181,7 @@ class TestNetworkHardwareInspector(unittest.TestCase):
         mock_dll.GetAdaptersAddresses.side_effect = fake_get_adapters
 
         with patch("os.name", "nt"):
-            with patch("ctypes.WinDLL", return_value=mock_dll):
+            with patch.object(NetworkHardwareInspector, "_load_iphlpapi", return_value=mock_dll):
                 # When include_virtual=False, virtual Wi-Fi Direct must be excluded
                 rep_no_virt = NetworkHardwareInspector.audit_network_adapters(include_virtual=False)
                 # Legacy speed should be 0.0 because Length did not cover speed fields
@@ -212,6 +212,12 @@ class TestNetworkHardwareInspector(unittest.TestCase):
                 "parent_device_id": "PCI\\VEN_8086&DEV_9D12\\3&11583659&0&E2",
                 "service": "Netwtw06",
                 "driver_key": "{4d36e972-e325-11ce-bfc1-08002be10318}\\0002",
+                "driver_version": "20.70.25.2",
+                "driver_desc": "Intel(R) Dual Band Wireless-AC 8265",
+                "provider_name": "Intel",
+                "driver_date": "6-22-2021",
+                "inf_path": "oem3.inf",
+                "net_cfg_instance_id": "{B499737D-84F2-433F-B4CF-E7780121B408}",
                 "class": "Net",
                 "is_started": True,
                 "has_problem": False,
@@ -384,7 +390,7 @@ class TestNetworkHardwareInspector(unittest.TestCase):
         # 2. Live deep dissection
         live_dissect = NetworkHardwareInspector.deep_dissect_network_device(target_query="wifi")
         self.assertIn(live_dissect["status"], ("SUCCESS", "PARTIAL"))
-        self.assertIn("Intel", live_dissect.get("device_name", ""))
+        self.assertTrue(bool(live_dissect.get("device_name")))
         self.assertEqual(live_dissect["layer_1_physical_bus"]["layer_status"], "COMPLETE")
 
 

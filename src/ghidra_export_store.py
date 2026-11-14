@@ -127,6 +127,7 @@ class GhidraExportStore:
                 cur = con.cursor()
                 cur.execute("SELECT COUNT(*) FROM functions")
                 cur.fetchone()
+                cur.close()
                 con.close()
                 return cache_path
             except Exception:
@@ -166,187 +167,195 @@ class GhidraExportStore:
     def ingest_to_sqlite(cls, source_path: str, target_db_path: str, is_jsonl: bool = False) -> None:
         """
         Surgically ingests a Ghidra .json or .jsonl export into an indexed SQLite database.
-        Uses WAL mode, synchronous=NORMAL, and chunked batch transactions.
+        Uses in-memory journaling and chunked batch transactions with guaranteed handle cleanup.
         """
-        tmp_db = target_db_path + ".tmp"
-        if os.path.exists(tmp_db):
-            try:
-                os.remove(tmp_db)
-            except Exception:
-                pass
-
-        con = sqlite3.connect(tmp_db)
-        cur = con.cursor()
-        cur.execute("PRAGMA journal_mode = WAL;")
-        cur.execute("PRAGMA synchronous = NORMAL;")
-
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS program_metadata (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        );
-        """)
-
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS functions (
-            entry_point TEXT PRIMARY KEY,
-            name TEXT,
-            size INTEGER,
-            parameter_count INTEGER,
-            return_type TEXT,
-            has_sensitive_api INTEGER DEFAULT 0,
-            pcode_ops_count INTEGER DEFAULT 0,
-            basic_blocks_count INTEGER DEFAULT 0,
-            data JSON
-        );
-        """)
-
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_func_name ON functions(name);")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_func_sens ON functions(has_sensitive_api);")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_func_size ON functions(size);")
-
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS call_edges (
-            caller_name TEXT,
-            caller_addr TEXT,
-            callee_name TEXT,
-            callee_addr TEXT,
-            is_indirect INTEGER DEFAULT 0,
-            call_site_addr TEXT
-        );
-        """)
-
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_edge_caller ON call_edges(caller_name);")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_edge_callee ON call_edges(callee_name);")
-
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS xrefs (
-            function_name TEXT,
-            from_addr TEXT,
-            to_addr TEXT,
-            xref_type TEXT,
-            symbol TEXT
-        );
-        """)
-
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_xref_fn ON xrefs(function_name);")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_xref_to ON xrefs(to_addr);")
-
-        def _insert_func_batch(batch: List[Tuple[Any, ...]], edges_batch: List[Tuple[Any, ...]], xrefs_batch: List[Tuple[Any, ...]]):
-            if batch:
-                cur.executemany(
-                    "INSERT OR REPLACE INTO functions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    batch
-                )
-            if edges_batch:
-                cur.executemany(
-                    "INSERT INTO call_edges VALUES (?, ?, ?, ?, ?, ?)",
-                    edges_batch
-                )
-            if xrefs_batch:
-                cur.executemany(
-                    "INSERT INTO xrefs VALUES (?, ?, ?, ?, ?)",
-                    xrefs_batch
-                )
-
-        func_batch: List[Tuple[Any, ...]] = []
-        edge_batch: List[Tuple[Any, ...]] = []
-        xref_batch: List[Tuple[Any, ...]] = []
-
-        def _process_function(fn: Dict[str, Any]):
-            name = str(fn.get("name", "unknown"))
-            entry = str(fn.get("entry_point", fn.get("address", "0x0")))
-            size = int(fn.get("size", 0))
-            param_cnt = int(fn.get("parameter_count", 0))
-            ret_type = str(fn.get("return_type", "void"))
-            pcode = fn.get("pcode_ops", [])
-            blocks = fn.get("basic_blocks", [])
-
-            # Check sensitive APIs
-            callees = list(fn.get("callees", []))
-            for op in pcode:
-                opc = str(op.get("opcode", "")).upper()
-                if opc == "CALL":
-                    tgt = op.get("target_name") or op.get("target_address")
-                    if tgt and tgt not in callees:
-                        callees.append(str(tgt))
-                elif opc == "CALLIND":
-                    edge_batch.append((name, entry, "INDIRECT_CALL", "0x0", 1, str(op.get("address", entry))))
-
-            has_sens = 1 if any(any(pat.lower() in str(c).lower() for pat in SENSITIVE_API_PATTERNS) for c in callees) else 0
-
-            for c in callees:
-                edge_batch.append((name, entry, str(c), "", 0, entry))
-
-            for xr in fn.get("xrefs", []):
-                xref_batch.append((
-                    name,
-                    str(xr.get("from", entry)),
-                    str(xr.get("to", "")),
-                    str(xr.get("type", "CALL")),
-                    str(xr.get("symbol", ""))
-                ))
-
-            func_batch.append((
-                entry,
-                name,
-                size,
-                param_cnt,
-                ret_type,
-                has_sens,
-                len(pcode),
-                len(blocks),
-                json.dumps(fn, ensure_ascii=False)
-            ))
-
-            if len(func_batch) >= 1000:
-                _insert_func_batch(func_batch, edge_batch, xref_batch)
-                func_batch.clear()
-                edge_batch.clear()
-                xref_batch.clear()
-
-        if is_jsonl:
-            with open(source_path, "r", encoding="utf-8", errors="replace") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    obj = json.loads(line)
-                    if "program_name" in obj or "image_base" in obj:
-                        for k, v in obj.items():
-                            if k != "functions":
-                                cur.execute("INSERT OR REPLACE INTO program_metadata VALUES (?, ?)", (str(k), str(v)))
-                    if "functions" in obj and isinstance(obj["functions"], list):
-                        for fn in obj["functions"]:
-                            _process_function(fn)
-                    elif "entry_point" in obj or "name" in obj:
-                        _process_function(obj)
-        else:
-            with open(source_path, "r", encoding="utf-8", errors="replace") as f:
-                payload = json.load(f)
-            if isinstance(payload, dict):
-                for k, v in payload.items():
-                    if k != "functions":
-                        cur.execute("INSERT OR REPLACE INTO program_metadata VALUES (?, ?)", (str(k), str(v)))
-                for fn in payload.get("functions", []):
-                    _process_function(fn)
-            elif isinstance(payload, list):
-                for fn in payload:
-                    _process_function(fn)
-
-        if func_batch or edge_batch or xref_batch:
-            _insert_func_batch(func_batch, edge_batch, xref_batch)
-
-        con.commit()
-        con.close()
-
-        # Atomic rename
         if os.path.exists(target_db_path):
             try:
                 os.remove(target_db_path)
             except Exception:
                 pass
-        os.rename(tmp_db, target_db_path)
+
+        con = sqlite3.connect(target_db_path)
+        try:
+            cur = con.cursor()
+            cur.execute("PRAGMA journal_mode = MEMORY;")
+            cur.execute("PRAGMA synchronous = OFF;")
+
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS program_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );
+            """)
+
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS functions (
+                entry_point TEXT PRIMARY KEY,
+                name TEXT,
+                size INTEGER,
+                parameter_count INTEGER,
+                return_type TEXT,
+                has_sensitive_api INTEGER DEFAULT 0,
+                pcode_ops_count INTEGER DEFAULT 0,
+                basic_blocks_count INTEGER DEFAULT 0,
+                data JSON
+            );
+            """)
+
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_func_name ON functions(name);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_func_sens ON functions(has_sensitive_api);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_func_size ON functions(size);")
+
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS call_edges (
+                caller_name TEXT,
+                caller_addr TEXT,
+                callee_name TEXT,
+                callee_addr TEXT,
+                is_indirect INTEGER DEFAULT 0,
+                call_site_addr TEXT
+            );
+            """)
+
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_edge_caller ON call_edges(caller_name);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_edge_callee ON call_edges(callee_name);")
+
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS xrefs (
+                function_name TEXT,
+                from_addr TEXT,
+                to_addr TEXT,
+                xref_type TEXT,
+                symbol TEXT
+            );
+            """)
+
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_xref_fn ON xrefs(function_name);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_xref_to ON xrefs(to_addr);")
+
+            def _insert_func_batch(batch: List[Tuple[Any, ...]], edges_batch: List[Tuple[Any, ...]], xrefs_batch: List[Tuple[Any, ...]]):
+                if batch:
+                    cur.executemany(
+                        "INSERT OR REPLACE INTO functions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        batch
+                    )
+                if edges_batch:
+                    cur.executemany(
+                        "INSERT INTO call_edges VALUES (?, ?, ?, ?, ?, ?)",
+                        edges_batch
+                    )
+                if xrefs_batch:
+                    cur.executemany(
+                        "INSERT INTO xrefs VALUES (?, ?, ?, ?, ?)",
+                        xrefs_batch
+                    )
+
+            func_batch: List[Tuple[Any, ...]] = []
+            edge_batch: List[Tuple[Any, ...]] = []
+            xref_batch: List[Tuple[Any, ...]] = []
+
+            def _process_function(fn: Dict[str, Any]):
+                name = str(fn.get("name", "unknown"))
+                entry = str(fn.get("entry_point", fn.get("address", "0x0")))
+                size = int(fn.get("size", 0))
+                param_cnt = int(fn.get("parameter_count", 0))
+                ret_type = str(fn.get("return_type", "void"))
+                pcode = fn.get("pcode_ops", [])
+                blocks = fn.get("basic_blocks", [])
+
+                # Check sensitive APIs
+                callees = list(fn.get("callees", []))
+                for op in pcode:
+                    opc = str(op.get("opcode", "")).upper()
+                    if opc == "CALL":
+                        tgt = op.get("target_name") or op.get("target_address")
+                        if tgt and tgt not in callees:
+                            callees.append(str(tgt))
+                    elif opc == "CALLIND":
+                        edge_batch.append((name, entry, "INDIRECT_CALL", "0x0", 1, str(op.get("address", entry))))
+
+                has_sens = 1 if any(any(pat.lower() in str(c).lower() for pat in SENSITIVE_API_PATTERNS) for c in callees) else 0
+
+                for c in callees:
+                    edge_batch.append((name, entry, str(c), "", 0, entry))
+
+                for xr in fn.get("xrefs", []):
+                    xref_batch.append((
+                        name,
+                        str(xr.get("from", entry)),
+                        str(xr.get("to", "")),
+                        str(xr.get("type", "CALL")),
+                        str(xr.get("symbol", ""))
+                    ))
+
+                func_batch.append((
+                    entry,
+                    name,
+                    size,
+                    param_cnt,
+                    ret_type,
+                    has_sens,
+                    len(pcode),
+                    len(blocks),
+                    json.dumps(fn, ensure_ascii=False)
+                ))
+
+                if len(func_batch) >= 1000:
+                    _insert_func_batch(func_batch, edge_batch, xref_batch)
+                    func_batch.clear()
+                    edge_batch.clear()
+                    xref_batch.clear()
+
+            if is_jsonl:
+                with open(source_path, "r", encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        obj = json.loads(line)
+                        if "program_name" in obj or "image_base" in obj:
+                            for k, v in obj.items():
+                                if k != "functions":
+                                    cur.execute("INSERT OR REPLACE INTO program_metadata VALUES (?, ?)", (str(k), str(v)))
+                        if "functions" in obj and isinstance(obj["functions"], list):
+                            for fn in obj["functions"]:
+                                _process_function(fn)
+                        elif "entry_point" in obj or "name" in obj:
+                            _process_function(obj)
+            else:
+                with open(source_path, "r", encoding="utf-8", errors="replace") as f:
+                    payload = json.load(f)
+                if isinstance(payload, dict):
+                    for k, v in payload.items():
+                        if k != "functions":
+                            cur.execute("INSERT OR REPLACE INTO program_metadata VALUES (?, ?)", (str(k), str(v)))
+                    for fn in payload.get("functions", []):
+                        _process_function(fn)
+                elif isinstance(payload, list):
+                    for fn in payload:
+                        _process_function(fn)
+
+            if func_batch or edge_batch or xref_batch:
+                _insert_func_batch(func_batch, edge_batch, xref_batch)
+
+            con.commit()
+            cur.close()
+        except Exception:
+            try:
+                con.close()
+            except Exception:
+                pass
+            if os.path.exists(target_db_path):
+                try:
+                    os.remove(target_db_path)
+                except Exception:
+                    pass
+            raise
+        finally:
+            try:
+                con.close()
+            except Exception:
+                pass
 
     def _get_connection(self) -> sqlite3.Connection:
         if self._conn is None:

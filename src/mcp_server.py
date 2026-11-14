@@ -2035,34 +2035,33 @@ class BintraMcpServer:
             t_path = args["target_path"]
             if mode_val == "ghidra_export":
                 from ghidra_export_store import GhidraExportStore
-                b_store = GhidraExportStore.from_path(b_path)
-                t_store = GhidraExportStore.from_path(t_path)
-                b_funcs = list(b_store.iter_functions()) if b_store.is_sqlite else b_store.to_dict().get("functions", [])
-                t_funcs = list(t_store.iter_functions()) if t_store.is_sqlite else t_store.to_dict().get("functions", [])
-                return SemanticBinaryDiffer().diff_function_exports(b_funcs, t_funcs)
+                with GhidraExportStore.from_path(b_path) as b_store, GhidraExportStore.from_path(t_path) as t_store:
+                    b_funcs = list(b_store.iter_functions()) if b_store.is_sqlite else b_store.to_dict().get("functions", [])
+                    t_funcs = list(t_store.iter_functions()) if t_store.is_sqlite else t_store.to_dict().get("functions", [])
+                    return SemanticBinaryDiffer().diff_function_exports(b_funcs, t_funcs)
             return SemanticBinaryDiffer().diff_pe_binaries(b_path, t_path)
 
         elif name == "bintra_ghidra_call_graph":
             from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
             from ghidra_export_store import GhidraExportStore
             ep = args["export_path"]
-            store = GhidraExportStore.from_path(ep)
-            return GhidraDeepAnalyzer().build_call_graph_and_xrefs(
-                store,
-                target_function=args.get("target_function"),
-                max_depth=int(args.get("max_depth", 4)),
-            )
+            with GhidraExportStore.from_path(ep) as store:
+                return GhidraDeepAnalyzer().build_call_graph_and_xrefs(
+                    store,
+                    target_function=args.get("target_function"),
+                    max_depth=int(args.get("max_depth", 4)),
+                )
 
         elif name == "bintra_ghidra_data_flow":
             from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
             from ghidra_export_store import GhidraExportStore
             ep = args["export_path"]
             fn_target = args["function_name"]
-            store = GhidraExportStore.from_path(ep)
-            matched_fn = store.get_function(fn_target)
-            if not matched_fn:
-                return {"status": "not_found", "function_name": fn_target}
-            return GhidraDeepAnalyzer().slice_data_flow(matched_fn, target_var=args.get("target_var"))
+            with GhidraExportStore.from_path(ep) as store:
+                matched_fn = store.get_function(fn_target)
+                if not matched_fn:
+                    return {"status": "not_found", "function_name": fn_target}
+                return GhidraDeepAnalyzer().slice_data_flow(matched_fn, target_var=args.get("target_var"))
 
         elif name == "bintra_fuse_evidence":
             from windows_intelligence.evidence_engine.graph_model import fuse_static_dynamic_ghidra
@@ -2080,13 +2079,13 @@ class BintraMcpServer:
                 from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
                 from ghidra_export_store import GhidraExportStore
                 gp = args["ghidra_export_path"]
-                store = GhidraExportStore.from_path(gp)
-                analyzer = GhidraDeepAnalyzer()
-                cg_res = analyzer.build_call_graph_and_xrefs(store, target_function=args.get("function_name"))
-                if args.get("function_name"):
-                    fn_match = store.get_function(args["function_name"])
-                    if fn_match:
-                        df_res = analyzer.slice_data_flow(fn_match)
+                with GhidraExportStore.from_path(gp) as store:
+                    analyzer = GhidraDeepAnalyzer()
+                    cg_res = analyzer.build_call_graph_and_xrefs(store, target_function=args.get("function_name"))
+                    if args.get("function_name"):
+                        fn_match = store.get_function(args["function_name"])
+                        if fn_match:
+                            df_res = analyzer.slice_data_flow(fn_match)
             return fuse_static_dynamic_ghidra(pe_forensics=pe_res, crash_rca=rca_res, ghidra_call_graph=cg_res, ghidra_data_flow=df_res)
 
         elif name == "bintra_list_capabilities":

@@ -120,10 +120,15 @@ class EtwLiveCaptureSession:
     def decode_raw_payload(raw: bytes) -> Dict[str, Any]:
         """
         Decodes raw UserData buffer from an ETW event record.
-        Extracts UTF-16LE / ASCII strings, file paths, driver modules, and hardware IDs.
+        Extracts UTF-16LE / ASCII strings, file paths, driver modules, and hardware IDs
+        using heuristic string carving (without requiring TDH manifest parsing).
         """
         if not raw:
-            return {"decoded": False}
+            return {
+                "decoded": False,
+                "epistemic_classification": "HEURISTIC_PAYLOAD_STRING_CARVING",
+                "tdh_schema_decoding": False
+            }
         try:
             extracted_strings = []
             is_utf16 = len(raw) >= 4 and (raw[1::2].count(0) > len(raw) // 4)
@@ -163,7 +168,11 @@ class EtwLiveCaptureSession:
                                 extracted_strings.append(s)
                         except Exception:
                             pass
-            res = {"decoded": bool(extracted_strings)}
+            res = {
+                "decoded": bool(extracted_strings),
+                "epistemic_classification": "HEURISTIC_PAYLOAD_STRING_CARVING",
+                "tdh_schema_decoding": False
+            }
             if extracted_strings:
                 res["strings"] = extracted_strings[:5]
                 for s in extracted_strings:
@@ -175,7 +184,11 @@ class EtwLiveCaptureSession:
                         res["hardware_id"] = s
             return res
         except Exception:
-            return {"decoded": False}
+            return {
+                "decoded": False,
+                "epistemic_classification": "HEURISTIC_PAYLOAD_STRING_CARVING",
+                "tdh_schema_decoding": False
+            }
 
     def start_session(self, providers: Optional[List[str]] = None) -> Dict[str, Any]:
         """

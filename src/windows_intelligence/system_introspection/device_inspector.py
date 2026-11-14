@@ -40,26 +40,67 @@ class NativeDeviceInspector:
     """
 
     CM_PROB_DESCRIPTIONS = {
-        0: "Healthy",
+        0: "Healthy (Device working normally)",
         1: "CM_PROB_NOT_CONFIGURED (Device is not configured correctly)",
+        2: "CM_PROB_DEVLOADER_FAILED (Device loader failed)",
         3: "CM_PROB_OUT_OF_MEMORY (Driver out of memory)",
+        4: "CM_PROB_ENTRY_IS_WRONG_TYPE (Device entry is wrong type)",
+        5: "CM_PROB_LACKED_ARBITRATOR (Lacked arbitrator for resource)",
+        6: "CM_PROB_BOOT_CONFIG_CONFLICT (Boot config conflict)",
+        7: "CM_PROB_FAILED_FILTER (Failed filter)",
+        8: "CM_PROB_DEVLOADER_NOT_FOUND (Device loader not found)",
+        9: "CM_PROB_INVALID_DATA (Invalid data in registry or firmware)",
         10: "CM_PROB_FAILED_START (Device cannot start)",
+        11: "CM_PROB_LIAR (Device failed or reported impossible state)",
         12: "CM_PROB_NORMAL_CONFLICT (Cannot find enough free resources)",
+        13: "CM_PROB_NOT_VERIFIED (Device not verified)",
         14: "CM_PROB_NEED_RESTART (Restart required)",
+        15: "CM_PROB_REENUMERATION (Reenumeration required)",
+        16: "CM_PROB_PARTIAL_LOG_CONF (Partial logical configuration)",
+        17: "CM_PROB_UNKNOWN_RESOURCE (Unknown resource type)",
         18: "CM_PROB_REINSTALL (Reinstall drivers for this device)",
+        19: "CM_PROB_REGISTRY (Registry returned a failure)",
+        20: "CM_PROB_VXDLDR (VxD loader failure)",
+        21: "CM_PROB_WILL_BE_REMOVED (Device is being removed)",
         22: "CM_PROB_DISABLED (Device is disabled)",
+        23: "CM_PROB_DEVLOADER_NOT_READY (Devloader not ready)",
+        24: "CM_PROB_DEVICE_NOT_THERE (Hardware device not present / disconnected)",
+        25: "CM_PROB_MOVED (Device moved)",
+        26: "CM_PROB_TOO_EARLY (Device called too early)",
+        27: "CM_PROB_NO_VALID_LOG_CONF (No valid logical configuration)",
         28: "CM_PROB_FAILED_INSTALL (Drivers for this device are not installed)",
-        31: "CM_PROB_FAILED_ADD (Device is not working properly; driver load failed)",
+        29: "CM_PROB_HARDWARE_DISABLED (Device hardware is disabled)",
+        30: "CM_PROB_CANT_SHARE_IRQ (Cannot share IRQ)",
+        31: "CM_PROB_FAILED_ADD (Device is not working properly; driver load failed / AddDevice error)",
+        32: "CM_PROB_DISABLED_SERVICE (Driver service is disabled)",
+        33: "CM_PROB_TRANSLATION_FAILED (Resource translation failed)",
+        34: "CM_PROB_NO_SOFTCONFIG (No soft config found)",
+        35: "CM_PROB_BIOS_TABLE (Machine BIOS table error)",
+        36: "CM_PROB_IRQ_TRANSLATION_FAILED (IRQ translation failed)",
         37: "CM_PROB_FAILED_DRIVER_ENTRY (Windows cannot initialize device driver)",
+        38: "CM_PROB_DRIVER_FAILED_PRIOR_UNLOAD (Driver failed prior unload)",
         39: "CM_PROB_DRIVER_FAILED_LOAD (Driver corrupted or missing)",
-        43: "CM_PROB_FAILED_POST_START (Windows stopped device because it reported problems)",
+        40: "CM_PROB_DRIVER_SERVICE_KEY_INVALID (Driver service registry key invalid)",
+        41: "CM_PROB_LEGACY_SERVICE_NO_DEVICES (Legacy service created no devices)",
+        42: "CM_PROB_DUPLICATE_DEVICE (Duplicate device instance detected)",
+        43: "CM_PROB_FAILED_POST_START (Windows stopped device because it reported problems / Code 43)",
+        44: "CM_PROB_HALTED (Device halted)",
         45: "CM_PROB_PHANTOM (Hardware device not currently connected)",
-        48: "CM_PROB_BLOCKED_DRIVER (Software/driver blocked from starting)",
-        52: "CM_PROB_UNSIGNED_DRIVER (Cannot verify digital signature for drivers)",
+        46: "CM_PROB_SYSTEM_SHUTDOWN (System is shutting down)",
+        47: "CM_PROB_HELD_VDL (Held VDL)",
+        48: "CM_PROB_NEEDS_VCS (Device driver blocked from starting / needs VCS)",
+        49: "CM_PROB_BOOT_FAILURE (Boot failure)",
+        50: "CM_PROB_VERIFY_FAILED (Driver verification failed)",
+        51: "CM_PROB_FAILED_INITIALIZING_DEVICE (Device initialization failed)",
+        52: "CM_PROB_FAILED_START_RESOURCE_CONFLICT (CM_PROB_UNSIGNED_DRIVER: Cannot verify digital signature for drivers)",
+        53: "CM_PROB_GENERIC_DRIVER_BLOCKED (Driver blocked from starting)",
+        54: "CM_PROB_DRIVER_BLOCKED_UNSAFE (Driver blocked due to security vulnerability)",
     }
 
     @classmethod
     def describe_problem_code(cls, code: int) -> str:
+        if int(code) == 0:
+            return "Healthy"
         return cls.CM_PROB_DESCRIPTIONS.get(int(code), f"CM_PROB_{int(code)}")
 
     DIGCF_PRESENT = 0x00000002
@@ -83,19 +124,63 @@ class NativeDeviceInspector:
     DN_REMOVABLE = 0x00004000
     DN_HAS_PROBLEM = 0x00000400
 
-    # CfgMgr32 Problem Codes (CM_PROB_*)
+    # CfgMgr32 Problem Codes (CM_PROB_*) - Canonical Microsoft SDK cfg.h definitions
     CM_PROBLEM_NAMES = {
-        0: "CM_PROB_OK (Device working normally)",
+        0: "CM_PROB_OK",
         1: "CM_PROB_NOT_CONFIGURED",
-        10: "CM_PROB_FAILED_START (Device failed to start / Driver init failure)",
-        12: "CM_PROB_NORMAL_CONFLICT (Resource arbitration conflict)",
-        14: "CM_PROB_NEED_RESTART (System restart required)",
-        18: "CM_PROB_REINSTALL (Reinstallation needed)",
-        20: "CM_PROB_FAILED_ADD",
-        22: "CM_PROB_DISABLED (Device is disabled)",
-        28: "CM_PROB_FAILED_INSTALL (Drivers not installed)",
-        31: "CM_PROB_FAILED_POST_START",
-        43: "CM_PROB_CODE43 (Device reported fatal error / GPU driver crash)"
+        2: "CM_PROB_DEVLOADER_FAILED",
+        3: "CM_PROB_OUT_OF_MEMORY",
+        4: "CM_PROB_ENTRY_IS_WRONG_TYPE",
+        5: "CM_PROB_LACKED_ARBITRATOR",
+        6: "CM_PROB_BOOT_CONFIG_CONFLICT",
+        7: "CM_PROB_FAILED_FILTER",
+        8: "CM_PROB_DEVLOADER_NOT_FOUND",
+        9: "CM_PROB_INVALID_DATA",
+        10: "CM_PROB_FAILED_START",
+        11: "CM_PROB_LIAR",
+        12: "CM_PROB_NORMAL_CONFLICT",
+        13: "CM_PROB_NOT_VERIFIED",
+        14: "CM_PROB_NEED_RESTART",
+        15: "CM_PROB_REENUMERATION",
+        16: "CM_PROB_PARTIAL_LOG_CONF",
+        17: "CM_PROB_UNKNOWN_RESOURCE",
+        18: "CM_PROB_REINSTALL",
+        19: "CM_PROB_REGISTRY",
+        20: "CM_PROB_VXDLDR",
+        21: "CM_PROB_WILL_BE_REMOVED",
+        22: "CM_PROB_DISABLED",
+        23: "CM_PROB_DEVLOADER_NOT_READY",
+        24: "CM_PROB_DEVICE_NOT_THERE",
+        25: "CM_PROB_MOVED",
+        26: "CM_PROB_TOO_EARLY",
+        27: "CM_PROB_NO_VALID_LOG_CONF",
+        28: "CM_PROB_FAILED_INSTALL",
+        29: "CM_PROB_HARDWARE_DISABLED",
+        30: "CM_PROB_CANT_SHARE_IRQ",
+        31: "CM_PROB_FAILED_ADD",
+        32: "CM_PROB_DISABLED_SERVICE",
+        33: "CM_PROB_TRANSLATION_FAILED",
+        34: "CM_PROB_NO_SOFTCONFIG",
+        35: "CM_PROB_BIOS_TABLE",
+        36: "CM_PROB_IRQ_TRANSLATION_FAILED",
+        37: "CM_PROB_FAILED_DRIVER_ENTRY",
+        38: "CM_PROB_DRIVER_FAILED_PRIOR_UNLOAD",
+        39: "CM_PROB_DRIVER_FAILED_LOAD",
+        40: "CM_PROB_DRIVER_SERVICE_KEY_INVALID",
+        41: "CM_PROB_LEGACY_SERVICE_NO_DEVICES",
+        42: "CM_PROB_DUPLICATE_DEVICE",
+        43: "CM_PROB_FAILED_POST_START",
+        44: "CM_PROB_HALTED",
+        45: "CM_PROB_PHANTOM",
+        46: "CM_PROB_SYSTEM_SHUTDOWN",
+        47: "CM_PROB_HELD_VDL",
+        48: "CM_PROB_NEEDS_VCS",
+        49: "CM_PROB_BOOT_FAILURE",
+        50: "CM_PROB_VERIFY_FAILED",
+        51: "CM_PROB_FAILED_INITIALIZING_DEVICE",
+        52: "CM_PROB_FAILED_START_RESOURCE_CONFLICT",
+        53: "CM_PROB_GENERIC_DRIVER_BLOCKED",
+        54: "CM_PROB_DRIVER_BLOCKED_UNSAFE",
     }
 
     @classmethod
@@ -286,6 +371,7 @@ class NativeDeviceInspector:
                 "parent_devnode": parent_devnode_val,
                 "parent_device_id": parent_id_str,
                 "name": name_repr,
+                "friendly_name": friendly_name,
                 "description": dev_desc,
                 "class": cls_name,
                 "hardware_id": hw_ids[0] if hw_ids else None,
@@ -555,6 +641,8 @@ class NativeDeviceInspector:
             return {
                 "status": "not_applicable",
                 "platform": sys.platform,
+                "epistemic_scope": "STORAGE_BUS_AND_VOLUME_TOPOLOGY",
+                "smart_health_analyzed": False,
                 "message": "Storage device inspection requires a Windows NT host.",
                 "physical_drives": [],
                 "logical_volumes": [],
@@ -562,6 +650,53 @@ class NativeDeviceInspector:
             }
 
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateFileW.restype = wintypes.HANDLE
+        kernel32.CreateFileW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE
+        ]
+        kernel32.DeviceIoControl.restype = wintypes.BOOL
+        kernel32.DeviceIoControl.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+            wintypes.LPVOID
+        ]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.GetLogicalDrives.restype = wintypes.DWORD
+        kernel32.GetLogicalDrives.argtypes = []
+        kernel32.GetVolumeInformationW.restype = wintypes.BOOL
+        kernel32.GetVolumeInformationW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.LPWSTR,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+            ctypes.POINTER(wintypes.DWORD),
+            ctypes.POINTER(wintypes.DWORD),
+            wintypes.LPWSTR,
+            wintypes.DWORD
+        ]
+        kernel32.GetDiskFreeSpaceExW.restype = wintypes.BOOL
+        kernel32.GetDiskFreeSpaceExW.argtypes = [
+            wintypes.LPCWSTR,
+            ctypes.POINTER(ctypes.c_ulonglong),
+            ctypes.POINTER(ctypes.c_ulonglong),
+            ctypes.POINTER(ctypes.c_ulonglong)
+        ]
+        kernel32.GetDriveTypeW.restype = wintypes.UINT
+        kernel32.GetDriveTypeW.argtypes = [wintypes.LPCWSTR]
+
+        INVALID_HANDLE_VALUE = wintypes.HANDLE(-1).value
         FILE_SHARE_READ = 0x00000001
         FILE_SHARE_WRITE = 0x00000002
         OPEN_EXISTING = 3
@@ -587,7 +722,7 @@ class NativeDeviceInspector:
                 0,
                 None
             )
-            if handle == -1 or handle == 0:
+            if handle == INVALID_HANDLE_VALUE or handle is None or handle == 0:
                 continue
 
             try:
@@ -706,6 +841,8 @@ class NativeDeviceInspector:
 
         return {
             "status": "success",
+            "epistemic_scope": "STORAGE_BUS_AND_VOLUME_TOPOLOGY",
+            "smart_health_analyzed": False,
             "physical_drives": physical_drives,
             "logical_volumes": logical_volumes,
             "summary": summary

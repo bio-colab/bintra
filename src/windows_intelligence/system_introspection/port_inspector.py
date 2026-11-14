@@ -193,7 +193,6 @@ class PortInspector:
         FILE_SHARE_READ = 0x00000001
         OPEN_EXISTING = 3
         FILE_ATTRIBUTE_NORMAL = 0x00000080
-        INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
 
         # Define Win32 DCB structure
         class _DCB(ctypes.Structure):
@@ -215,7 +214,26 @@ class PortInspector:
                 ("wReserved1", wintypes.WORD),
             ]
 
-        k32 = ctypes.windll.kernel32
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateFileW.restype = wintypes.HANDLE
+        k32.CreateFileW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE
+        ]
+        k32.CloseHandle.restype = wintypes.BOOL
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        k32.GetCommState.restype = wintypes.BOOL
+        k32.GetCommState.argtypes = [wintypes.HANDLE, ctypes.POINTER(_DCB)]
+        k32.GetCommModemStatus.restype = wintypes.BOOL
+        k32.GetCommModemStatus.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+
+        INVALID_HANDLE_VALUE = wintypes.HANDLE(-1).value
+
         handle = k32.CreateFileW(
             device_path,
             GENERIC_READ,
@@ -226,8 +244,8 @@ class PortInspector:
             None
         )
 
-        if handle == INVALID_HANDLE_VALUE or handle is None:
-            err = ctypes.GetLastError()
+        if handle == INVALID_HANDLE_VALUE or handle is None or handle == 0:
+            err = ctypes.get_last_error()
             is_busy = (err == 5)  # ERROR_ACCESS_DENIED (port opened by another app)
             return {
                 "accessible": False,
@@ -323,32 +341,41 @@ class PortInspector:
         from windows_intelligence.system_introspection.device_inspector import NativeDeviceInspector
         from windows_intelligence.device_intelligence.device_identity import DeviceIdentity
 
-        dev_audit = NativeDeviceInspector.audit_pnp_devices(max_devices=200, filter_class="Ports")
-        if dev_audit.get("status") != "success":
+        devices = NativeDeviceInspector.enumerate_devices(max_devices=512)
+        if not devices:
             return
 
-        devices = dev_audit.get("devices", [])
         for p in ports_list:
-            p_name = p["port_name"].upper()
+            p_name = p.get("port_name", "").upper()
+            if not p_name:
+                continue
+
             # Find matching PnP device
             matched = None
             for d in devices:
-                f_name = str(d.get("friendly_name", "")).upper()
-                d_desc = str(d.get("device_description", "")).upper()
-                if f"({p_name})" in f_name or f"({p_name})" in d_desc or p_name in f_name:
+                f_name = str(d.get("friendly_name") or d.get("name") or "").upper()
+                d_desc = str(d.get("description") or "").upper()
+                target_token = f"({p_name})"
+                if target_token in f_name or target_token in d_desc or p_name == f_name or p_name in f_name.split():
                     matched = d
                     break
 
             if matched:
-                identity = DeviceIdentity.parse_device_info(matched)
+                identity = DeviceIdentity.parse_device_instance(matched)
                 p["hardware_details"] = {
-                    "friendly_name": matched.get("friendly_name") or matched.get("device_description"),
+                    "friendly_name": matched.get("friendly_name") or matched.get("name") or matched.get("description"),
                     "device_instance_id": matched.get("device_instance_id"),
                     "vendor_id": identity.get("vendor_id"),
                     "vendor_name": identity.get("vendor_name"),
                     "device_id": identity.get("device_id"),
                     "serial_bridge_model": identity.get("serial_bridge_model"),
                     "bound_driver_service": matched.get("service"),
+                    "driver_key": matched.get("driver_key"),
                     "has_problem": matched.get("has_problem", False),
-                    "problem_name": matched.get("problem_name"),
+                    "problem_code": matched.get("problem_code", 0),
+                    "problem_description": matched.get("problem_description", "Healthy"),
+                    "problem_name": matched.get("problem_name", "CM_PROB_OK"),
                 }
+                if identity.get("serial_bridge_model"):
+                    p["bridge_identity"] = identity.get("serial_bridge_model")
+                    p["is_usb_serial_bridge"] = True

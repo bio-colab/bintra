@@ -144,6 +144,59 @@ class TestPortsAndHardwareTopology(unittest.TestCase):
         self.assertIsInstance(topo_res, dict)
         self.assertIn("status", topo_res)
 
+    def test_cm_prob_sdk_definitions(self):
+        """Validates CM_PROB_* codes align with canonical Windows SDK cfg.h definitions."""
+        # Code 20 is CM_PROB_VXDLDR
+        self.assertEqual(NativeDeviceInspector.CM_PROBLEM_NAMES[20], "CM_PROB_VXDLDR")
+        # Code 31 is CM_PROB_FAILED_ADD
+        self.assertEqual(NativeDeviceInspector.CM_PROBLEM_NAMES[31], "CM_PROB_FAILED_ADD")
+        self.assertIn("CM_PROB_FAILED_ADD", NativeDeviceInspector.describe_problem_code(31))
+        # Code 43 is CM_PROB_FAILED_POST_START
+        self.assertEqual(NativeDeviceInspector.CM_PROBLEM_NAMES[43], "CM_PROB_FAILED_POST_START")
+        self.assertIn("CM_PROB_FAILED_POST_START", NativeDeviceInspector.describe_problem_code(43))
+        # Code 0 is Healthy
+        self.assertEqual(NativeDeviceInspector.describe_problem_code(0), "Healthy")
+
+    def test_port_pnp_hardware_enrichment_mock(self):
+        """Validates that _enrich_with_pnp_hardware correctly correlates ports with PnP devices."""
+        from unittest.mock import patch
+        mock_devices = [
+            {
+                "device_instance_id": "USB\\VID_0403&PID_6001\\FT123456",
+                "name": "USB Serial Port (COM3)",
+                "friendly_name": "USB Serial Port (COM3)",
+                "description": "USB Serial Port",
+                "class": "Ports",
+                "hardware_ids": ["USB\\VID_0403&PID_6001&REV_0600"],
+                "service": "FTDIBUS",
+                "has_problem": False,
+                "problem_code": 0,
+            }
+        ]
+        ports_list = [{"port_name": "COM3", "device_map_path": "\\Device\\Serial0"}]
+        with patch.object(NativeDeviceInspector, "enumerate_devices", return_value=mock_devices):
+            PortInspector._enrich_with_pnp_hardware(ports_list)
+
+        self.assertIn("hardware_details", ports_list[0])
+        hw = ports_list[0]["hardware_details"]
+        self.assertEqual(hw.get("vendor_id"), "0403")
+        self.assertEqual(hw.get("serial_bridge_model"), "FTDI FT232R USB-to-UART Bridge")
+        self.assertTrue(ports_list[0].get("is_usb_serial_bridge"))
+        self.assertEqual(ports_list[0].get("bridge_identity"), "FTDI FT232R USB-to-UART Bridge")
+
+    def test_etw_and_storage_epistemic_scope(self):
+        """Validates epistemic clarity tags on ETW payload carving and storage inspection."""
+        # ETW
+        raw = b"test payload"
+        decoded = EtwLiveCaptureSession.decode_raw_payload(raw)
+        self.assertEqual(decoded.get("epistemic_classification"), "HEURISTIC_PAYLOAD_STRING_CARVING")
+        self.assertFalse(decoded.get("tdh_schema_decoding"))
+
+        # Storage
+        storage_rep = NativeDeviceInspector.audit_storage_devices(max_drives=1)
+        self.assertEqual(storage_rep.get("epistemic_scope"), "STORAGE_BUS_AND_VOLUME_TOPOLOGY")
+        self.assertFalse(storage_rep.get("smart_health_analyzed"))
+
 
 if __name__ == "__main__":
     unittest.main()

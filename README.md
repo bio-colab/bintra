@@ -328,6 +328,12 @@ bintra proc-list --limit 20 --sort memory
 bintra proc-search --query "shamela"
 bintra proc-info --pid 10324
 
+# Windows Device Manager Intelligence: class hierarchies, active PnP devices, driver versions & property dossiers
+bintra dev-classes
+bintra dev-list --class-filter Display
+bintra dev-search --query "Realtek"
+bintra dev-info --device "Intel(R) UHD Graphics 620"
+
 # Match PnP devices against Driver Store packages and evaluate driver ranks
 bintra dev-match --query "PCI" --problems-only
 ```

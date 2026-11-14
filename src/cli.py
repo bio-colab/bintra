@@ -41,7 +41,7 @@ WEIGHT_COMMANDS = {
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless", "ghidra-bridge"}
-WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "port-audit", "hw-tree", "hw-net", "hw-dissect", "net-conns", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations", "proc-list", "proc-search", "proc-info", "sys-perf"}
+WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "port-audit", "hw-tree", "hw-net", "hw-dissect", "net-conns", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations", "proc-list", "proc-search", "proc-info", "sys-perf", "dev-classes", "dev-list", "dev-search", "dev-info"}
 
 
 def print_help():
@@ -104,6 +104,10 @@ Windows System Intelligence & Failure Diagnostic Commands:
   file-locks        Detect processes and services holding active locks on a file via Restart Manager
   proc-modules      Locate running processes that have loaded a specific module or DLL
   dev-match         Match Plug and Play (PnP) hardware IDs against driver INF store and problem codes
+  dev-classes       Device Manager class hierarchy with friendly categories and error tallies
+  dev-list          Enumerate active PnP devices enriched with driver store metadata and locations
+  dev-search        Instant multi-field search across device names, hardware IDs, and vendors
+  dev-info          Complete Device Manager Properties dossier (General, Driver, IDs, Topology)
   vad-inspect       Inspect passive virtual memory map (VAD) and classify addresses (Heap/Stack/Image)
   mem-scan          Non-intrusive read-only memory value search (First/Next scan: exact, changed, between)
   pointer-scan      Multi-level backward pointer path resolver finding static module roots
@@ -1183,6 +1187,209 @@ def _dispatch_cli():
                     f"- **Total Active Processes:** {top.get('total_processes', 0):,}",
                     f"- **Total Active Threads:** {top.get('total_threads', 0):,}",
                 ]
+                print("\n".join(lines))
+            else:
+                print(json.dumps(res, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "dev-classes":
+            parser = argparse.ArgumentParser(prog="bintra dev-classes", description="Device Manager class hierarchy with friendly categories and error tallies")
+            parser.add_argument("--format", choices=["json", "md"], default="md", help="Output format")
+            args = parser.parse_args(sys.argv[2:])
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="dev-classes",
+                target="DeviceClasses",
+                capability=Capability.DEVICE_QUERY,
+                access_mode="QUERY"
+            )
+            from windows_intelligence.device_intelligence import DeviceManagerInspector
+            res = DeviceManagerInspector.get_device_classes()
+            if args.format == "md":
+                lines = [
+                    "# Windows Device Manager - Hardware Classes",
+                    f"- **Status:** `{res.get('status')}`",
+                    f"- **Total Hardware Classes:** {res.get('total_classes', 0)}",
+                    f"- **Total Active Devices:** {res.get('total_devices', 0)}",
+                    f"- **Devices with Problem Codes:** {res.get('total_problems', 0)}",
+                    "",
+                    "| Class | Friendly Category | Devices | Problems | Status |",
+                    "| :--- | :--- | :--- | :--- | :--- |",
+                ]
+                for c in res.get("classes", []):
+                    c_status = "⚠️ Error" if c.get("problem_count", 0) > 0 else "✅ Healthy"
+                    lines.append(
+                        f"| `{c.get('class_name')}` | {c.get('friendly_name')} | {c.get('device_count')} | {c.get('problem_count')} | {c_status} |"
+                    )
+                print("\n".join(lines))
+            else:
+                print(json.dumps(res, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "dev-list":
+            parser = argparse.ArgumentParser(prog="bintra dev-list", description="List active PnP devices enriched with driver store metadata and locations")
+            parser.add_argument("--class-filter", default=None, help="Filter by device class (e.g. Display, Net, USB, Audio)")
+            parser.add_argument("--problems-only", action="store_true", help="Filter to devices with active problem codes (CM_PROB_*)")
+            parser.add_argument("--limit", type=int, default=50, help="Maximum devices to display (default: 50)")
+            parser.add_argument("--format", choices=["json", "md"], default="md", help="Output format")
+            args = parser.parse_args(sys.argv[2:])
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="dev-list",
+                target=args.class_filter or "AllDevices",
+                capability=Capability.DEVICE_QUERY,
+                access_mode="QUERY"
+            )
+            from windows_intelligence.device_intelligence import DeviceManagerInspector
+            res = DeviceManagerInspector.list_devices(
+                class_filter=args.class_filter,
+                problems_only=args.problems_only,
+                limit=args.limit
+            )
+            if args.format == "md":
+                lines = [
+                    f"# Windows Device Manager - Active Devices ({res.get('matched_count', len(res.get('devices', [])))} matches)",
+                    f"- **Total Enumerated:** {res.get('total_devices', 0)}",
+                    f"- **Class Filter:** `{args.class_filter}`" if args.class_filter else "- **Class Filter:** None",
+                    f"- **Problems Only:** {args.problems_only}",
+                    "",
+                    "| Device Name | Class | Driver Version | Provider | Bus / Location | Status |",
+                    "| :--- | :--- | :--- | :--- | :--- | :--- |",
+                ]
+                for d in res.get("devices", []):
+                    ver = d.get("driver_version") or "N/A"
+                    prov = d.get("driver_provider") or "N/A"
+                    loc = d.get("location") or d.get("bus_enumerator") or "Internal"
+                    prob_desc = d.get("problem_description") or "Healthy"
+                    stat_str = f"❌ {prob_desc}" if d.get("has_problem") else "✅ Healthy"
+                    lines.append(
+                        f"| {d.get('name')} | `{d.get('class')}` | {ver} | {prov} | {loc} | {stat_str} |"
+                    )
+                print("\n".join(lines))
+            else:
+                print(json.dumps(res, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "dev-search":
+            parser = argparse.ArgumentParser(prog="bintra dev-search", description="Instant multi-field search across device names, hardware IDs, and vendors")
+            parser.add_argument("query", nargs="?", default="", help="Search query (name, vendor, hardware ID, class, service, driver)")
+            parser.add_argument("--query", dest="named_query", default=None, help="Alternative flag for query")
+            parser.add_argument("--limit", type=int, default=50, help="Maximum results to return (default: 50)")
+            parser.add_argument("--format", choices=["json", "md"], default="md", help="Output format")
+            args = parser.parse_args(sys.argv[2:])
+            query_val = args.named_query or args.query
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="dev-search",
+                target=query_val or "EmptyQuery",
+                capability=Capability.DEVICE_QUERY,
+                access_mode="QUERY"
+            )
+            from windows_intelligence.device_intelligence import DeviceManagerInspector
+            res = DeviceManagerInspector.search_devices(query=query_val, limit=args.limit)
+            if args.format == "md":
+                lines = [
+                    f"# Windows Device Manager - Search Results for '{query_val}' ({res.get('matched_count', len(res.get('devices', [])))} matches)",
+                    "",
+                    "| Match Field | Device Name | Class | Driver Version | Provider | Location | Status |",
+                    "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+                ]
+                for d in res.get("devices", []):
+                    ver = d.get("driver_version") or "N/A"
+                    prov = d.get("driver_provider") or "N/A"
+                    loc = d.get("location") or d.get("bus_enumerator") or "Internal"
+                    prob_desc = d.get("problem_description") or "Healthy"
+                    stat_str = f"❌ {prob_desc}" if d.get("has_problem") else "✅ Healthy"
+                    lines.append(
+                        f"| `{d.get('match_field')}` | {d.get('name')} | `{d.get('class')}` | {ver} | {prov} | {loc} | {stat_str} |"
+                    )
+                print("\n".join(lines))
+            else:
+                print(json.dumps(res, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "dev-info":
+            parser = argparse.ArgumentParser(prog="bintra dev-info", description="Complete Device Manager Properties dossier for a specific device")
+            parser.add_argument("device", nargs="?", default="", help="Target device name or instance ID")
+            parser.add_argument("--device", dest="named_device", default=None, help="Alternative flag for device target")
+            parser.add_argument("--format", choices=["json", "md"], default="md", help="Output format")
+            args = parser.parse_args(sys.argv[2:])
+            target_dev = args.named_device or args.device
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="dev-info",
+                target=target_dev or "EmptyTarget",
+                capability=Capability.DEVICE_QUERY,
+                access_mode="QUERY"
+            )
+            from windows_intelligence.device_intelligence import DeviceManagerInspector
+            res = DeviceManagerInspector.get_device_details(target_dev)
+            if args.format == "md":
+                if res.get("status") != "success":
+                    print(f"# Device Manager Dossier - Error\n- **Status:** `{res.get('status')}`\n- **Error:** {res.get('error', 'Unknown error')}")
+                    return
+                dev = res.get("device", {})
+                gen = dev.get("general", {})
+                drv = dev.get("driver", {})
+                diag = dev.get("status_diagnostics", {})
+                hw = dev.get("hardware_ids", {})
+                top = dev.get("topology", {})
+
+                stat_badge = "✅ Healthy" if not diag.get("has_problem") else f"❌ {diag.get('problem_description')}"
+
+                lines = [
+                    f"# Device Manager Properties - {gen.get('name')}",
+                    f"- **Status Badge:** {stat_badge}",
+                    "",
+                    "## 1. General Information",
+                    f"- **Friendly Name:** {gen.get('friendly_name') or 'N/A'}",
+                    f"- **Description:** {gen.get('description') or 'N/A'}",
+                    f"- **Class (Internal):** `{gen.get('class')}`",
+                    f"- **Class (Friendly):** {gen.get('class_friendly')}",
+                    f"- **Class GUID:** `{gen.get('class_guid')}`",
+                    f"- **Manufacturer:** {gen.get('manufacturer') or 'N/A'}",
+                    f"- **Location:** {gen.get('location') or 'N/A'}",
+                    f"- **Bus Enumerator:** `{gen.get('bus_enumerator')}`",
+                    f"- **PDO Name:** `{gen.get('pdo_name')}`",
+                    f"- **Kernel Service:** `{gen.get('service')}`",
+                    "",
+                    "## 2. Status & Diagnostics",
+                    f"- **Is Started (DN_STARTED):** {diag.get('is_started')}",
+                    f"- **Has Problem (DN_HAS_PROBLEM):** {diag.get('has_problem')}",
+                    f"- **Problem Code:** {diag.get('problem_code')} (`{diag.get('problem_name')}`)",
+                    f"- **Problem Description:** {diag.get('problem_description')}",
+                    "",
+                    "## 3. Driver Specification",
+                    f"- **Driver Version:** `{drv.get('driver_version') or 'N/A'}`",
+                    f"- **Driver Date:** `{drv.get('driver_date') or 'N/A'}`",
+                    f"- **Driver Provider:** {drv.get('provider_name') or 'N/A'}",
+                    f"- **INF File:** `{drv.get('inf_path') or 'N/A'}`",
+                    f"- **INF Section:** `{drv.get('inf_section') or 'N/A'}`",
+                    f"- **Matching Hardware ID:** `{drv.get('matching_device_id') or 'N/A'}`",
+                    f"- **Driver Registry Key:** `{drv.get('driver_key') or 'N/A'}`",
+                    "",
+                    "## 4. Hardware Identifiers",
+                    f"- **Primary Hardware ID:** `{hw.get('primary_hardware_id') or 'N/A'}`",
+                    "- **All Hardware IDs:**",
+                ]
+                for hid in hw.get("all_hardware_ids", []):
+                    lines.append(f"  - `{hid}`")
+                if hw.get("compatible_ids"):
+                    lines.append("- **Compatible IDs:**")
+                    for cid in hw.get("compatible_ids", []):
+                        lines.append(f"  - `{cid}`")
+                lines.extend([
+                    "",
+                    "## 5. Kernel PnP Topology",
+                    f"- **Device Instance ID:** `{top.get('device_instance_id')}`",
+                    f"- **DevNode Handle:** `0x{top.get('devnode_handle', 0):08X}`",
+                    f"- **Parent DevNode Handle:** `0x{top.get('parent_devnode', 0):08X}`" if top.get('parent_devnode') else "- **Parent DevNode Handle:** N/A",
+                    f"- **Parent Device Instance ID:** `{top.get('parent_device_id') or 'N/A'}`",
+                ])
                 print("\n".join(lines))
             else:
                 print(json.dumps(res, indent=2, ensure_ascii=False))

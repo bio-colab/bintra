@@ -59,6 +59,14 @@ from .runtime_telemetry import (
     EtwTimelineCorrelator
 )
 
+# Device & Driver Intelligence Submodule
+from .device_intelligence import (
+    DeviceIdentity,
+    DriverPackageInventory,
+    DriverMatcher,
+    DeviceManagerInspector
+)
+
 # Evidence Graph & Causality Engine Submodule (Phase 4)
 from .evidence_engine import (
     EvidenceGraph,
@@ -112,5 +120,10 @@ __all__ = [
     "EvidenceGraph",
     "EvidenceNode",
     "EvidenceEdge",
-    "CausalitySynthesizer"
+    "CausalitySynthesizer",
+    # Device & Driver Intelligence
+    "DeviceIdentity",
+    "DriverPackageInventory",
+    "DriverMatcher",
+    "DeviceManagerInspector"
 ]

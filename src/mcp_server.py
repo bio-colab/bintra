@@ -865,19 +865,23 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
     },
     {
         "name": "bintra_device_driver_intelligence",
-        "description": "Audits PnP devices, CM_PROB_* codes, PCI/USB/HDAUDIO/HID/ACPI identities, and Driver Rank bindings; supports cross-platform offline .inf matching via offline_inf_paths.",
+        "description": "Device Manager telemetry and deep driver intelligence: categorizes device classes, lists live devices with driver versions, searches devices by name/ID/vendor, inspects full Device Manager property sheets, and performs Driver Rank matching.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["audit", "match", "find_packages"],
-                    "description": "Action: 'audit' (default device driver audit), 'match' (match hardware IDs), 'find_packages' (search driver packages)",
+                    "enum": ["audit", "match", "find_packages", "device_classes", "list_devices", "search_devices", "device_details"],
+                    "description": "Action: 'audit' (Driver Rank audit), 'match' (match hardware IDs), 'find_packages' (search driver packages), 'device_classes' (hierarchical class summary), 'list_devices' (enumerate devices with driver metadata), 'search_devices' (instant multi-field search), 'device_details' (full Device Manager property sheet)",
                     "default": "audit"
                 },
                 "device_query": {
                     "type": "string",
-                    "description": "Optional search term matching device name, instance ID, or hardware ID"
+                    "description": "Optional search term matching device name, instance ID, vendor, or hardware ID"
+                },
+                "device_id_or_name": {
+                    "type": "string",
+                    "description": "Target device name or instance ID for 'device_details' action"
                 },
                 "class_filter": {
                     "type": "string",
@@ -892,6 +896,11 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                     "type": "integer",
                     "description": "Maximum number of devices to inspect",
                     "default": 64
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum items to return for list_devices and search_devices",
+                    "default": 200
                 }
             }
         }
@@ -2103,7 +2112,7 @@ class BintraMcpServer:
             return res
 
         elif name == "bintra_device_driver_intelligence":
-            from windows_intelligence.device_intelligence import DriverMatcher, DriverPackageInventory
+            from windows_intelligence.device_intelligence import DriverMatcher, DriverPackageInventory, DeviceManagerInspector
             offline_infs = args.get("offline_inf_paths")
             if offline_infs and args.get("device_id"):
                 parsed_infs = [DriverPackageInventory.parse_offline_inf(p) for p in offline_infs]
@@ -2112,10 +2121,21 @@ class BintraMcpServer:
             query = args.get("device_query")
             c_filter = args.get("class_filter")
             prob_only = args.get("problems_only", False)
+            limit = int(args.get("limit", 200))
 
             if action == "find_packages":
                 pkgs = DriverPackageInventory.find_driver_package_by_name(query or "")
                 return {"status": "success", "query": query, "packages_count": len(pkgs), "packages": pkgs}
+            elif action == "device_classes":
+                return DeviceManagerInspector.get_device_classes()
+            elif action == "list_devices":
+                return DeviceManagerInspector.list_devices(class_filter=c_filter, problems_only=prob_only, limit=limit)
+            elif action == "search_devices":
+                return DeviceManagerInspector.search_devices(query=query or "", limit=limit if limit <= 50 else 50)
+            elif action == "device_details":
+                target = args.get("device_id_or_name") or query or ""
+                return DeviceManagerInspector.get_device_details(target)
+
             return DriverMatcher.audit_device_driver_bindings(
                 device_query=query,
                 class_filter=c_filter,

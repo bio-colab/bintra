@@ -8,9 +8,11 @@ and device-to-driver compatibility matching.
 from .device_identity import DeviceIdentity
 from .driver_package_inventory import DriverPackageInventory
 from .driver_matcher import DriverMatcher
+from .device_manager import DeviceManagerInspector
 
 __all__ = [
     "DeviceIdentity",
     "DriverPackageInventory",
-    "DriverMatcher"
+    "DriverMatcher",
+    "DeviceManagerInspector"
 ]

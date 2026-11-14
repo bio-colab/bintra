@@ -119,6 +119,9 @@ class NativeDeviceInspector:
     SPDRP_DRIVER = 0x00000009
     SPDRP_MFG = 0x0000000B
     SPDRP_FRIENDLYNAME = 0x0000000C
+    SPDRP_LOCATION_INFORMATION = 0x0000000D
+    SPDRP_PHYSICAL_DEVICE_OBJECT_NAME = 0x0000000E
+    SPDRP_ENUMERATOR_NAME = 0x00000016
 
     # CfgMgr32 Device Status Bits (DN_*)
     DN_STARTABLE = 0x00000001
@@ -347,9 +350,13 @@ class NativeDeviceInspector:
                 hw_ids = cls._read_multi_sz_property(setupapi, dev_info, dev_data, cls.SPDRP_HARDWAREID)
                 compat_ids = cls._read_multi_sz_property(setupapi, dev_info, dev_data, cls.SPDRP_COMPATIBLEIDS)
                 cls_name = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_CLASS)
+                cls_guid = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_CLASSGUID)
                 service = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_SERVICE)
                 driver = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_DRIVER)
                 mfg = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_MFG)
+                location_info = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_LOCATION_INFORMATION)
+                pdo_name = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_PHYSICAL_DEVICE_OBJECT_NAME)
+                bus_enum = cls._read_device_property(setupapi, dev_info, dev_data, cls.SPDRP_ENUMERATOR_NAME)
 
                 if class_filter:
                     if not cls_name or class_filter.lower() not in cls_name.lower():
@@ -391,12 +398,16 @@ class NativeDeviceInspector:
                     "friendly_name": friendly_name,
                     "description": dev_desc,
                     "class": cls_name,
+                    "class_guid": cls_guid,
                     "hardware_id": hw_ids[0] if hw_ids else None,
                     "hardware_ids": hw_ids,
                     "compatible_ids": compat_ids,
                     "service": service,
                     "driver_key": driver,
                     "manufacturer": mfg,
+                    "location_information": location_info,
+                    "pdo_name": pdo_name,
+                    "bus_enumerator": bus_enum,
                     "is_started": bool(dev_status.value & cls.DN_STARTED) if status_available else False,
                     "has_problem": has_problem,
                     "problem_code": prob_num,

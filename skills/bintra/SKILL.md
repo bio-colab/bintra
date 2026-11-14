@@ -122,6 +122,10 @@ bintra proc-list [--limit 50] [--sort memory|commit|threads|handles|pid|name] [-
 bintra proc-search --query <name_or_pid> [--limit 25]
 bintra proc-info --pid <pid> [--format md]
 bintra dev-match --query <query> --problems-only
+bintra dev-classes [--format md]
+bintra dev-list [--class-filter <class>] [--problems-only] [--limit 50]
+bintra dev-search --query <name_or_id> [--limit 50]
+bintra dev-info --device <name_or_instance_id>
 bintra dmp-inspect --file <path>
 bintra wsp-audit --model <model.safetensors>
 bintra patch-weights --source <in> --output <out> --tensor <name> --num-columns 64

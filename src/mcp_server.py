@@ -13,6 +13,13 @@ import os
 import sys
 import json
 import traceback
+from token_telemetry import (
+    TokenSessionTracker,
+    compact_tool_schema,
+    estimate_tokens,
+    estimate_cost_usd,
+    prune_payload,
+)
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 
@@ -927,6 +934,7 @@ class BintraMcpServer:
             t["name"]: t.get("inputSchema", {})
             for t in TOOLS_REGISTRY
         }
+        self.token_tracker = TokenSessionTracker(model=os.environ.get("BINTRA_MODEL_PRICING", "claude-3.5-sonnet"))
         from security import PathIdentity, TargetScope, AuditLogger
         AuditLogger.ensure_chain_continuity(rotate_on_corrupt=True)
         default_ws = os.path.join(os.path.expanduser("~"), ".bintra", "workspace")
@@ -1023,7 +1031,7 @@ class BintraMcpServer:
                 f"Missing required parameter(s) for '{tool_name}': {', '.join(missing)}."
             )
         props = schema.get("properties", {})
-        unknown = [k for k in args.keys() if k not in props and k != "workspace_dir"]
+        unknown = [k for k in args.keys() if k not in props and k not in ("workspace_dir", "compact", "summary_only", "max_list_items")]
         if unknown:
             raise ValueError(
                 f"Unknown parameter(s) for '{tool_name}': {', '.join(sorted(unknown))}."
@@ -1073,9 +1081,50 @@ class BintraMcpServer:
     def handle_ping(self, params: Dict[str, Any]) -> Dict[str, Any]:
         return {}
 
+    MCP_TOOL_PROFILES = {
+        "core": {
+            "bintra_inspect_binary", "bintra_pe_deep_forensics", "bintra_sensory_audit",
+            "bintra_deobfuscate_binary", "bintra_binary_diff", "bintra_list_capabilities",
+        },
+        "static": {
+            "bintra_inspect_binary", "bintra_pe_deep_forensics", "bintra_deobfuscate_binary",
+            "bintra_dump_bytes", "bintra_match_functions", "bintra_scan_hybrid",
+            "bintra_sensory_audit", "bintra_binary_diff", "bintra_patch_binary",
+            "bintra_list_capabilities",
+        },
+        "ghidra": {
+            "bintra_ghidra_analyze", "bintra_ghidra_headless", "bintra_ghidra_live_bridge",
+            "bintra_ghidra_call_graph", "bintra_ghidra_data_flow", "bintra_match_pcode",
+            "bintra_deobfuscate_pcode", "bintra_fuse_evidence", "bintra_list_capabilities",
+        },
+        "neural": {
+            "bintra_sensory_audit", "bintra_scan_hybrid", "bintra_wsp_audit",
+            "bintra_patch_weights", "bintra_list_capabilities",
+        },
+    }
+
     def handle_tools_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        params = params or {}
+        profile = (params.get("profile") or os.environ.get("BINTRA_MCP_PROFILE", "all")).lower()
+        compact = (
+            bool(params["compact"])
+            if "compact" in params
+            else (os.environ.get("BINTRA_MCP_COMPACT_SCHEMAS") == "1")
+        )
+        tools = TOOLS_REGISTRY
+        if profile in self.MCP_TOOL_PROFILES:
+            allowed = self.MCP_TOOL_PROFILES[profile]
+            tools = [t for t in TOOLS_REGISTRY if t["name"] in allowed]
+        elif profile == "windows":
+            tools = [t for t in TOOLS_REGISTRY if t["name"] not in self.MCP_TOOL_PROFILES["neural"] or t["name"] == "bintra_list_capabilities"]
+        if compact:
+            tools = [compact_tool_schema(t) for t in tools]
+
+        base_tok = estimate_tokens(TOOLS_REGISTRY)
+        act_tok = estimate_tokens(tools)
+        self.token_tracker.record_schema_footprint(act_tok, base_tok)
         return {
-            "tools": TOOLS_REGISTRY
+            "tools": tools
         }
 
     TOOL_SECURITY_METADATA = {
@@ -1120,6 +1169,54 @@ class BintraMcpServer:
         "bintra_fuse_evidence": ("cap.file.read", "READ", "binary_path"),
         "bintra_list_capabilities": ("cap.file.read", "READ", None)
     }
+
+    @staticmethod
+    def _apply_token_diet(tool_name: str, result_data: Any, args: Dict[str, Any]) -> Any:
+        """Prune verbose boilerplate and bound large arrays when compact/summary_only is enabled."""
+        if not isinstance(result_data, dict):
+            return result_data
+        compact = bool(args.get("compact")) or (os.environ.get("BINTRA_COMPACT_OUTPUT") == "1")
+        summary_only = bool(args.get("summary_only"))
+        max_items = args.get("max_list_items")
+        if max_items is None and (compact or summary_only):
+            max_items = 20
+
+        if not (compact or summary_only or max_items is not None):
+            return result_data
+
+        data = dict(result_data)
+        if tool_name == "bintra_sensory_audit" and (compact or summary_only):
+            data.pop("score_semantics", None)
+            senses = data.get("senses")
+            if isinstance(senses, dict) and summary_only:
+                condensed = {}
+                for s_name, s_val in senses.items():
+                    if isinstance(s_val, dict):
+                        condensed[s_name] = {
+                            k: v for k, v in s_val.items()
+                            if k in ("status", "score", "efficiency", "entropy", "anomalies_count", "is_safe", "recommendation")
+                        }
+                    else:
+                        condensed[s_name] = s_val
+                data["senses"] = condensed
+
+        elif tool_name == "bintra_ghidra_call_graph" and (compact or summary_only):
+            if summary_only:
+                data.pop("callees_map", None)
+                data.pop("callers_map", None)
+            elif isinstance(max_items, int) and max_items > 0:
+                for map_key in ("callees_map", "callers_map"):
+                    m = data.get(map_key)
+                    if isinstance(m, dict) and len(m) > max_items:
+                        keys = list(m.keys())[:max_items]
+                        data[map_key] = {k: m[k] for k in keys}
+                        data[f"_{map_key}_truncated"] = {"total": len(m), "shown": max_items}
+
+        if isinstance(max_items, int) and max_items > 0:
+            data, _ = prune_payload(data, max_list_items=max_items, drop_empty=compact)
+        elif compact:
+            data, _ = prune_payload(data, max_list_items=0, drop_empty=True)
+        return data
 
     def handle_tools_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
         tool_name = params.get("name")
@@ -1166,13 +1263,33 @@ class BintraMcpServer:
                     access_mode=mode,
                     metadata=req_metadata
                 )
-                result_data = self.dispatch_tool(tool_name, args)
+                raw_result_data = self.dispatch_tool(tool_name, args)
                 pretty_print = (os.environ.get("BINTRA_PRETTY_PRINT") == "1")
+                baseline_pretty_str = json.dumps(raw_result_data, indent=2, ensure_ascii=False)
+                baseline_tok = estimate_tokens(baseline_pretty_str)
+                result_data = self._apply_token_diet(tool_name, raw_result_data, args if isinstance(args, dict) else {})
                 serialized_text = (
                     json.dumps(result_data, indent=2, ensure_ascii=False)
                     if pretty_print
                     else json.dumps(result_data, separators=(",", ":"), ensure_ascii=False)
                 )
+                call_stats = self.token_tracker.record_tool_call(
+                    tool_name=tool_name,
+                    args_text=json.dumps(args, separators=(",", ":"), ensure_ascii=False),
+                    output_text=serialized_text,
+                    baseline_output_tokens=baseline_tok,
+                )
+                if os.environ.get("BINTRA_TOKEN_TELEMETRY") == "1" and isinstance(result_data, dict):
+                    result_data = dict(result_data)
+                    result_data["_token_telemetry"] = {
+                        "call": call_stats,
+                        "session": self.token_tracker.summary(),
+                    }
+                    serialized_text = (
+                        json.dumps(result_data, indent=2, ensure_ascii=False)
+                        if pretty_print
+                        else json.dumps(result_data, separators=(",", ":"), ensure_ascii=False)
+                    )
                 return {
                     "content": [
                         {
@@ -1956,13 +2073,16 @@ class BintraMcpServer:
                 env = "windows_native" if t_name in win_tools else ("ghidra_required" if t_name in ghidra_tools else "cross_platform")
                 if p_filter != "all" and env != p_filter:
                     continue
-                entries.append({
+                compact_caps = bool(args.get("compact")) or (os.environ.get("BINTRA_COMPACT_OUTPUT") == "1")
+                entry = {
                     "name": t_name,
                     "environment": env,
                     "capability": sec[0],
                     "access_mode": sec[1],
-                    "description": t.get("description", "")
-                })
+                }
+                if not compact_caps:
+                    entry["description"] = t.get("description", "")
+                entries.append(entry)
             return {
                 "status": "ok",
                 "host_os": _plat.system(),

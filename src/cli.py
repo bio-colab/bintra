@@ -172,6 +172,25 @@ def main():
                 else:
                     del sys.argv[idx]
 
+        compact_mode = (os.environ.get("BINTRA_COMPACT_OUTPUT") == "1")
+        while "--compact" in sys.argv:
+            compact_mode = True
+            sys.argv.remove("--compact")
+
+        token_report_mode = (os.environ.get("BINTRA_TOKEN_TELEMETRY") == "1")
+        while "--token-report" in sys.argv:
+            token_report_mode = True
+            sys.argv.remove("--token-report")
+
+        model_pricing = os.environ.get("BINTRA_MODEL_PRICING", "claude-3.5-sonnet")
+        while "--model-pricing" in sys.argv:
+            idx = sys.argv.index("--model-pricing")
+            if idx + 1 < len(sys.argv):
+                model_pricing = sys.argv[idx + 1]
+                del sys.argv[idx:idx + 2]
+            else:
+                del sys.argv[idx]
+
         if cmd_lower == "ghidra-analyze" and not workspace_arg and "--output" in sys.argv:
             out_idx = sys.argv.index("--output")
             if out_idx + 1 < len(sys.argv):
@@ -190,6 +209,7 @@ def main():
                             _dispatch_cli()
                     finally:
                         raw_out = cap_buf.getvalue()
+                        final_out = raw_out
                         if AuditLogger.is_audit_degraded() and raw_out.strip():
                             injected = False
                             try:
@@ -197,17 +217,34 @@ def main():
                                 if isinstance(parsed, dict):
                                     parsed["audit_degraded"] = True
                                     parsed["audit_degraded_reason"] = AuditLogger.get_degraded_reason()
-                                    sys.stdout.write(json.dumps(parsed, indent=2, ensure_ascii=False) + "\n")
+                                    if compact_mode:
+                                        final_out = json.dumps(parsed, separators=(",", ":"), ensure_ascii=False) + "\n"
+                                    else:
+                                        final_out = json.dumps(parsed, indent=2, ensure_ascii=False) + "\n"
                                     injected = True
                             except Exception:
                                 pass
                             if not injected:
-                                sys.stdout.write(raw_out)
                                 sys.stderr.write(
                                     f"[AUDIT DEGRADED] Persistent audit logging unavailable: {AuditLogger.get_degraded_reason()}\n"
                                 )
-                        else:
-                            sys.stdout.write(raw_out)
+                        elif compact_mode and raw_out.strip():
+                            try:
+                                parsed = json.loads(raw_out)
+                                final_out = json.dumps(parsed, separators=(",", ":"), ensure_ascii=False) + "\n"
+                            except Exception:
+                                pass
+                        sys.stdout.write(final_out)
+                        if token_report_mode and final_out.strip():
+                            from token_telemetry import estimate_tokens, estimate_cost_usd
+                            base_tok = estimate_tokens(raw_out)
+                            act_tok = estimate_tokens(final_out)
+                            saved_tok = max(0, base_tok - act_tok)
+                            cost_usd = estimate_cost_usd(act_tok, model=model_pricing, direction="input")
+                            sys.stderr.write(
+                                f"[TOKEN TELEMETRY] model={model_pricing} tokens={act_tok} "
+                                f"(baseline={base_tok}, saved={saved_tok}) est_cost_usd=${cost_usd:.6f}\n"
+                            )
                 else:
                     _dispatch_cli()
         except SystemExit:

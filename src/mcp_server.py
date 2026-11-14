@@ -65,6 +65,10 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                 "file_path": {
                     "type": "string",
                     "description": "Absolute filesystem path to the target executable (.exe or .dll)"
+                },
+                "max_exports": {
+                    "type": "integer",
+                    "description": "Maximum exported functions to return in sample (default 64, pass 0 for all). Prevents token bloat on system DLLs."
                 }
             },
             "required": ["file_path"]
@@ -234,13 +238,13 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "payload": {
-                    "type": "object",
-                    "description": "Exported program payload containing 'functions' array of High P-Code ops"
-                },
                 "input_file": {
                     "type": "string",
-                    "description": "Optional path to exported JSON file on disk"
+                    "description": "Recommended token-efficient path to exported JSON file on disk (pass-by-reference avoids prompt token bloat)"
+                },
+                "payload": {
+                    "type": "object",
+                    "description": "Optional inline exported program payload containing 'functions' array of High P-Code ops (pass-by-reference via 'input_file' is strongly preferred for token efficiency)"
                 }
             }
         }
@@ -834,7 +838,7 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
             "properties": {
                 "file_path": {"type": "string", "description": "Path to PE executable or DLL"},
                 "pdb_path": {"type": "string", "description": "Optional explicit local .pdb path for offline RSDS verification"},
-                "limit": {"type": "integer", "description": "Maximum entries per section (default 500)"}
+                "limit": {"type": "integer", "description": "Maximum entries per section (default 25 to optimize token efficiency; pass higher for exhaustive dumps)"}
             },
             "required": ["file_path"]
         }
@@ -1163,11 +1167,17 @@ class BintraMcpServer:
                     metadata=req_metadata
                 )
                 result_data = self.dispatch_tool(tool_name, args)
+                pretty_print = (os.environ.get("BINTRA_PRETTY_PRINT") == "1")
+                serialized_text = (
+                    json.dumps(result_data, indent=2, ensure_ascii=False)
+                    if pretty_print
+                    else json.dumps(result_data, separators=(",", ":"), ensure_ascii=False)
+                )
                 return {
                     "content": [
                         {
                             "type": "text",
-                            "text": json.dumps(result_data, indent=2, ensure_ascii=False)
+                            "text": serialized_text
                         }
                     ],
                     "isError": False
@@ -1182,11 +1192,16 @@ class BintraMcpServer:
             }
             if os.environ.get("BINTRA_DEBUG") == "1":
                 err_payload["traceback"] = tb
+            err_text = (
+                json.dumps(err_payload, indent=2)
+                if os.environ.get("BINTRA_PRETTY_PRINT") == "1"
+                else json.dumps(err_payload, separators=(",", ":"))
+            )
             return {
                 "content": [
                     {
                         "type": "text",
-                        "text": json.dumps(err_payload, indent=2)
+                        "text": err_text
                     }
                 ],
                 "isError": True
@@ -1197,7 +1212,17 @@ class BintraMcpServer:
             name = f"bintra_{name}"
         if name == "bintra_inspect_binary":
             path = args["file_path"]
-            return BinaryFormatInspector.inspect(path)
+            res = BinaryFormatInspector.inspect(path)
+            max_exports = args.get("max_exports")
+            if "exports" in res and "functions" in res["exports"]:
+                all_funcs = res["exports"]["functions"]
+                limit_val = 64 if max_exports is None else int(max_exports)
+                if limit_val > 0 and len(all_funcs) > limit_val:
+                    res["exports"]["functions_sample"] = all_funcs[:limit_val]
+                    res["exports"]["functions_truncated"] = True
+                    res["exports"]["functions_omitted_count"] = len(all_funcs) - limit_val
+                    res["exports"]["functions"] = all_funcs[:limit_val]
+            return res
 
         elif name == "bintra_deobfuscate_binary":
             code_hex = args.get("code_hex")
@@ -1839,7 +1864,7 @@ class BintraMcpServer:
             return PeDeepForensicsInspector().inspect(
                 file_path=args["file_path"],
                 pdb_path=args.get("pdb_path"),
-                limit=int(args.get("limit", 500)),
+                limit=int(args.get("limit", 25)),
             )
 
         elif name == "bintra_binary_diff":

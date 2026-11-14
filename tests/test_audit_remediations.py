@@ -216,6 +216,26 @@ class TestAuditRemediations(unittest.TestCase):
             scan_data = json.loads(scan_resp["content"][0]["text"])
             self.assertNotIn("takes no arguments", str(scan_data))
 
+            # Tier 1 Token Efficiency verification: compact minification & export/pdata limits
+            self.assertNotIn("\n  ", err_resp["content"][0]["text"], "Expected compact minified JSON output in MCP tool response")
+            # Verify inspect respects max_exports default 64
+            insp_resp = srv.handle_tools_call({
+                "name": "bintra_inspect_binary",
+                "arguments": {"file_path": pe_path}
+            })
+            self.assertFalse(insp_resp["isError"])
+            insp_data = json.loads(insp_resp["content"][0]["text"])
+            self.assertIn("exports", insp_data)
+
+            # Verify deep forensics defaults limit to 25
+            deep_resp = srv.handle_tools_call({
+                "name": "bintra_pe_deep_forensics",
+                "arguments": {"file_path": pe_path}
+            })
+            self.assertFalse(deep_resp["isError"])
+            deep_data = json.loads(deep_resp["content"][0]["text"])
+            self.assertIn("pdata_functions", deep_data)
+
     def test_f1_f4_snapshot_simulation_transparency(self):
         """F1/F4: Verifies ProcessMemoryMapSnapshot marks synthetic snapshots clearly and non-NT degrades cleanly."""
         from windows_intelligence.runtime_telemetry.virtual_memory_inspector import ProcessMemoryMapSnapshot

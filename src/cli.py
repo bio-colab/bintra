@@ -107,6 +107,10 @@ Windows System Intelligence & Failure Diagnostic Commands:
   crash-rca         Automated Crash Root Cause Analysis (MiniDump + Disassembly + Culprit Register)
   etw-capture       Establish real-time ETW capture session and stream diagnostic timeline events
 
+Python Ecosystem & Runtime Forensics Commands:
+  py-bytecode       Disassemble and inspect Python bytecode (.pyc / .py) with opcode and constant analysis
+  py-mem-inspect    Passive runtime CPython object inspection via PROCESS_VM_READ (PyObject, PyDict, PyASCIIObject)
+
 Agent-Native MCP (Model Context Protocol):
   mcp               Launch native JSON-RPC 2.0 stdio MCP server for AI models (Claude, Antigravity, Cursor)
 
@@ -1638,6 +1642,27 @@ def _dispatch_cli():
 
         bintra_engine.main()
 
+    elif cmd == "py-bytecode":
+        ap = argparse.ArgumentParser(prog="bintra py-bytecode")
+        ap.add_argument("--file", required=True)
+        ap.add_argument("--compare-with", dest="compare_with", default=None)
+        ap.add_argument("--limit", type=int, default=50)
+        ns = ap.parse_args(sys.argv[2:])
+        from python_intelligence import PythonBytecodeAnalyzer
+        if ns.compare_with:
+            print(json.dumps(PythonBytecodeAnalyzer.compare_bytecode(ns.file, ns.compare_with), indent=2))
+        else:
+            print(json.dumps(PythonBytecodeAnalyzer.analyze_file(ns.file, limit=ns.limit), indent=2))
+
+    elif cmd == "py-mem-inspect":
+        ap = argparse.ArgumentParser(prog="bintra py-mem-inspect")
+        ap.add_argument("--pid", type=int, required=True)
+        ap.add_argument("--address", required=True)
+        ap.add_argument("--type", default="pyobject", choices=["pyobject", "pydict", "pyascii", "pylong"])
+        ns = ap.parse_args(sys.argv[2:])
+        from windows_intelligence.runtime_telemetry.cpython_memory_forensics import CPythonMemoryForensics
+        addr = int(ns.address, 16) if str(ns.address).startswith("0x") else int(ns.address)
+        print(json.dumps(CPythonMemoryForensics.inspect_live_process(ns.pid, addr, ns.type), indent=2))
     elif cmd == "pe-forensics":
         ap = argparse.ArgumentParser(prog="bintra pe-forensics")
         ap.add_argument("--file", "--binary", dest="file", required=True)

@@ -197,7 +197,7 @@ class TestDeepReUpgrades(unittest.TestCase):
     def test_mcp_40_tools_capabilities_manifest_and_evidence_fusion(self):
         srv = BintraMcpServer()
         tools = srv.handle_tools_list({})["tools"]
-        self.assertEqual(len(tools), 40)
+        self.assertEqual(len(tools), 42)
 
         cap_resp = srv.handle_tools_call({"name": "bintra_list_capabilities", "arguments": {"platform_filter": "cross_platform"}})
         payload = json.loads(cap_resp["content"][0]["text"])

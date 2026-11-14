@@ -149,7 +149,7 @@ bintra/
 ├── README.md                      # Comprehensive guide
 ├── src/
 │   ├── cli.py                     # Unified CLI entry point (`bintra`) with self-update
-│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`bintra-mcp`, 40 tools)
+│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`bintra-mcp`, 42 tools)
 │   ├── binary_neural_engine.py    # PE binary analysis, deobfuscator & patcher
 │   ├── bintra_engine.py       # Weight-space SVD & circuit decompiler
 │   ├── sensory_cortex.py          # 10 Metaphorical Senses evaluation cortex
@@ -235,7 +235,7 @@ bintra sense --hex "55 48 89 e5 90 5d c3"
 
 ## Agent-Native MCP (Model Context Protocol) Integration
 
-`Bintra` ships with a production-ready **JSON-RPC 2.0 stdio MCP server** (`bintra-mcp`) offering **40 mediated reverse engineering and Windows intelligence tools** to AI agents (Claude Desktop, Cursor, Antigravity, Windsurf).
+`Bintra` ships with a production-ready **JSON-RPC 2.0 stdio MCP server** (`bintra-mcp`) offering **42 mediated reverse engineering and Windows intelligence tools** to AI agents (Claude Desktop, Cursor, Antigravity, Windsurf).
 
 ### 1. Claude Desktop Configuration
 Add the `bintra` server to your `%APPDATA%\Claude\claude_desktop_config.json`:
@@ -424,3 +424,10 @@ We warmly welcome contributions from the binary analysis, systems research, and 
 - **Offline MiniDump & Crash RCA (`dmp-inspect` / `crash-rca`):** Parses `MemoryListStream` (5), `Memory64ListStream` (9), `MemoryInfoListStream` (16), `VS_FIXEDFILEINFO`, and `CvRecord` (CodeView RSDS/NB10 PDB GUIDs) with $O(\log N)$ `read_memory_from_dump()` lookup.
 - **Hardware & Device Intelligence (`hw-audit` / `dev-match` / `bintra_device_driver_intelligence`):** `CM_PROB_*` problem code descriptions, `PCI`/`USB`/`HDAUDIO`/`HID`/`ACPI`/`BLUETOOTH`/`STORAGE` bus decoding, `hw-audit --problems-only --class-filter`, and cross-platform offline `.inf` Driver Rank matching (`DriverPackageInventory.parse_offline_inf`, `DriverMatcher.match_offline_device_to_infs`).
 - **Additional Read-Only CLI Tools:** `evidence-graph` (JSON/Mermaid causality dossier), `registry-read` (safe hive/key inspection), and `process-mitigations` (DEP/ASLR/CFG inspection).
+
+## Frozen Python & Hybrid Binary Reverse Engineering (`.pyd`, PyInstaller, Nuitka, Cython)
+
+Bintra provides dedicated read-only forensic capabilities for **compiled and frozen Python executables** on Windows:
+- **`.pyd` C-Extensions & Cython / Nuitka Binaries**: Inspects PE32/PE32+ headers, `PyInit_*` / `__pyx_*` / `__nuitka_*` exports, `.pdata` functions, and MSVC RTTI alongside `python3*.dll` dependencies.
+- **PyInstaller Executables**: Detects `MEI` CArchive cookies and `PYZ` bytecode archives via `scan-hybrid`.
+- **CPython Bytecode & Live Memory Forensics**: Disassembles `.py`/`.pyc` bytecode into Basic Blocks for `WeisfeilerLehmanCfgHasher` (`py-bytecode`) and inspects live `PyObject` / `PyDictObject` heap structures (`py-mem-inspect`).

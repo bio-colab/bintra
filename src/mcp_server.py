@@ -838,6 +838,32 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
     }
     ,
     {
+        "name": "bintra_python_bytecode",
+        "description": "Strictly read-only CPython bytecode analyzer: disassembles .py/.pyc via dis & marshal into Control-Flow Basic Blocks and computes Weisfeiler-Lehman CFG hashes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Path to .py or .pyc file"},
+                "compare_with": {"type": "string", "description": "Optional second .py/.pyc path for WL-CFG bytecode diffing"},
+                "limit": {"type": "integer", "description": "Maximum code objects to analyze (default 50)"}
+            },
+            "required": ["file_path"]
+        }
+    },
+    {
+        "name": "bintra_cpython_memory_forensics",
+        "description": "Strictly read-only CPython heap memory forensics using VirtualMemoryInspector and StructureDissector to inspect PyObject, PyASCIIObject, PyLongObject, and PyDictObject.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pid": {"type": "integer", "description": "Target Windows process ID"},
+                "address": {"type": "string", "description": "Hex virtual address of the CPython object (e.g. 0x7ff612340000)"},
+                "object_type": {"type": "string", "enum": ["pyobject", "pydict", "pyascii", "pylong"], "description": "CPython object layout to decode"}
+            },
+            "required": ["pid", "address"]
+        }
+    },
+    {
         "name": "bintra_pe_deep_forensics",
         "description": "Strictly read-only deep PE32/PE32+ forensics: recovers x64 .pdata RUNTIME_FUNCTION boundaries, MSVC RTTI classes/vftables, and verifies local offline PDB/RSDS matches (zero network).",
         "inputSchema": {
@@ -1162,6 +1188,8 @@ class BintraMcpServer:
         "bintra_patch_weights": ("cap.workspace.write", "WRITE", "output_path"),
         "bintra_device_driver_intelligence": ("cap.device.query", "QUERY", "device_query"),
         "bintra_process_resource_audit": ("cap.process.query", "QUERY", "file_path"),
+        "bintra_python_bytecode": ("cap.file.read", "READ", "file_path"),
+        "bintra_cpython_memory_forensics": ("cap.process.query", "READ", "pid"),
         "bintra_pe_deep_forensics": ("cap.file.read", "READ", "file_path"),
         "bintra_binary_diff": ("cap.file.read", "READ", "baseline_path"),
         "bintra_ghidra_call_graph": ("cap.file.read", "READ", "export_path"),
@@ -1975,6 +2003,21 @@ class BintraMcpServer:
                 }
             else:
                 return {"status": "error", "error": f"Unknown action: '{action}'"}
+
+        elif name == "bintra_python_bytecode":
+            from python_intelligence import PythonBytecodeAnalyzer
+            if args.get("compare_with"):
+                return PythonBytecodeAnalyzer.compare_bytecode(args["file_path"], args["compare_with"])
+            return PythonBytecodeAnalyzer.analyze_file(args["file_path"], limit=int(args.get("limit", 50)))
+
+        elif name == "bintra_cpython_memory_forensics":
+            from windows_intelligence.runtime_telemetry.cpython_memory_forensics import CPythonMemoryForensics
+            addr = int(str(args["address"]), 16) if str(args["address"]).startswith("0x") else int(args["address"])
+            return CPythonMemoryForensics.inspect_live_process(
+                pid=int(args["pid"]),
+                address=addr,
+                object_type=args.get("object_type", "pyobject"),
+            )
 
         elif name == "bintra_pe_deep_forensics":
             from pe_deep_forensics import PeDeepForensicsInspector

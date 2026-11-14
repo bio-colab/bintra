@@ -600,6 +600,20 @@ class PeDeepForensicsInspector:
 
     def inspect(self, file_path: str, pdb_path: Optional[str] = None, limit: int = 500) -> Dict[str, Any]:
         """Full read-only deep PE forensics pass (.pdata + MSVC RTTI + Local PDB)."""
+        if file_path.lower().endswith((".py", ".pyw", ".pyi")):
+            from binary_neural_engine import BinaryFormatInspector
+            py_info = BinaryFormatInspector.inspect(file_path)
+            return {
+                "status": "ok",
+                "file": os.path.abspath(file_path),
+                "sha256": py_info.get("sha256"),
+                "architecture": "Python Source (AST)",
+                "python_ast_summary": py_info,
+                "pdata_functions": {"count": 0, "functions": []},
+                "msvc_rtti": {"count": 0, "classes": []},
+                "pdb_correlation": {"status": "not_applicable", "reason": "Python source file"},
+                "epistemic_classification": "DETERMINISTIC_PYTHON_AST_FALLBACK",
+            }
         data = self._read_binary_bytes(file_path)
         layout = _parse_pe_layout(data)
         pdata = self.extract_pdata_functions(data, layout=layout, limit=limit)
@@ -637,6 +651,26 @@ class SemanticBinaryDiffer:
     def diff_pe_binaries(self, baseline_path: str, target_path: str) -> Dict[str, Any]:
         """Compares two PE binaries deterministically using sections, imports, exports, .pdata/prologue functions, and RTTI."""
         from binary_neural_engine import BinaryFormatInspector, SemanticFunctionMatcher
+
+        if baseline_path.lower().endswith(".py") and target_path.lower().endswith(".py"):
+            base_py = BinaryFormatInspector.inspect(baseline_path)
+            targ_py = BinaryFormatInspector.inspect(target_path)
+            base_syms = set(base_py.get("top_level_symbols", []))
+            targ_syms = set(targ_py.get("top_level_symbols", []))
+            base_imps = set(base_py.get("imports", []))
+            targ_imps = set(targ_py.get("imports", []))
+            return {
+                "status": "ok",
+                "diff_mode": "PYTHON_AST_DIFF",
+                "baseline_sha256": base_py.get("sha256"),
+                "target_sha256": targ_py.get("sha256"),
+                "identical_bytes": base_py.get("sha256") == targ_py.get("sha256"),
+                "added_symbols": sorted(targ_syms - base_syms),
+                "removed_symbols": sorted(base_syms - targ_syms),
+                "common_symbols_count": len(base_syms & targ_syms),
+                "added_imports": sorted(targ_imps - base_imps),
+                "removed_imports": sorted(base_imps - targ_imps),
+            }
 
         inspector = PeDeepForensicsInspector(component_name=self.component_name)
         base_res = inspector.inspect(baseline_path, limit=5000)

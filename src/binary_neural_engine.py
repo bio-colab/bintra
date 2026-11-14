@@ -9,6 +9,7 @@ and Hybrid Binary Dissection (DirectML, WinML, ONNX Runtime, GGUF, TFLite, Safet
 """
 
 import sys
+import ast
 import os
 import json
 import struct
@@ -112,12 +113,88 @@ class BinaryFormatInspector:
             return BinaryFormatInspector._parse_pe(file_path)
         elif magic.startswith(b"\x7fELF"):
             return BinaryFormatInspector._parse_elf(file_path)
+        elif BinaryFormatInspector._is_python_source(file_path):
+            return BinaryFormatInspector._parse_python(file_path)
         else:
             return {
                 "format": "RAW_BINARY",
                 "size": os.path.getsize(file_path),
                 "sha256": BinaryFormatInspector.compute_sha256(file_path)
             }
+
+    @staticmethod
+    def _is_python_source(file_path: str) -> bool:
+        if file_path.lower().endswith((".py", ".pyw", ".pyi")):
+            return True
+        try:
+            with open(file_path, "rb") as f:
+                first_line = f.readline(256)
+            return first_line.startswith(b"#!") and b"python" in first_line.lower()
+        except Exception:
+            return False
+
+    @staticmethod
+    def _parse_python(file_path: str) -> Dict[str, Any]:
+        size = os.path.getsize(file_path)
+        sha256 = BinaryFormatInspector.compute_sha256(file_path)
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            src_text = f.read()
+        lines_of_code = len(src_text.splitlines())
+        imports: List[str] = []
+        functions: List[str] = []
+        classes: List[str] = []
+        security_flags: List[str] = []
+        ast_nodes_count = 0
+        control_flow_branches = 0
+        syntax_error = None
+        ast_valid = False
+
+        try:
+            tree = ast.parse(src_text, filename=file_path)
+            ast_valid = True
+            for node in ast.walk(tree):
+                ast_nodes_count += 1
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        imports.append(alias.name)
+                elif isinstance(node, ast.ImportFrom):
+                    mod = node.module or ""
+                    imports.append(mod)
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    functions.append(node.name)
+                elif isinstance(node, ast.ClassDef):
+                    classes.append(node.name)
+                elif isinstance(node, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.With)):
+                    control_flow_branches += 1
+                elif isinstance(node, ast.Call):
+                    func = node.func
+                    call_name = None
+                    if isinstance(func, ast.Name):
+                        call_name = func.id
+                    elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                        call_name = f"{func.value.id}.{func.attr}"
+                    if call_name in ("eval", "exec", "compile", "os.system", "subprocess.run", "subprocess.Popen", "pickle.loads", "marshal.loads"):
+                        if call_name not in security_flags:
+                            security_flags.append(call_name)
+        except SyntaxError as exc:
+            syntax_error = f"{exc.msg} (line {exc.lineno})"
+
+        return {
+            "format": "PYTHON_SOURCE",
+            "size": size,
+            "sha256": sha256,
+            "python_ast_valid": ast_valid,
+            "syntax_error": syntax_error,
+            "lines_of_code": lines_of_code,
+            "ast_nodes_count": ast_nodes_count,
+            "control_flow_branches": control_flow_branches,
+            "imports_count": len(sorted(set(imports))),
+            "imports": sorted(set(imports))[:50],
+            "functions_count": len(functions),
+            "classes_count": len(classes),
+            "top_level_symbols": sorted(set(classes + functions))[:50],
+            "ast_security_flags": sorted(security_flags),
+        }
 
     @staticmethod
     def compute_sha256(file_path: str) -> str:
@@ -2509,6 +2586,40 @@ class HybridBinaryDissector:
         n = len(data)
         overall_entropy = round(BinaryFormatInspector.compute_shannon_entropy(data[:min(n, 524288)]), 4)
 
+        if BinaryFormatInspector._is_python_source(norm_path):
+            py_info = BinaryFormatInspector._parse_python(norm_path)
+            ai_libs = {
+                "torch": "PyTorch Neural Framework",
+                "tensorflow": "TensorFlow ML Framework",
+                "onnx": "ONNX Model Interchange",
+                "onnxruntime": "ONNX Runtime Inference Engine",
+                "safetensors": "Safetensors Weight Container",
+                "transformers": "HuggingFace Transformers",
+                "numpy": "NumPy Tensor/Numerical Backend",
+                "scipy": "SciPy Scientific Computing",
+                "keras": "Keras Deep Learning API",
+                "jax": "JAX Autograd/XLA Framework",
+                "llama_cpp": "llama.cpp Python Bindings",
+            }
+            for imp in py_info.get("imports", []):
+                root_pkg = imp.split(".")[0]
+                if root_pkg in ai_libs:
+                    findings.append({
+                        "type": ai_libs[root_pkg],
+                        "file_offset": "AST_IMPORT",
+                        "identifier": root_pkg,
+                        "confidence": "HIGH",
+                        "details": f"Python AST import '{imp}' detected."
+                    })
+            return {
+                "file_path": file_path,
+                "is_hybrid_binary": False,
+                "target_modality": "PYTHON_SOURCE",
+                "embedded_logic_assets_count": len(findings),
+                "overall_shannon_entropy": overall_entropy,
+                "findings": findings
+            }
+
         # 1. TensorFlow Lite: FlatBuffer file identifier 'TFL3' at offset +4
         start = 0
         while len(findings) < 500:
@@ -2664,9 +2775,21 @@ class HybridBinaryDissector:
                     "details": f"Verified Windows native neural runtime binding '{sig_bytes.decode('ascii', errors='ignore')}'."
                 })
 
+        from python_intelligence import FrozenPythonDetector
+        frozen_info = FrozenPythonDetector.scan_bytes(data, file_path=file_path)
+        for fm in frozen_info.get("markers", []):
+            findings.append({
+                "type": f"Frozen Python ({fm['category']})",
+                "file_offset": fm["offset"],
+                "identifier": fm["category"],
+                "confidence": "HIGH",
+                "details": fm["description"],
+            })
         return {
             "file_path": file_path,
             "is_hybrid_binary": len(findings) > 0,
+            "frozen_python_detected": frozen_info["is_frozen_python"],
+            "frozen_python_toolchains": frozen_info["detected_toolchains"],
             "embedded_logic_assets_count": len(findings),
             "overall_shannon_entropy": overall_entropy,
             "findings": findings
@@ -2719,8 +2842,9 @@ class SensoryCortex:
             AmenabilityDiagnostic, WeightSecurityAuditor
         )
         is_safetensors = bool(file_path and file_path.endswith(".safetensors") and os.path.exists(file_path))
-        code_sample = cls._extract_code_sample(file_path if not is_safetensors else None, code_hex)
         pe_info = BinaryFormatInspector.inspect(file_path) if (file_path and os.path.exists(file_path) and not is_safetensors) else None
+        is_python = bool(pe_info and pe_info.get("format") == "PYTHON_SOURCE")
+        code_sample = cls._extract_code_sample(file_path if (not is_safetensors and not is_python) else None, code_hex) if not is_python else b""
 
         senses_output: Dict[str, Dict[str, Any]] = {}
 
@@ -2754,6 +2878,16 @@ class SensoryCortex:
             temporal_details = {
                 "steps_listened": trace_res["steps_simulated"],
                 "loop_attractor_detected": trace_res["loop_attractor_detected"],
+            }
+        elif is_python and pe_info:
+            nodes_cnt = pe_info.get("ast_nodes_count", 0)
+            branches_cnt = pe_info.get("control_flow_branches", 0)
+            temporal_details = {
+                "decoded_instruction_steps": 0,
+                "temporal_control_transitions": branches_cnt,
+                "ast_nodes_count": nodes_cnt,
+                "transition_density": round(branches_cnt / max(nodes_cnt, 1), 4),
+                "analysis_mode": "PYTHON_AST_CONTROL_FLOW",
             }
         else:
             insns = SemanticFunctionMatcher.decode_instructions_x86(code_sample[:256])
@@ -2803,18 +2937,31 @@ class SensoryCortex:
         }
 
         # 5. Discriminative Taste
-        vec = SemanticFunctionMatcher.vectorize_function(code_sample[:128].hex())
-        is_valid_code = float(np.linalg.norm(vec)) > 0.0
-        rex_diff_test, _ = ContinuousDeobfuscator.is_register_zeroing(0x31, 0xC0, rex_prefix=0x49)
-        senses_output["discriminative_taste"] = {
-            "id": 5, "name_ar": "الذوق التمييزي", "name_en": "Discriminative Taste",
-            "present": True, "efficiency_score": 0.97, "importance_rank": 2,
-            "telemetry": {
-                "sample_classified_as_valid_code": is_valid_code,
-                "rex_cross_register_false_positive_rejected": not rex_diff_test, "pcode_cross_architecture_matching": True,
-                "embedding_norm": round(float(np.linalg.norm(vec)), 4),
+        if is_python and pe_info:
+            senses_output["discriminative_taste"] = {
+                "id": 5, "name_ar": "الذوق التمييزي", "name_en": "Discriminative Taste",
+                "present": True, "efficiency_score": 0.97, "importance_rank": 2,
+                "telemetry": {
+                    "sample_classified_as_valid_code": bool(pe_info.get("python_ast_valid")),
+                    "analysis_mode": "PYTHON_AST_SYNTAX",
+                    "functions_count": pe_info.get("functions_count", 0),
+                    "classes_count": pe_info.get("classes_count", 0),
+                    "ast_security_flags": pe_info.get("ast_security_flags", []),
+                }
             }
-        }
+        else:
+            vec = SemanticFunctionMatcher.vectorize_function(code_sample[:128].hex())
+            is_valid_code = float(np.linalg.norm(vec)) > 0.0
+            rex_diff_test, _ = ContinuousDeobfuscator.is_register_zeroing(0x31, 0xC0, rex_prefix=0x49)
+            senses_output["discriminative_taste"] = {
+                "id": 5, "name_ar": "الذوق التمييزي", "name_en": "Discriminative Taste",
+                "present": True, "efficiency_score": 0.97, "importance_rank": 2,
+                "telemetry": {
+                    "sample_classified_as_valid_code": is_valid_code,
+                    "rex_cross_register_false_positive_rejected": not rex_diff_test, "pcode_cross_architecture_matching": True,
+                    "embedding_norm": round(float(np.linalg.norm(vec)), 4),
+                }
+            }
 
         # 6. Deep Proprioception
         prop = SurgicalBinaryPatcher.compute_stack_proprioception(code_sample[:64])

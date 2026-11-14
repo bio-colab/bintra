@@ -21,7 +21,7 @@ Launch the native zero-dependency MCP server via stdio:
   }
 }
 ```
-Exposes **34 type-safe tools**:
+Exposes **40 type-safe tools**:
 - **Core Binary & Decompilation (13 Tools):** `bintra_inspect_binary`, `bintra_dump_bytes`, `bintra_deobfuscate_binary`, `bintra_match_functions`, `bintra_patch_binary`, `bintra_scan_hybrid`, `bintra_sensory_audit`, `bintra_match_pcode`, `bintra_deobfuscate_pcode`, `bintra_ghidra_analyze`, `bintra_ghidra_headless`, `bintra_wsp_audit`, `bintra_patch_weights`.
 - **Windows System Intelligence & Forensics (14 Tools):** `bintra_windows_env_audit`, `bintra_resolve_dependencies`, `bintra_inspect_crash_reports`, `bintra_correlate_failure_evidence`, `bintra_win_catalog_cmd`, `bintra_registry_audit`, `bintra_hardware_audit`, `bintra_driver_audit`, `bintra_service_audit`, `bintra_dmp_inspect`, `bintra_etw_audit`, `bintra_evidence_graph`, `bintra_device_driver_intelligence`, `bintra_process_resource_audit`.
 - **Runtime Telemetry, Crash RCA & Live Ghidra Bridge (7 Tools):** `bintra_vad_inspect`, `bintra_memory_scan`, `bintra_pointer_scan`, `bintra_struct_dissect`, `bintra_crash_rca`, `bintra_etw_capture`, `bintra_ghidra_live_bridge`.
@@ -171,3 +171,24 @@ Bintra provides **7 specialized sub-skills** (plus the [`bintra`](skills/bintra/
    bintra patch-binary --file "C:\path\to\target.exe" --output ".\workspace\target_patched.exe" --offset 0x2400 --patch-hex "90 90"
    ```
 3. Verify that `is_safe: true`, `pe_checksum_recalculated: true`, and `original_sha256 != patched_sha256`.
+
+---
+
+## 6. Deep Reverse Engineering & AI Discoverability Additions (v1.1 Upgrade)
+
+All 6 new tools below are **strictly read-only** (`cap.file.read`) and work **cross-platform** on static PE binaries and Ghidra JSON exports:
+
+| MCP Tool | CLI Command | Purpose |
+|:---|:---|:---|
+| `bintra_list_capabilities` | `bintra capabilities` | Self-describing JSON manifest of all 40 tools, environment compatibility (`cross_platform` / `windows_native` / `ghidra_required`), and workflows. |
+| `bintra_pe_deep_forensics` | `bintra pe-forensics` | x64 `.pdata` `RUNTIME_FUNCTION` boundary recovery, MSVC RTTI (`TypeDescriptor`, `CompleteObjectLocator`, `vftable`), and offline local PDB/RSDS verification. |
+| `bintra_binary_diff` | `bintra diff-binaries` | Semantic diffing across two PE binaries or two Ghidra exports (WL-CFG subtree hash + 64-D P-Code cosine + API/String anchor Jaccard). |
+| `bintra_ghidra_call_graph` | `bintra ghidra-callgraph` | Caller/callee topology, indirect calls, XREFs, and sensitive Win32 API reachability paths. |
+| `bintra_ghidra_data_flow` | `bintra ghidra-dataflow` | Intra-procedural High P-Code SSA def-use backward/forward slice + Decompiler C AST/local variable correlation. |
+| `bintra_fuse_evidence` | `bintra fuse-evidence` | Multi-signal causal fusion of PE Deep Forensics + MiniDump Crash RCA + Ghidra Call-Graph/Data-Flow into `EvidenceGraph`. |
+
+### AI Agent Decision Tree
+1. **First turn on an unfamiliar host:** Call `bintra_list_capabilities` (or `bintra capabilities`) to inspect which tools are `cross_platform` vs `windows_native` vs `ghidra_required`.
+2. **Stripped x64 PE without PDB:** Run `bintra_inspect_binary` -> `bintra_pe_deep_forensics` (recovers `.pdata` function boundaries & MSVC RTTI classes/vtables).
+3. **Deep Ghidra export or live bridge:** Run `bintra_ghidra_analyze` -> `bintra_ghidra_call_graph` -> `bintra_ghidra_data_flow` -> `bintra_fuse_evidence`.
+4. **Comparing two builds/versions:** Run `bintra_binary_diff` (`mode: "pe"` or `mode: "ghidra_export"`).

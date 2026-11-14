@@ -230,6 +230,51 @@ def apply_command(prog, cmd):
                 cu.setComment(CodeUnit.EOL_COMMENT, comment)
                 log_msg("Applied Pointer Chain EOL comment at %s" % addr.toString())
 
+    elif action == "FETCH_FUNCTION_DEEP":
+        addr = _resolve_addr(details.get("address"), details.get("address_space", "auto"))
+        if addr:
+            fn = prog.getFunctionManager().getFunctionAt(addr) or prog.getFunctionManager().getFunctionContaining(addr)
+            if fn:
+                try:
+                    from ghidra.app.decompiler import DecompInterface
+                    from ghidra.util.task import ConsoleTaskMonitor
+                    mon = ConsoleTaskMonitor()
+                    decomp = DecompInterface()
+                    decomp.openProgram(prog)
+                    res = decomp.decompileFunction(fn, 30, mon)
+                    callees = [c.getName() for c in fn.getCalledFunctions(mon)]
+                    xrefs = []
+                    ref_it = prog.getReferenceManager().getReferencesTo(fn.getEntryPoint())
+                    while ref_it.hasNext() and len(xrefs) < 64:
+                        r = ref_it.next()
+                        xrefs.append({"from": "0x" + r.getFromAddress().toString(), "to": "0x" + r.getToAddress().toString(), "type": str(r.getReferenceType())})
+                    dc_c = res.getDecompiledFunction().getC() if (res and res.decompileCompleted() and res.getDecompiledFunction()) else ""
+                    pcode_ops = []
+                    hf = res.getHighFunction() if (res and res.decompileCompleted()) else None
+                    if hf:
+                        it = hf.getPcodeOps()
+                        while it.hasNext():
+                            op = it.next()
+                            pcode_ops.append({
+                                "opcode": op.getMnemonic(),
+                                "address": "0x" + op.getSeqnum().getTarget().toString(),
+                                "inputs": [str(op.getInput(i)) for i in range(op.getNumInputs())],
+                                "output": str(op.getOutput()) if op.getOutput() else None,
+                            })
+                    bridge_url, auth_token = resolve_bridge_config()
+                    rpc_call(bridge_url, auth_token, "ghidra.push_pcode", {
+                        "name": fn.getName(),
+                        "entry_point": "0x" + fn.getEntryPoint().toString(),
+                        "signature": fn.getPrototypeString(False, False),
+                        "callees": callees,
+                        "xrefs": xrefs,
+                        "decompiled_c": dc_c,
+                        "pcode_ops": pcode_ops,
+                    })
+                    log_msg("Pushed deep function telemetry for %s" % fn.getName())
+                except Exception as fetch_err:
+                    log_err("FETCH_FUNCTION_DEEP error: %s" % fetch_err)
+
 
 def run():
     log_msg("=================================================================")

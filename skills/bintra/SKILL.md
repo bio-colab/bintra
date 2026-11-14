@@ -4,7 +4,7 @@ description: Master agent skill for Bintra v1.0.0. Autonomous, continuous semant
 metadata:
   framework: bintra
   version: "1.0.0"
-  tool_count: 34
+  tool_count: 40
   subskills:
     - bintra-binary-dissection
     - bintra-safe-binary-patching
@@ -54,9 +54,9 @@ All 34 MCP tools and CLI commands are strictly governed by the **Safety Kernel &
 
 ---
 
-## 3. Tool Matrix: The 34 Native MCP Tools
+## 3. Tool Matrix: The 40 Native MCP Tools
 
-Bintra exposes 34 type-safe tools over JSON-RPC 2.0 stdio (`bintra-mcp`):
+Bintra exposes 40 type-safe tools over JSON-RPC 2.0 stdio (`bintra-mcp`):
 
 ### Tier 1: Core Binary & Disassembly (13 Tools)
 - `bintra_inspect_binary`: PE32/PE32+ headers, ASLR/DEP/CFG mitigations, sections, entropy.
@@ -132,3 +132,13 @@ bintra ghidra-bridge --start --port 41718 --no-temp-marker
 - Use `bintra inspect` for Rich Header, TLS callbacks, Load Config (GuardCF/SafeSEH), Authenticode `WIN_CERTIFICATE`, and CLR/.NET metadata.
 - Use `bintra evidence-graph --target <path> --format mermaid` for cross-layer causality graphs.
 - Use `bintra hw-audit --problems-only --class-filter <class>` and `bintra dev-match` (or `bintra_device_driver_intelligence` with `offline_inf_paths`) for `CM_PROB_*` and offline `.inf` driver correlation.
+
+---
+
+## 5. Deep Forensics, Ghidra Topology & Capability Discovery (40 MCP Tools)
+
+- **Self-Discovery:** Always start with `bintra_list_capabilities` (`bintra capabilities`) to map all 40 tools by host compatibility (`cross_platform`, `windows_native`, `ghidra_required`).
+- **PE Deep Forensics (`bintra_pe_deep_forensics`):** Recovers x64 `.pdata` `RUNTIME_FUNCTION` boundaries, MSVC RTTI classes/`vftables`, and offline local PDB/RSDS matches.
+- **Semantic Binary Diffing (`bintra_binary_diff`):** Compares PE binaries or Ghidra exports using WL-CFG subtree hashing + 64-D P-Code cosine + API/String anchor Jaccard.
+- **Ghidra Deep Analysis (`bintra_ghidra_call_graph`, `bintra_ghidra_data_flow`):** Extracts caller/callee chains, sensitive API reachability, intra-procedural SSA def-use slices, and Decompiler C AST summaries.
+- **Unified Causal Fusion (`bintra_fuse_evidence`):** Fuses PE forensics, Crash RCA, and Ghidra Call-Graph/Data-Flow into a single `EvidenceGraph`.

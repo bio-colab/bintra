@@ -165,3 +165,86 @@ class EvidenceGraph:
         lines.append("    classDef drvClass fill:#38bdf8,stroke:#0284c7,stroke-width:1px,color:#fff;")
 
         return "\n".join(lines)
+
+
+def fuse_static_dynamic_ghidra(
+    pe_forensics: Optional[Dict[str, Any]] = None,
+    crash_rca: Optional[Dict[str, Any]] = None,
+    ghidra_call_graph: Optional[Dict[str, Any]] = None,
+    ghidra_data_flow: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Fuses static PE deep forensics (.pdata, RTTI, PDB), MiniDump/Crash RCA,
+    and Ghidra Call-Graph / Data-Flow slices into a unified EvidenceGraph.
+    """
+    graph = EvidenceGraph()
+    if pe_forensics and pe_forensics.get("status") == "ok":
+        bin_id = f"pe:{pe_forensics.get('sha256', 'unknown')[:12]}"
+        graph.add_node(
+            bin_id,
+            "PE_BINARY",
+            pe_forensics.get("file", "target.exe"),
+            properties={
+                "pdata_functions": pe_forensics.get("pdata_functions", {}).get("total_runtime_functions", 0),
+                "rtti_vftables": pe_forensics.get("msvc_rtti", {}).get("vftables_count", 0),
+                "pdb_matched": pe_forensics.get("pdb_correlation", {}).get("pdb_verification", {}).get("guid_match", False),
+            },
+        )
+    else:
+        bin_id = "pe:unknown"
+
+    if crash_rca:
+        exc_code = crash_rca.get("exception_code", "UNKNOWN_EXCEPTION")
+        crash_id = f"crash:{exc_code}"
+        graph.add_node(
+            crash_id,
+            "CRASH_EVENT",
+            f"{exc_code} ({crash_rca.get('root_cause_classification', 'UNKNOWN')})",
+            properties={
+                "culprit_register": crash_rca.get("culprit_register"),
+                "fault_address": crash_rca.get("fault_address"),
+                "confidence": crash_rca.get("confidence"),
+            },
+        )
+        if bin_id in graph.nodes:
+            graph.add_edge(bin_id, crash_id, "EXHIBITED_FAULT", metadata={"weight": 0.95})
+
+    if ghidra_call_graph and ghidra_call_graph.get("status") == "ok":
+        cg_id = "ghidra:call_graph"
+        graph.add_node(
+            cg_id,
+            "GHIDRA_CALL_GRAPH",
+            f"CallGraph ({ghidra_call_graph.get('functions_indexed', 0)} funcs)",
+            properties={
+                "call_edges": ghidra_call_graph.get("call_edges_count", 0),
+                "indirect_calls": ghidra_call_graph.get("indirect_calls_count", 0),
+                "sensitive_apis": len(ghidra_call_graph.get("sensitive_api_reachability", [])),
+            },
+        )
+        if bin_id in graph.nodes:
+            graph.add_edge(bin_id, cg_id, "DECOMPILED_TOPOLOGY", metadata={"weight": 0.9})
+
+    if ghidra_data_flow and ghidra_data_flow.get("status") == "ok":
+        fn_name = ghidra_data_flow.get("function", "unknown")
+        df_id = f"ghidra:slice:{fn_name}"
+        graph.add_node(
+            df_id,
+            "DATA_FLOW_SLICE",
+            f"DataFlow Slice: {fn_name}",
+            properties={
+                "sources_count": ghidra_data_flow.get("sources_count", 0),
+                "sinks_count": ghidra_data_flow.get("sinks_count", 0),
+                "slice_depth": len(ghidra_data_flow.get("backward_slice", [])),
+            },
+        )
+        if "ghidra:call_graph" in graph.nodes:
+            graph.add_edge("ghidra:call_graph", df_id, "CONTAINS_SLICE", metadata={"weight": 0.9})
+        if crash_rca:
+            exc_code = crash_rca.get("exception_code", "UNKNOWN_EXCEPTION")
+            graph.add_edge(df_id, f"crash:{exc_code}", "EXPLAINS_DATA_PROVENANCE", metadata={"weight": 0.85})
+
+    return {
+        "status": "ok",
+        "fused_graph": graph.to_dict(),
+        "epistemic_classification": "MULTI_SIGNAL_EVIDENCE_FUSION",
+    }

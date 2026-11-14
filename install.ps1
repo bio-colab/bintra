@@ -91,7 +91,7 @@ if ($LASTEXITCODE -eq 0 -and $smokeJson -match "Bintra Sensory Cortex") {
 
 # 7. Optional Unit Test Suite Execution
 if ($RunTests) {
-    Write-Host "[*] Executing test suite (195 unit & regression tests)..." -ForegroundColor Yellow
+    Write-Host "[*] Executing test suite (227 unit & regression tests)..." -ForegroundColor Yellow
     & ($pythonCmd -split ' ')[0] ($pythonCmd -split ' ')[1..10] -m unittest discover -s "$pkgRoot\tests" -p "test_*.py"
     if ($LASTEXITCODE -eq 0) {
         Write-Host "[+] All test suites passed with 100% success rate!" -ForegroundColor Green

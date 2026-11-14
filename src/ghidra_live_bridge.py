@@ -347,6 +347,49 @@ class GhidraLiveBridgeServer:
             pointer_report = params.get("pointer_report", {})
             return self.inject_pointer_chains(pointer_report)
 
+        elif method == "bintra.query_call_graph":
+            from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
+            target_fn = params.get("target_function")
+            max_depth = int(params.get("max_depth", 4))
+            with self._cache_lock:
+                funcs = list(self._decompiled_functions.values())
+            return GhidraDeepAnalyzer().build_call_graph_and_xrefs(
+                {"functions": funcs}, target_function=target_fn, max_depth=max_depth
+            )
+
+        elif method == "bintra.query_data_flow":
+            from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
+            fn_name = params.get("function")
+            target_var = params.get("target_var")
+            with self._cache_lock:
+                fn_data = self._decompiled_functions.get(fn_name) if fn_name else None
+            if not fn_data:
+                return {"status": "not_found", "function": fn_name}
+            return GhidraDeepAnalyzer().slice_data_flow(fn_data, target_var=target_var)
+
+        elif method == "bintra.query_decompiled_c":
+            from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
+            fn_name = params.get("function")
+            with self._cache_lock:
+                fn_data = self._decompiled_functions.get(fn_name) if fn_name else None
+            if not fn_data:
+                return {"status": "not_found", "function": fn_name}
+            return {
+                "status": "ok",
+                "function": fn_name,
+                **GhidraDeepAnalyzer.correlate_decompiler_ast(fn_data),
+            }
+
+        elif method == "bintra.request_live_function_fetch":
+            addr = params.get("address")
+            if not addr:
+                raise ValueError("address parameter is required")
+            self.queue_command("FETCH_FUNCTION_DEEP", {
+                "address": str(addr),
+                "address_space": params.get("address_space", "auto"),
+            })
+            return {"status": "queued", "action": "FETCH_FUNCTION_DEEP", "address": str(addr)}
+
         elif method in ("shutdown", "stop"):
             def _delayed_stop():
                 time.sleep(0.1)

@@ -108,3 +108,9 @@ When relaying findings to the user, translate technical telemetry into clear, ac
 ## Extended PE/COFF Directories
 - `BinaryFormatInspector._parse_pe()` surfaces `rich_header`, `tls`, `load_config`, `security_authenticode`, `clr_metadata`, and `sections_truncated`.
 - `SemanticFunctionMatcher.match_batch()` provides vectorized $N \times M$ cosine similarity across x86-64 and ARM64.
+
+---
+
+## Deep Static PE Forensics & Binary Diffing (v1.1)
+- `bintra_pe_deep_forensics` (`bintra pe-forensics --file <target.exe>`): Strictly read-only recovery of x64 `.pdata` `RUNTIME_FUNCTION` + `UNWIND_INFO` boundaries, MSVC RTTI (`TypeDescriptor`, `CompleteObjectLocator`, `vftable`), and offline local PDB/RSDS verification (zero network).
+- `bintra_binary_diff` (`bintra diff-binaries --baseline <a.exe> --target <b.exe>`): Compares PE binaries or Ghidra JSON exports using 2-round Weisfeiler-Lehman CFG subtree hashing + 64-D P-Code cosine + API/String anchor Jaccard.

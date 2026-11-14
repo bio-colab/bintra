@@ -81,3 +81,13 @@ bintra ghidra-bridge --stop --port 41718
 ## P-Code CFG Folding & Cached Queries
 - `PcodeVectorizer.vectorize_high_function()` folds `basic_blocks` CFG topology into 64-D embeddings; `PcodeFunctionMatcher.match_batch()` computes vectorized similarity.
 - `GhidraLiveBridgeServer` supports `ghidra.query_cached_functions` for read-only inspection of pushed P-Code functions.
+
+---
+
+## Deep Read-Only Ghidra Extensions (v1.1)
+- **Offline / Exported Topology & Data-Flow:**
+  - `bintra_ghidra_call_graph` (`bintra ghidra-callgraph --input <export.json>`): Extracts caller/callee edges, indirect `CALLIND` sites, XREFs, and sensitive Win32 API reachability paths.
+  - `bintra_ghidra_data_flow` (`bintra ghidra-dataflow --input <export.json> --function <name>`): Performs intra-procedural High P-Code SSA backward/forward def-use slicing and correlates Decompiler C pseudocode & local variables.
+- **Live Bridge Read-Only Queries (`ghidra_live_bridge.py` & `BintraLiveBridgeService.py`):**
+  - `bintra.request_live_function_fetch` queues `FETCH_FUNCTION_DEEP` in Ghidra to push `callees`, `xrefs`, `decompiled_c`, `signature`, and `pcode_ops`.
+  - `bintra.query_call_graph`, `bintra.query_data_flow`, and `bintra.query_decompiled_c` query cached live functions over authenticated localhost JSON-RPC.

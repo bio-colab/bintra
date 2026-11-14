@@ -1599,6 +1599,83 @@ def _dispatch_cli():
 
         bintra_engine.main()
 
+    elif cmd == "pe-forensics":
+        ap = argparse.ArgumentParser(prog="bintra pe-forensics")
+        ap.add_argument("--file", "--binary", dest="file", required=True)
+        ap.add_argument("--pdb", dest="pdb", default=None)
+        ap.add_argument("--limit", type=int, default=500)
+        ns = ap.parse_args(sys.argv[2:])
+        from pe_deep_forensics import PeDeepForensicsInspector
+        print(json.dumps(PeDeepForensicsInspector().inspect(ns.file, pdb_path=ns.pdb, limit=ns.limit), indent=2))
+
+    elif cmd == "diff-binaries":
+        ap = argparse.ArgumentParser(prog="bintra diff-binaries")
+        ap.add_argument("--baseline", required=True)
+        ap.add_argument("--target", required=True)
+        ap.add_argument("--mode", choices=["pe", "ghidra_export"], default="pe")
+        ns = ap.parse_args(sys.argv[2:])
+        from pe_deep_forensics import SemanticBinaryDiffer
+        if ns.mode == "ghidra_export":
+            from security import SafeFileAccess, TargetScope
+            b_d = json.loads(SafeFileAccess.read_bytes(ns.baseline).decode("utf-8"))
+            t_d = json.loads(SafeFileAccess.read_bytes(ns.target).decode("utf-8"))
+            res = SemanticBinaryDiffer().diff_function_exports(b_d.get("functions", []), t_d.get("functions", []))
+        else:
+            res = SemanticBinaryDiffer().diff_pe_binaries(ns.baseline, ns.target)
+        print(json.dumps(res, indent=2))
+
+    elif cmd == "ghidra-callgraph":
+        ap = argparse.ArgumentParser(prog="bintra ghidra-callgraph")
+        ap.add_argument("--input", required=True)
+        ap.add_argument("--function", default=None)
+        ap.add_argument("--max-depth", type=int, default=4)
+        ns = ap.parse_args(sys.argv[2:])
+        from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
+        from security import SafeFileAccess, TargetScope
+        exp_d = json.loads(SafeFileAccess.read_bytes(ns.input).decode("utf-8"))
+        print(json.dumps(GhidraDeepAnalyzer().build_call_graph_and_xrefs(exp_d, target_function=ns.function, max_depth=ns.max_depth), indent=2))
+
+    elif cmd == "ghidra-dataflow":
+        ap = argparse.ArgumentParser(prog="bintra ghidra-dataflow")
+        ap.add_argument("--input", required=True)
+        ap.add_argument("--function", required=True)
+        ap.add_argument("--var", default=None)
+        ns = ap.parse_args(sys.argv[2:])
+        from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
+        from security import SafeFileAccess, TargetScope
+        exp_d = json.loads(SafeFileAccess.read_bytes(ns.input).decode("utf-8"))
+        fn_obj = next((f for f in exp_d.get("functions", []) if f.get("name") == ns.function or f.get("entry_point") == ns.function), None)
+        if not fn_obj:
+            print(json.dumps({"status": "not_found", "function": ns.function}, indent=2))
+            sys.exit(1)
+        print(json.dumps(GhidraDeepAnalyzer().slice_data_flow(fn_obj, target_var=ns.var), indent=2))
+
+    elif cmd == "fuse-evidence":
+        ap = argparse.ArgumentParser(prog="bintra fuse-evidence")
+        ap.add_argument("--binary", default=None)
+        ap.add_argument("--dmp", default=None)
+        ap.add_argument("--ghidra-json", default=None)
+        ap.add_argument("--function", default=None)
+        ns = ap.parse_args(sys.argv[2:])
+        from mcp_server import BintraMcpServer
+        srv = BintraMcpServer()
+        resp = srv.handle_tools_call({"name": "bintra_fuse_evidence", "arguments": {
+            "binary_path": ns.binary,
+            "dmp_path": ns.dmp,
+            "ghidra_export_path": ns.ghidra_json,
+            "function_name": ns.function,
+        }})
+        print(resp["content"][0]["text"])
+
+    elif cmd == "capabilities":
+        ap = argparse.ArgumentParser(prog="bintra capabilities")
+        ap.add_argument("--platform", choices=["all", "cross_platform", "windows_native", "ghidra_required"], default="all")
+        ns = ap.parse_args(sys.argv[2:])
+        from mcp_server import BintraMcpServer
+        srv = BintraMcpServer()
+        resp = srv.handle_tools_call({"name": "bintra_list_capabilities", "arguments": {"platform_filter": ns.platform}})
+        print(resp["content"][0]["text"])
+
     elif cmd in ("update", "self-update"):
         _handle_update()
 

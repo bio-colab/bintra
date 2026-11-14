@@ -825,6 +825,82 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
             }
         }
     }
+    ,
+    {
+        "name": "bintra_pe_deep_forensics",
+        "description": "Strictly read-only deep PE32/PE32+ forensics: recovers x64 .pdata RUNTIME_FUNCTION boundaries, MSVC RTTI classes/vftables, and verifies local offline PDB/RSDS matches (zero network).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Path to PE executable or DLL"},
+                "pdb_path": {"type": "string", "description": "Optional explicit local .pdb path for offline RSDS verification"},
+                "limit": {"type": "integer", "description": "Maximum entries per section (default 500)"}
+            },
+            "required": ["file_path"]
+        }
+    },
+    {
+        "name": "bintra_binary_diff",
+        "description": "Strictly read-only semantic diffing across two PE binaries (.pdata/RTTI/SHA256) or two Ghidra P-Code JSON exports using WL-CFG hashing, 64-D P-Code cosine, and API/String anchor Jaccard.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "baseline_path": {"type": "string", "description": "Path to baseline PE binary or Ghidra export JSON"},
+                "target_path": {"type": "string", "description": "Path to target PE binary or Ghidra export JSON"},
+                "mode": {"type": "string", "enum": ["pe", "ghidra_export"], "description": "Diff mode: pe (default) or ghidra_export"}
+            },
+            "required": ["baseline_path", "target_path"]
+        }
+    },
+    {
+        "name": "bintra_ghidra_call_graph",
+        "description": "Strictly read-only Call-Graph, XREF topology, indirect call, and sensitive Win32 API reachability analyzer for Ghidra JSON exports.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "export_path": {"type": "string", "description": "Path to Ghidra JSON export file"},
+                "target_function": {"type": "string", "description": "Optional root function name for BFS subgraph extraction"},
+                "max_depth": {"type": "integer", "description": "BFS subgraph depth (default 4)"}
+            },
+            "required": ["export_path"]
+        }
+    },
+    {
+        "name": "bintra_ghidra_data_flow",
+        "description": "Strictly read-only intra-procedural High P-Code SSA def-use backward/forward slice and Decompiler C AST/local variable correlator.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "export_path": {"type": "string", "description": "Path to Ghidra JSON export file"},
+                "function_name": {"type": "string", "description": "Target function name or entry address"},
+                "target_var": {"type": "string", "description": "Optional SSA varnode/variable name to slice backward from"}
+            },
+            "required": ["export_path", "function_name"]
+        }
+    },
+    {
+        "name": "bintra_fuse_evidence",
+        "description": "Strictly read-only multi-signal causal fusion combining PE deep forensics (.pdata/RTTI/PDB), MiniDump Crash RCA, and Ghidra Call-Graph/Data-Flow into an EvidenceGraph.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "binary_path": {"type": "string", "description": "Optional path to target PE binary"},
+                "dmp_path": {"type": "string", "description": "Optional path to MiniDump (.dmp) file"},
+                "ghidra_export_path": {"type": "string", "description": "Optional path to Ghidra JSON export file"},
+                "function_name": {"type": "string", "description": "Optional function name for data-flow slice fusion"}
+            }
+        }
+    },
+    {
+        "name": "bintra_list_capabilities",
+        "description": "Self-describing capability manifest for AI agents: returns all registered Bintra MCP tools, environment requirements (cross_platform vs windows_native vs ghidra_required), security modes, and recommended decision workflows.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "platform_filter": {"type": "string", "enum": ["all", "cross_platform", "windows_native", "ghidra_required"], "description": "Filter tools by execution environment"}
+            }
+        }
+    }
 ]
 
 
@@ -1032,7 +1108,13 @@ class BintraMcpServer:
         "bintra_wsp_audit": ("cap.file.read", "READ", "model_path"),
         "bintra_patch_weights": ("cap.workspace.write", "WRITE", "output_path"),
         "bintra_device_driver_intelligence": ("cap.device.query", "QUERY", "device_query"),
-        "bintra_process_resource_audit": ("cap.process.query", "QUERY", "file_path")
+        "bintra_process_resource_audit": ("cap.process.query", "QUERY", "file_path"),
+        "bintra_pe_deep_forensics": ("cap.file.read", "READ", "file_path"),
+        "bintra_binary_diff": ("cap.file.read", "READ", "baseline_path"),
+        "bintra_ghidra_call_graph": ("cap.file.read", "READ", "export_path"),
+        "bintra_ghidra_data_flow": ("cap.file.read", "READ", "export_path"),
+        "bintra_fuse_evidence": ("cap.file.read", "READ", "binary_path"),
+        "bintra_list_capabilities": ("cap.file.read", "READ", None)
     }
 
     def handle_tools_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1751,6 +1833,123 @@ class BintraMcpServer:
                 }
             else:
                 return {"status": "error", "error": f"Unknown action: '{action}'"}
+
+        elif name == "bintra_pe_deep_forensics":
+            from pe_deep_forensics import PeDeepForensicsInspector
+            return PeDeepForensicsInspector().inspect(
+                file_path=args["file_path"],
+                pdb_path=args.get("pdb_path"),
+                limit=int(args.get("limit", 500)),
+            )
+
+        elif name == "bintra_binary_diff":
+            from pe_deep_forensics import SemanticBinaryDiffer
+            from security import SafeFileAccess, TargetScope
+            mode_val = args.get("mode", "pe")
+            b_path = args["baseline_path"]
+            t_path = args["target_path"]
+            if mode_val == "ghidra_export":
+                b_data = json.loads(SafeFileAccess.read_bytes(b_path).decode("utf-8"))
+                t_data = json.loads(SafeFileAccess.read_bytes(t_path).decode("utf-8"))
+                return SemanticBinaryDiffer().diff_function_exports(b_data.get("functions", []), t_data.get("functions", []))
+            return SemanticBinaryDiffer().diff_pe_binaries(b_path, t_path)
+
+        elif name == "bintra_ghidra_call_graph":
+            from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
+            from security import SafeFileAccess, TargetScope
+            ep = args["export_path"]
+            raw = SafeFileAccess.read_bytes(ep).decode("utf-8")
+            exp_data = json.loads(raw)
+            return GhidraDeepAnalyzer().build_call_graph_and_xrefs(
+                exp_data,
+                target_function=args.get("target_function"),
+                max_depth=int(args.get("max_depth", 4)),
+            )
+
+        elif name == "bintra_ghidra_data_flow":
+            from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
+            from security import SafeFileAccess, TargetScope
+            ep = args["export_path"]
+            fn_target = args["function_name"]
+            raw = SafeFileAccess.read_bytes(ep).decode("utf-8")
+            exp_data = json.loads(raw)
+            matched_fn = None
+            for fn in exp_data.get("functions", []):
+                if fn.get("name") == fn_target or fn.get("entry_point") == fn_target or fn.get("address") == fn_target:
+                    matched_fn = fn
+                    break
+            if not matched_fn:
+                return {"status": "not_found", "function_name": fn_target}
+            return GhidraDeepAnalyzer().slice_data_flow(matched_fn, target_var=args.get("target_var"))
+
+        elif name == "bintra_fuse_evidence":
+            from windows_intelligence.evidence_engine.graph_model import fuse_static_dynamic_ghidra
+            pe_res = None
+            rca_res = None
+            cg_res = None
+            df_res = None
+            if args.get("binary_path"):
+                from pe_deep_forensics import PeDeepForensicsInspector
+                pe_res = PeDeepForensicsInspector().inspect(args["binary_path"], limit=200)
+            if args.get("dmp_path"):
+                from windows_intelligence import CrashRootCauseAnalyzer
+                rca_res = CrashRootCauseAnalyzer.analyze_crash(dump_target=args["dmp_path"], binary_path=args.get("binary_path"))
+            if args.get("ghidra_export_path"):
+                from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
+                from security import SafeFileAccess, TargetScope
+                gp = args["ghidra_export_path"]
+                g_data = json.loads(SafeFileAccess.read_bytes(gp).decode("utf-8"))
+                analyzer = GhidraDeepAnalyzer()
+                cg_res = analyzer.build_call_graph_and_xrefs(g_data, target_function=args.get("function_name"))
+                if args.get("function_name"):
+                    for fn in g_data.get("functions", []):
+                        if fn.get("name") == args["function_name"]:
+                            df_res = analyzer.slice_data_flow(fn)
+                            break
+            return fuse_static_dynamic_ghidra(pe_forensics=pe_res, crash_rca=rca_res, ghidra_call_graph=cg_res, ghidra_data_flow=df_res)
+
+        elif name == "bintra_list_capabilities":
+            import platform as _plat
+            p_filter = args.get("platform_filter", "all")
+            win_tools = {
+                "bintra_windows_env_audit", "bintra_resolve_dependencies", "bintra_inspect_crash_reports",
+                "bintra_win_catalog_cmd", "bintra_registry_audit", "bintra_hardware_audit",
+                "bintra_driver_audit", "bintra_service_audit", "bintra_etw_audit",
+                "bintra_vad_inspect", "bintra_memory_scan", "bintra_pointer_scan",
+                "bintra_struct_dissect", "bintra_etw_capture", "bintra_device_driver_intelligence",
+                "bintra_process_resource_audit"
+            }
+            ghidra_tools = {
+                "bintra_ghidra_headless", "bintra_ghidra_live_bridge", "bintra_match_pcode",
+                "bintra_deobfuscate_pcode", "bintra_ghidra_analyze", "bintra_ghidra_call_graph",
+                "bintra_ghidra_data_flow"
+            }
+            entries = []
+            for t in TOOLS_REGISTRY:
+                t_name = t["name"]
+                sec = self.TOOL_SECURITY_METADATA.get(t_name, ("unknown", "READ", None))
+                env = "windows_native" if t_name in win_tools else ("ghidra_required" if t_name in ghidra_tools else "cross_platform")
+                if p_filter != "all" and env != p_filter:
+                    continue
+                entries.append({
+                    "name": t_name,
+                    "environment": env,
+                    "capability": sec[0],
+                    "access_mode": sec[1],
+                    "description": t.get("description", "")
+                })
+            return {
+                "status": "ok",
+                "host_os": _plat.system(),
+                "total_tools": len(entries),
+                "tools": entries,
+                "recommended_workflows": {
+                    "static_pe_deep_audit": ["bintra_inspect_binary", "bintra_pe_deep_forensics", "bintra_deobfuscate_binary", "bintra_scan_hybrid"],
+                    "ghidra_deep_re": ["bintra_ghidra_analyze", "bintra_ghidra_call_graph", "bintra_ghidra_data_flow"],
+                    "crash_root_cause_fusion": ["bintra_dmp_inspect", "bintra_crash_rca", "bintra_pe_deep_forensics", "bintra_fuse_evidence"],
+                    "version_diff": ["bintra_binary_diff"]
+                }
+            }
 
         else:
             raise ValueError(f"Unknown tool name: '{name}'")

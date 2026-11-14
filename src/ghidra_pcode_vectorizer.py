@@ -885,3 +885,271 @@ class GhidraAnnotationPlanner:
                 f"{total_cff} CFF backbones, {len(rename_actions)} verified rename recommendations."
             )
         }
+
+
+# ---------------------------------------------------------------------------
+# Phase 2A Upgrades: WL-CFG Hashing & Deep Ghidra Call-Graph / Data-Flow
+# ---------------------------------------------------------------------------
+
+import hashlib as _hashlib
+from collections import deque as _deque
+
+
+class WeisfeilerLehmanCfgHasher:
+    """
+    Deterministic 2-iteration Weisfeiler-Lehman (WL) CFG Subtree Hasher.
+    Encodes control-flow topology + per-block P-Code opcode multisets into an
+    order-invariant structural fingerprint for cross-compiler & diffing tasks.
+    """
+
+    def __init__(self, iterations: int = 2):
+        self.iterations = max(1, int(iterations))
+
+    def compute_wl_hash(
+        self,
+        basic_blocks: Optional[List[Dict[str, Any]]] = None,
+        pcode_ops: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        bbs = basic_blocks or []
+        if not bbs:
+            # Fallback to ordered P-Code opcode fingerprint if no basic_blocks provided
+            ops = [str(op.get("opcode", "")).upper() for op in (pcode_ops or [])]
+            sig = "|".join(ops)
+            return _hashlib.sha256(f"FLAT:{len(ops)}:{sig}".encode("utf-8")).hexdigest()[:24]
+
+        # Build adjacency & initial node labels
+        node_ids: List[str] = []
+        adj: Dict[str, List[str]] = {}
+        labels: Dict[str, str] = {}
+
+        for idx, bb in enumerate(bbs):
+            nid = str(bb.get("id", bb.get("start_address", idx)))
+            node_ids.append(nid)
+            succs = [str(s) for s in bb.get("successors", bb.get("out_edges", []))]
+            adj[nid] = succs
+            bb_ops = bb.get("pcode_ops", [])
+            if bb_ops:
+                op_sig = ",".join(sorted(str(o.get("opcode", "")).upper() for o in bb_ops))
+            else:
+                op_sig = f"n{bb.get('op_count', bb.get('instruction_count', 0))}"
+            labels[nid] = f"d{len(succs)}:{op_sig}"
+
+        # WL label refinement rounds
+        for _ in range(self.iterations):
+            new_labels: Dict[str, str] = {}
+            for nid in node_ids:
+                neigh = sorted(labels.get(s, "EXT") for s in adj.get(nid, []))
+                combined = f"{labels[nid]}->[{','.join(neigh)}]"
+                new_labels[nid] = _hashlib.sha256(combined.encode("utf-8")).hexdigest()[:12]
+            labels = new_labels
+
+        canonical_multiset = "|".join(sorted(labels.values()))
+        return _hashlib.sha256(f"WL{self.iterations}:{len(node_ids)}:{canonical_multiset}".encode("utf-8")).hexdigest()[:24]
+
+
+class GhidraDeepAnalyzer:
+    """
+    Strictly read-only deep analyzer for enriched Ghidra exports & live bridge data:
+      1. Call-Graph & XREF topology + sensitive API import reachability paths.
+      2. Intra-procedural High P-Code SSA data-flow / taint slice summary.
+      3. Decompiler C AST / pseudocode & local variable correlation.
+    """
+
+    SENSITIVE_API_PATTERNS = (
+        "LoadLibrary", "GetProcAddress", "VirtualAlloc", "VirtualProtect",
+        "CreateFile", "WriteFile", "ReadFile", "RegOpenKey", "RegSetValue",
+        "CreateProcess", "WinExec", "ShellExecute", "WSASocket", "connect",
+        "InternetOpen", "HttpSendRequest", "CryptDecrypt", "BCryptDecrypt",
+        "RtlCopyMemory", "memcpy", "strcpy", "sprintf",
+    )
+
+    def build_call_graph_and_xrefs(
+        self, export_data: Dict[str, Any], target_function: Optional[str] = None, max_depth: int = 4
+    ) -> Dict[str, Any]:
+        funcs = export_data.get("functions", [])
+        if not isinstance(funcs, list):
+            funcs = []
+
+        callers_of: Dict[str, List[str]] = {}
+        callees_of: Dict[str, List[str]] = {}
+        indirect_calls: List[Dict[str, Any]] = []
+        xref_records: List[Dict[str, Any]] = []
+        api_reachability: List[Dict[str, Any]] = []
+
+        name_by_addr: Dict[str, str] = {}
+        for fn in funcs:
+            addr = str(fn.get("entry_point", fn.get("address", "")))
+            name = str(fn.get("name", addr))
+            if addr:
+                name_by_addr[addr] = name
+
+        for fn in funcs:
+            fn_name = str(fn.get("name", fn.get("entry_point", "unknown")))
+            fn_addr = str(fn.get("entry_point", fn.get("address", "0x0")))
+
+            # Direct/recorded callees from Ghidra export
+            raw_callees = list(fn.get("callees", []))
+            for op in fn.get("pcode_ops", []):
+                opcode = str(op.get("opcode", "")).upper()
+                if opcode == "CALL":
+                    tgt = op.get("target_name") or op.get("target_address")
+                    if tgt and tgt not in raw_callees:
+                        raw_callees.append(str(tgt))
+                elif opcode == "CALLIND":
+                    indirect_calls.append({
+                        "function": fn_name,
+                        "address": op.get("address", fn_addr),
+                        "inputs": op.get("inputs", []),
+                    })
+
+            callees_of[fn_name] = raw_callees
+            for c in raw_callees:
+                c_name = name_by_addr.get(c, c)
+                callers_of.setdefault(c_name, [])
+                if fn_name not in callers_of[c_name]:
+                    callers_of[c_name].append(fn_name)
+
+            # XREFs (data, string, code)
+            for xr in fn.get("xrefs", []):
+                xref_records.append({
+                    "function": fn_name,
+                    "from": xr.get("from", fn_addr),
+                    "to": xr.get("to", ""),
+                    "type": xr.get("type", "UNCONDITIONAL_CALL"),
+                    "symbol": xr.get("symbol", ""),
+                })
+
+            # Check sensitive APIs called directly
+            for c in raw_callees:
+                if any(pat.lower() in c.lower() for pat in self.SENSITIVE_API_PATTERNS):
+                    api_reachability.append({
+                        "api": c,
+                        "direct_caller": fn_name,
+                        "caller_address": fn_addr,
+                        "upstream_callers": callers_of.get(fn_name, [])[:10],
+                    })
+
+        # Optional BFS subgraph around target_function
+        subgraph = None
+        if target_function:
+            visited = {target_function}
+            q = _deque([(target_function, 0)])
+            edges: List[Dict[str, Any]] = []
+            while q:
+                curr, d = q.popleft()
+                if d >= max_depth:
+                    continue
+                for nxt in callees_of.get(curr, []):
+                    edges.append({"from": curr, "to": nxt, "depth": d + 1})
+                    if nxt not in visited:
+                        visited.add(nxt)
+                        q.append((nxt, d + 1))
+            subgraph = {
+                "root": target_function,
+                "max_depth": max_depth,
+                "reachable_nodes": sorted(visited),
+                "edges": edges,
+            }
+
+        return {
+            "status": "ok",
+            "functions_indexed": len(funcs),
+            "call_edges_count": sum(len(v) for v in callees_of.values()),
+            "indirect_calls_count": len(indirect_calls),
+            "indirect_calls_sample": indirect_calls[:50],
+            "xrefs_count": len(xref_records),
+            "xrefs_sample": xref_records[:100],
+            "sensitive_api_reachability": api_reachability[:50],
+            "callees_map": {k: v for k, v in list(callees_of.items())[:100]},
+            "callers_map": {k: v for k, v in list(callers_of.items())[:100]},
+            "target_subgraph": subgraph,
+            "epistemic_classification": "GHIDRA_STATIC_TOPOLOGY_PARSE",
+        }
+
+    def slice_data_flow(
+        self, func_data: Dict[str, Any], target_var: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Intra-procedural High P-Code SSA backward/forward def-use slice & taint summary.
+        Tracks where pointers/values originate (PARAM/LOAD/CALL) and where they flow (STORE/CALL/CBRANCH/RETURN).
+        """
+        ops = func_data.get("pcode_ops", [])
+        fn_name = str(func_data.get("name", func_data.get("entry_point", "unknown")))
+
+        defs: Dict[str, Dict[str, Any]] = {}
+        uses: Dict[str, List[int]] = {}
+        sinks: List[Dict[str, Any]] = []
+        sources: List[Dict[str, Any]] = []
+
+        for idx, op in enumerate(ops):
+            opcode = str(op.get("opcode", "")).upper()
+            out_v = op.get("output")
+            in_vs = [str(v) for v in op.get("inputs", [])]
+
+            if out_v is not None:
+                out_s = str(out_v)
+                defs[out_s] = {"op_index": idx, "opcode": opcode, "inputs": in_vs, "address": op.get("address")}
+                if opcode in ("LOAD", "CALL", "CALLIND") or "param" in out_s.lower():
+                    sources.append({"var": out_s, "op_index": idx, "opcode": opcode, "address": op.get("address")})
+
+            for iv in in_vs:
+                uses.setdefault(iv, []).append(idx)
+
+            if opcode in ("STORE", "CALL", "CALLIND", "CBRANCH", "RETURN"):
+                sinks.append({
+                    "op_index": idx,
+                    "opcode": opcode,
+                    "address": op.get("address"),
+                    "inputs": in_vs,
+                    "target": op.get("target_name") or op.get("target_address"),
+                })
+
+        # Backward slice from target_var (or first sink input if target_var is omitted)
+        seed_vars: List[str] = []
+        if target_var:
+            seed_vars.append(target_var)
+        elif sinks:
+            seed_vars.extend(sinks[0].get("inputs", [])[:2])
+
+        slice_chain: List[Dict[str, Any]] = []
+        visited_vars = set()
+        worklist = _deque(seed_vars)
+        while worklist and len(slice_chain) < 100:
+            v = worklist.popleft()
+            if v in visited_vars:
+                continue
+            visited_vars.add(v)
+            d = defs.get(v)
+            if d:
+                slice_chain.append({"var": v, **d})
+                for iv in d.get("inputs", []):
+                    if iv not in visited_vars:
+                        worklist.append(iv)
+
+        return {
+            "status": "ok",
+            "function": fn_name,
+            "total_pcode_ops": len(ops),
+            "tracked_seed_vars": seed_vars,
+            "sources_count": len(sources),
+            "sinks_count": len(sinks),
+            "sources_sample": sources[:25],
+            "sinks_sample": sinks[:25],
+            "backward_slice": slice_chain,
+            "decompiler_summary": self.correlate_decompiler_ast(func_data),
+            "epistemic_classification": "HIGH_PCODE_SSA_DEF_USE_SLICE",
+        }
+
+    @staticmethod
+    def correlate_decompiler_ast(func_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Structures any Decompiler C pseudocode, signature, and local variables from Ghidra."""
+        c_code = func_data.get("decompiled_c", "")
+        sig = func_data.get("signature", "")
+        locals_list = func_data.get("local_variables", [])
+        return {
+            "has_decompiled_c": bool(c_code),
+            "signature": sig or None,
+            "local_variables_count": len(locals_list) if isinstance(locals_list, list) else 0,
+            "local_variables": locals_list[:50] if isinstance(locals_list, list) else [],
+            "decompiled_c_preview": c_code[:4000] if isinstance(c_code, str) and c_code else None,
+        }

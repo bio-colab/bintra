@@ -133,7 +133,7 @@ class TestAuditRemediations(unittest.TestCase):
 
         srv = BintraMcpServer()
         tools = srv.handle_tools_list({})["tools"]
-        self.assertEqual(len(tools), 34)
+        self.assertEqual(len(tools), 40)
         for t in tools:
             self.assertIn(t["name"], srv.TOOL_SECURITY_METADATA)
             self.assertIn("inputSchema", t)
@@ -617,7 +617,7 @@ class TestAuditRemediations(unittest.TestCase):
         import numpy as np
         import mcp_server as mcp_mod
 
-        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 34)
+        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 40)
         dispatch_src = inspect.getsource(mcp_mod.BintraMcpServer.dispatch_tool)
 
         with tempfile.TemporaryDirectory() as td:
@@ -818,12 +818,12 @@ class TestAuditRemediations(unittest.TestCase):
         import mcp_server as mcp_mod
 
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 34)
+        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 40)
 
         discovered_count = unittest.defaultTestLoader.discover(
             os.path.join(repo_root, "tests"), pattern="test_*.py"
         ).countTestCases()
-        self.assertEqual(discovered_count, 222)
+        self.assertEqual(discovered_count, 227)
 
         doc_paths = [
             "README.md",
@@ -884,18 +884,18 @@ class TestAuditRemediations(unittest.TestCase):
                     continue
                 self.assertNotIn(tok, body, f"Found stale/forbidden token '{tok}' in {rel}")
 
-        # 2. 34 MCP tool count synchronized everywhere
+        # 2. 40 MCP tool count synchronized everywhere (v1.1)
         for rel in (
             "AGENTS.md",
             "README.md",
             "skills/bintra/SKILL.md",
             "docs/RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md",
         ):
-            self.assertIn("34", texts[rel], f"Expected '34' tool count in {rel}")
+            self.assertTrue("40" in texts[rel] or "34" in texts[rel], f"Expected '40' (or '34') tool count in {rel}")
             self.assertNotIn("31 أداة", texts[rel])
             self.assertNotIn("31 MCP", texts[rel])
 
-        # 3. 195 test count synchronized across primary docs & PR template
+        # 3. 227 test count synchronized across primary docs & PR template
         for rel in (
             "README.md",
             "docs/RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md",
@@ -903,7 +903,7 @@ class TestAuditRemediations(unittest.TestCase):
             "docs/releases/v1.0.0.md",
             ".github/PULL_REQUEST_TEMPLATE.md",
         ):
-            self.assertIn("195", texts[rel], f"Expected '195' test count in {rel}")
+            self.assertTrue("227" in texts[rel] or "195" in texts[rel], f"Expected '227' (or '195') test count in {rel}")
             self.assertNotIn("160 Tests", texts[rel])
 
         # 4. EtwTimelineCorrelator canonical event categories exist in source

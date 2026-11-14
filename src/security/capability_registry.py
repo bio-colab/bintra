@@ -73,6 +73,7 @@ class CapabilityRegistry:
         "binary_inspector": {Capability.FILE_READ, Capability.FILE_HASH},
         "deobfuscator": {Capability.FILE_READ},
         "function_matcher": {Capability.FILE_READ},
+        "pe_deep_forensics": {Capability.FILE_READ, Capability.FILE_HASH},
         "device_inspector": {Capability.DEVICE_QUERY, Capability.DRIVER_QUERY},
         "driver_inspector": {Capability.DRIVER_QUERY},
         "process_inspector": {Capability.PROCESS_QUERY},

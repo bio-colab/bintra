@@ -112,12 +112,57 @@ def run():
                 "output": serialize_varnode(out_vn, currentProgram)
             })
 
+        callees = []
+        try:
+            for c_fn in func.getCalledFunctions(monitor):
+                callees.append(c_fn.getName())
+        except Exception:
+            pass
+
+        xrefs = []
+        try:
+            ref_mgr = currentProgram.getReferenceManager()
+            ref_iter = ref_mgr.getReferencesTo(func.getEntryPoint())
+            while ref_iter.hasNext() and len(xrefs) < 64:
+                r = ref_iter.next()
+                xrefs.append({
+                    "from": "0x" + r.getFromAddress().toString(),
+                    "to": "0x" + r.getToAddress().toString(),
+                    "type": str(r.getReferenceType()),
+                })
+        except Exception:
+            pass
+
+        decompiled_c = ""
+        try:
+            dc_fn = res.getDecompiledFunction()
+            if dc_fn is not None:
+                decompiled_c = dc_fn.getC() or ""
+        except Exception:
+            pass
+
+        local_vars = []
+        try:
+            for lv in func.getLocalVariables()[:40]:
+                local_vars.append({
+                    "name": lv.getName(),
+                    "type": lv.getDataType().getName(),
+                    "storage": str(lv.getVariableStorage()),
+                })
+        except Exception:
+            pass
+
         funcs_data.append({
             "name": func.getName(),
             "entry_point": "0x" + func.getEntryPoint().toString(),
             "size": int(func.getBody().getNumAddresses()),
             "parameter_count": func.getParameterCount(),
             "return_type": func.getReturnType().getName(),
+            "signature": func.getPrototypeString(False, False),
+            "callees": callees,
+            "xrefs": xrefs,
+            "local_variables": local_vars,
+            "decompiled_c": decompiled_c,
             "pcode_ops": pcode_ops
         })
 

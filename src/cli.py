@@ -41,7 +41,7 @@ WEIGHT_COMMANDS = {
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless", "ghidra-bridge"}
-WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "port-audit", "hw-tree", "hw-net", "hw-dissect", "net-conns", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations", "proc-list", "proc-search", "proc-info", "sys-perf", "dev-classes", "dev-list", "dev-search", "dev-info"}
+WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "port-audit", "hw-tree", "hw-net", "hw-dissect", "net-conns", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations", "proc-list", "proc-search", "proc-info", "sys-perf", "dev-classes", "dev-list", "dev-search", "dev-info", "reg-read", "reg-search", "reg-export", "reg-import"}
 
 
 def print_help():
@@ -92,6 +92,10 @@ Windows System Intelligence & Failure Diagnostic Commands:
   diagnose          Correlate host OS environment, crash records, and PE structure into Evidence Dossier
   win-cmd           Safely execute pre-registered read-only Windows catalog commands (or 'list')
   reg-audit         Dual-view (32/64-bit) audit across 11 Windows Registry functional domains
+  reg-read          Read registry keys, values, and subkeys across 64/32/dual views
+  reg-search        Deep multi-mode search across registry keys, value names, and data (Ctrl+F)
+  reg-export        Export live registry keys to official .reg format (Version 5.00)
+  reg-import        Parse, validate, and audit .reg files with live registry drift detection
   hw-audit          Inspect live PnP devices, problem codes (CM_PROB_*), and physical storage drives
   port-audit        Audit active COM and LPT ports with USB bridge matching and modem line status
   hw-tree           Render authoritative PnP bus hierarchy tree (ASCII tree, Mermaid, or JSON)
@@ -372,23 +376,253 @@ def _dispatch_cli():
             else:
                 print(json.dumps(dossier, indent=2, default=str))
 
-        elif cmd == "registry-read":
-            parser = argparse.ArgumentParser(description="Read-only Windows Registry hive/key inspection")
-            parser.add_argument("command")
-            parser.add_argument("--hive", default="HKLM", help="Registry hive (HKLM, HKCU, HKCR)")
-            parser.add_argument("--key", required=True, help="Registry subkey path")
-            args = parser.parse_args()
+        elif cmd in ("registry-read", "reg-read"):
+            parser = argparse.ArgumentParser(prog=f"bintra {cmd}", description="Read-only Windows Registry key and value inspection")
+            parser.add_argument("pos_key", nargs="?", default="", help="Registry subkey path")
+            parser.add_argument("--key", dest="named_key", default=None, help="Registry subkey path flag")
+            parser.add_argument("--hive", default="HKLM", help="Registry hive (HKLM, HKCU, HKCR, HKU, HKCC)")
+            parser.add_argument("--view", choices=["dual", "64", "32", "native"], default="dual", help="Architecture view perspective")
+            parser.add_argument("--format", choices=["json", "md"], default="md", help="Output format")
+            args = parser.parse_args(sys.argv[2:])
+            target_key = args.named_key or args.pos_key
+            if not target_key:
+                print("Error: Subkey path is required. Example: bintra reg-read --key \"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\"")
+                return
 
             from security import ExecutionGuard, Capability
             ExecutionGuard.request_access(
                 component="cli",
                 operation="registry-read",
-                target=f"{args.hive}\\{args.key}",
+                target=f"{args.hive}\\{target_key}",
                 capability=Capability.REGISTRY_READ,
                 access_mode="READ",
             )
-            res = WindowsRegistryReader.read_key(args.hive, args.key)
-            print(json.dumps(res, indent=2, default=str))
+            from windows_intelligence.registry_intelligence import WindowsRegistryReader
+            res = WindowsRegistryReader.read_key(hive=args.hive, subkey=target_key, view=args.view)
+            if args.format == "md":
+                if res.get("status") == "not_applicable":
+                    print(f"# Windows Registry - {args.hive}\\{target_key}\n- **Status:** `not_applicable` (Requires Windows NT)")
+                    return
+                if res.get("status") == "error":
+                    print(f"# Windows Registry - Error\n- **Error:** {res.get('error')}")
+                    return
+
+                # If dual view, show 64-bit primarily and report any discrepancies
+                view_obj = res.get("view_64") if "view_64" in res else res.get("result", {})
+                if not view_obj.get("exists"):
+                    print(f"# Windows Registry - Key Not Found\n- **Target:** `{args.hive}\\{target_key}`")
+                    return
+
+                vals = view_obj.get("values", {})
+                last_mod = view_obj.get("last_modified_utc") or "N/A"
+                subkeys = view_obj.get("subkeys", [])
+
+                lines = [
+                    f"# Windows Registry Key - `{args.hive}\\{target_key}`",
+                    f"- **View Mode:** `{res.get('view', 'dual')}`",
+                    f"- **Last Modified (UTC):** `{last_mod}`",
+                    f"- **Total Values:** {len(vals)}",
+                    f"- **Total Subkeys:** {view_obj.get('total_subkeys', len(subkeys))}",
+                ]
+                if res.get("has_discrepancy"):
+                    lines.append(f"- **⚠️ WOW64 Divergence Detected:** {res.get('discrepancy_count', 0)} discrepancies between 64-bit and 32-bit views")
+                lines.extend([
+                    "",
+                    "| Value Name | Type | Data |",
+                    "| :--- | :--- | :--- |",
+                ])
+                for vn, vinfo in sorted(vals.items(), key=lambda x: x[0]):
+                    v_type = vinfo.get("type", "REG_SZ")
+                    v_val = str(vinfo.get("value", ""))
+                    if len(v_val) > 80:
+                        v_val = v_val[:77] + "..."
+                    lines.append(f"| `{vn}` | `{v_type}` | {v_val} |")
+
+                if subkeys:
+                    lines.extend([
+                        "",
+                        f"### Child Subkeys ({min(len(subkeys), 20)} of {view_obj.get('total_subkeys', len(subkeys))})",
+                    ])
+                    for sk in subkeys[:20]:
+                        lines.append(f"- `{sk}`")
+
+                print("\n".join(lines))
+            else:
+                print(json.dumps(res, indent=2, default=str))
+            return
+
+        elif cmd == "reg-search":
+            parser = argparse.ArgumentParser(prog="bintra reg-search", description="Search registry keys, value names, and value data")
+            parser.add_argument("query", nargs="?", default="", help="Search query string")
+            parser.add_argument("--query", dest="named_query", default=None, help="Search query string flag")
+            parser.add_argument("--hive", default="HKLM", help="Target hive (HKLM, HKCU, HKCR, HKU, HKCC)")
+            parser.add_argument("--root-key", default="", help="Subkey path to begin search from")
+            parser.add_argument("--max-depth", type=int, default=3, help="Maximum traversal depth (default: 3)")
+            parser.add_argument("--limit", type=int, default=50, help="Maximum matches to return (default: 50)")
+            parser.add_argument("--match-case", action="store_true", help="Case-sensitive search")
+            parser.add_argument("--match-whole", action="store_true", help="Match entire string only")
+            parser.add_argument("--view", choices=["64", "32"], default="64", help="Architecture view")
+            parser.add_argument("--format", choices=["json", "md"], default="md", help="Output format")
+            args = parser.parse_args(sys.argv[2:])
+            q_val = args.named_query or args.query
+            if not q_val:
+                print("Error: Search query is required. Example: bintra reg-search --query \"Python\"")
+                return
+
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="reg-search",
+                target=f"{args.hive}\\{args.root_key or 'SearchRoot'}",
+                capability=Capability.REGISTRY_READ,
+                access_mode="READ",
+            )
+            from windows_intelligence.registry_intelligence import WindowsRegistryEditor
+            res = WindowsRegistryEditor.search(
+                query=q_val,
+                hive=args.hive,
+                root_key=args.root_key,
+                max_depth=args.max_depth,
+                limit=args.limit,
+                match_case=args.match_case,
+                match_whole_string=args.match_whole,
+                view=args.view
+            )
+            if args.format == "md":
+                lines = [
+                    f"# Windows Registry Search - '{q_val}' ({res.get('matched_count', len(res.get('matches', [])))} matches)",
+                    f"- **Hive:** `{res.get('hive')}` | **Root Key:** `{res.get('root_key')}`",
+                    f"- **Scanned Keys:** {res.get('keys_scanned', 0):,} | **Scanned Values:** {res.get('values_scanned', 0):,}",
+                    f"- **Elapsed Time:** {res.get('elapsed_seconds', 0.0)}s",
+                    "",
+                    "| Match Type | Canonical Path | Value Name | Type | Match Preview |",
+                    "| :--- | :--- | :--- | :--- | :--- |",
+                ]
+                for m in res.get("matches", []):
+                    m_type = m.get("match_type")
+                    p = m.get("canonical_path", "")
+                    vn = m.get("value_name") or "-"
+                    vt = m.get("value_type") or "-"
+                    prev = m.get("preview", "")
+                    if len(prev) > 80:
+                        prev = prev[:77] + "..."
+                    lines.append(f"| `{m_type}` | `{p}` | `{vn}` | `{vt}` | {prev} |")
+                print("\n".join(lines))
+            else:
+                print(json.dumps(res, indent=2, default=str))
+            return
+
+        elif cmd == "reg-export":
+            parser = argparse.ArgumentParser(prog="bintra reg-export", description="Export live registry key to Windows Registry Editor Version 5.00 format")
+            parser.add_argument("key", nargs="?", default="", help="Registry subkey path")
+            parser.add_argument("--key", dest="named_key", default=None, help="Registry subkey path flag")
+            parser.add_argument("--hive", default="HKLM", help="Registry hive (HKLM, HKCU, HKCR, HKU, HKCC)")
+            parser.add_argument("--output", default=None, help="Output .reg file path (prints to stdout if omitted)")
+            parser.add_argument("--recursive", action="store_true", help="Recursively export child subkeys")
+            parser.add_argument("--max-depth", type=int, default=1, help="Maximum recursion depth (default: 1)")
+            parser.add_argument("--view", choices=["64", "32"], default="64", help="Architecture view")
+            args = parser.parse_args(sys.argv[2:])
+            target_key = args.named_key or args.key
+            if not target_key:
+                print("Error: Subkey path is required. Example: bintra reg-export --key \"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\"")
+                return
+
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="reg-export",
+                target=f"{args.hive}\\{target_key}",
+                capability=Capability.REGISTRY_READ,
+                access_mode="READ",
+            )
+            from windows_intelligence.registry_intelligence import WindowsRegistryEditor
+            res = WindowsRegistryEditor.export_key(
+                hive=args.hive,
+                subkey=target_key,
+                output_path=args.output,
+                recursive=args.recursive,
+                max_depth=args.max_depth,
+                view=args.view
+            )
+            if args.output:
+                print(f"Export successful. Wrote {res.get('keys_exported', 0)} keys and {res.get('values_exported', 0)} values to '{res.get('output_path')}'.")
+            else:
+                print(res.get("reg_content", ""))
+            return
+
+        elif cmd == "reg-import":
+            parser = argparse.ArgumentParser(prog="bintra reg-import", description="Parse and audit .reg files with live registry drift detection")
+            parser.add_argument("file", nargs="?", default="", help="Path to .reg file")
+            parser.add_argument("--file", dest="named_file", default=None, help="Path to .reg file flag")
+            parser.add_argument("--diff", action="store_true", help="Audit live drift against Windows registry")
+            parser.add_argument("--view", choices=["64", "32"], default="64", help="Architecture view for live diff")
+            parser.add_argument("--format", choices=["json", "md"], default="md", help="Output format")
+            args = parser.parse_args(sys.argv[2:])
+            target_file = args.named_file or args.file
+            if not target_file:
+                print("Error: Path to .reg file is required. Example: bintra reg-import export.reg --diff")
+                return
+
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="reg-import",
+                target=target_file,
+                capability=Capability.REGISTRY_READ,
+                access_mode="READ",
+            )
+            from windows_intelligence.registry_intelligence import WindowsRegistryEditor
+            if args.diff:
+                res = WindowsRegistryEditor.diff_reg_file(reg_content_or_path=target_file, view=args.view)
+                if args.format == "md":
+                    lines = [
+                        f"# Registry Drift Audit - '{target_file}'",
+                        f"- **Format:** `{res.get('format_version')}`",
+                        f"- **Total Checked Values:** {res.get('total_items_checked', 0)}",
+                        f"- **Compliance:** **{res.get('compliance_percentage', 0.0)}%**",
+                        f"- **Matched:** {res.get('matched_count', 0)} | **Drifted:** {res.get('drifted_count', 0)} | **Missing:** {res.get('missing_count', 0)}",
+                        "",
+                        "| Target Key / Value | Audit Status | Expected Value | Live System Value |",
+                        "| :--- | :--- | :--- | :--- |",
+                    ]
+                    for item in res.get("diff_items", []):
+                        st = item.get("status")
+                        st_badge = "✅ Matched" if st == "matched" else ("⚠️ Drifted" if st == "drifted" else f"❌ {st}")
+                        k_lbl = f"{item.get('full_key')}\\{item.get('value_name', '')}"
+                        exp_v = str(item.get("expected_value", item.get("value", "")))
+                        act_v = str(item.get("actual_value", "-"))
+                        if len(exp_v) > 40: exp_v = exp_v[:37] + "..."
+                        if len(act_v) > 40: act_v = act_v[:37] + "..."
+                        lines.append(f"| `{k_lbl}` | {st_badge} | `{exp_v}` | `{act_v}` |")
+                    print("\n".join(lines))
+                else:
+                    print(json.dumps(res, indent=2, default=str))
+            else:
+                res = WindowsRegistryEditor.parse_reg_file(target_file)
+                if args.format == "md":
+                    lines = [
+                        f"# Parsed Registry File - '{target_file}'",
+                        f"- **Format:** `{res.get('format_version')}`",
+                        f"- **Total Keys:** {res.get('keys_count', 0)}",
+                        f"- **Total Values:** {res.get('values_count', 0)}",
+                        "",
+                    ]
+                    for k_path, k_data in res.get("keys", {}).items():
+                        del_str = " (DELETION)" if k_data.get("is_deletion") else ""
+                        lines.append(f"### `[{k_path}]{del_str}`")
+                        vals = k_data.get("values", {})
+                        if vals:
+                            lines.extend([
+                                "| Value Name | Type | Value Literal |",
+                                "| :--- | :--- | :--- |",
+                            ])
+                            for vn, vinfo in vals.items():
+                                lines.append(f"| `{vn}` | `{vinfo.get('type')}` | `{vinfo.get('value')}` |")
+                        lines.append("")
+                    print("\n".join(lines))
+                else:
+                    print(json.dumps(res, indent=2, default=str))
+            return
 
         elif cmd == "process-mitigations":
             parser = argparse.ArgumentParser(description="Inspect Windows process exploit mitigations (DEP, ASLR, CFG)")

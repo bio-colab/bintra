@@ -6,6 +6,8 @@ perspectives to detect WOW64 redirection divergence and configuration anomalies.
 """
 
 import os
+import sys
+import datetime
 from typing import Dict, Any, List, Optional, Tuple
 
 try:
@@ -28,14 +30,60 @@ class WindowsRegistryReader:
         "HKCC": getattr(winreg, "HKEY_CURRENT_CONFIG", 0x80000005) if winreg else 0x80000005
     }
 
+    HIVE_ALIASES = {
+        "HKEY_LOCAL_MACHINE": "HKLM",
+        "HKEY_CURRENT_USER": "HKCU",
+        "HKEY_CLASSES_ROOT": "HKCR",
+        "HKEY_USERS": "HKU",
+        "HKEY_CURRENT_CONFIG": "HKCC"
+    }
+
     REG_TYPE_NAMES = {
+        0: "REG_NONE",
         1: "REG_SZ",
         2: "REG_EXPAND_SZ",
         3: "REG_BINARY",
         4: "REG_DWORD",
+        5: "REG_DWORD_BIG_ENDIAN",
+        6: "REG_LINK",
         7: "REG_MULTI_SZ",
+        8: "REG_RESOURCE_LIST",
+        9: "REG_FULL_RESOURCE_DESCRIPTOR",
+        10: "REG_RESOURCE_REQUIREMENTS_LIST",
         11: "REG_QWORD"
     }
+
+    @classmethod
+    def normalize_hive_name(cls, hive: Optional[str]) -> Optional[str]:
+        """Normalizes full hive strings (e.g. HKEY_LOCAL_MACHINE) or abbreviations to standard HKLM format."""
+        if not hive:
+            return None
+        h = hive.strip().upper()
+        if h in cls.HIVE_MAP:
+            return h
+        return cls.HIVE_ALIASES.get(h)
+
+    @classmethod
+    def format_reg_value(cls, val_data: Any, val_type: int) -> Dict[str, Any]:
+        """Formats registry values safely for JSON output, CLI tables, and hex inspection."""
+        type_name = cls.REG_TYPE_NAMES.get(val_type, f"TYPE_{val_type}")
+        if isinstance(val_data, (bytes, bytearray)):
+            return {
+                "value": val_data.hex(" ").upper(),
+                "type": type_name,
+                "raw_bytes_len": len(val_data),
+                "is_binary": True
+            }
+        elif val_type in (4, 11) and isinstance(val_data, int):  # REG_DWORD, REG_QWORD
+            return {
+                "value": val_data,
+                "hex": f"0x{val_data:08X}" if val_type == 4 else f"0x{val_data:016X}",
+                "type": type_name
+            }
+        return {
+            "value": val_data,
+            "type": type_name
+        }
 
     @classmethod
     def enumerate_subkeys(
@@ -104,15 +152,21 @@ class WindowsRegistryReader:
         access = winreg.KEY_READ | view_flag
         try:
             with winreg.OpenKey(hive_handle, subkey, 0, access) as key:
+                last_modified_utc = None
+                try:
+                    _, _, last_mod_ft = winreg.QueryInfoKey(key)
+                    if last_mod_ft > 0:
+                        dt = datetime.datetime(1601, 1, 1, tzinfo=datetime.timezone.utc) + datetime.timedelta(microseconds=last_mod_ft // 10)
+                        last_modified_utc = dt.isoformat()
+                except Exception:
+                    pass
+
                 values = {}
                 if target_values and len(target_values) > 0:
                     for val_name in target_values:
                         try:
                             val_data, val_type = winreg.QueryValueEx(key, val_name)
-                            values[val_name] = {
-                                "value": val_data,
-                                "type": cls.REG_TYPE_NAMES.get(val_type, f"TYPE_{val_type}")
-                            }
+                            values[val_name] = cls.format_reg_value(val_data, val_type)
                         except FileNotFoundError:
                             pass
                 else:
@@ -122,15 +176,13 @@ class WindowsRegistryReader:
                         try:
                             val_name, val_data, val_type = winreg.EnumValue(key, idx)
                             idx += 1
-                            values[val_name or "(Default)"] = {
-                                "value": val_data,
-                                "type": cls.REG_TYPE_NAMES.get(val_type, f"TYPE_{val_type}")
-                            }
+                            values[val_name or "(Default)"] = cls.format_reg_value(val_data, val_type)
                         except OSError:
                             break
 
                 result: Dict[str, Any] = {
                     "exists": True,
+                    "last_modified_utc": last_modified_utc,
                     "values_count": len(values),
                     "values": values
                 }
@@ -179,7 +231,13 @@ class WindowsRegistryReader:
         Queries a registry key under both 64-bit and 32-bit perspectives,
         detecting WOW64 redirection and value discrepancies.
         """
-        hive_upper = hive.upper()
+        norm_hive = cls.normalize_hive_name(hive)
+        if not norm_hive:
+            return {
+                "status": "error",
+                "error": f"Unknown hive identifier '{hive}'. Supported: {list(cls.HIVE_MAP.keys())}"
+            }
+        hive_upper = norm_hive
         hive_handle = cls.HIVE_MAP.get(hive_upper)
         if not hive_handle:
             return {
@@ -230,4 +288,71 @@ class WindowsRegistryReader:
             "has_discrepancy": has_discrepancy,
             "discrepancy_count": len(discrepancy_details),
             "discrepancies": discrepancy_details
+        }
+
+    @classmethod
+    def read_key(
+        cls,
+        hive: str,
+        subkey: str,
+        view: str = "dual",
+        target_values: Optional[Tuple[str, ...]] = None,
+        include_subkeys: bool = True,
+        max_subkeys: int = 100
+    ) -> Dict[str, Any]:
+        """
+        Reads a Windows registry key with flexible architecture view selection.
+        view options:
+          - 'dual' (default): queries both 64-bit and 32-bit views and highlights discrepancies.
+          - '64' or 'x64': queries native 64-bit view (KEY_WOW64_64KEY).
+          - '32' or 'x86': queries WOW64 32-bit redirected view (KEY_WOW64_32KEY).
+          - 'native': queries without explicit WOW64 flags.
+        """
+        if not winreg or os.name != "nt":
+            return {
+                "status": "not_applicable",
+                "platform": sys.platform,
+                "reason": "Windows Registry inspection requires Windows NT.",
+                "hive": hive,
+                "subkey": subkey
+            }
+
+        norm_hive = cls.normalize_hive_name(hive)
+        if not norm_hive:
+            return {
+                "status": "error",
+                "error": f"Unknown hive identifier '{hive}'. Supported: {list(cls.HIVE_MAP.keys())}"
+            }
+
+        if view == "dual":
+            return cls.query_key_dual_view(
+                hive=norm_hive,
+                subkey=subkey,
+                target_values=target_values,
+                include_subkeys=include_subkeys,
+                max_subkeys=max_subkeys
+            )
+
+        hive_handle = cls.HIVE_MAP.get(norm_hive)
+        flag = 0
+        if str(view).lower() in ("64", "x64", "win64"):
+            flag = getattr(winreg, "KEY_WOW64_64KEY", 0x0100)
+        elif str(view).lower() in ("32", "x86", "win32"):
+            flag = getattr(winreg, "KEY_WOW64_32KEY", 0x0200)
+
+        single_res = cls._read_single_view(
+            hive_handle=hive_handle,
+            subkey=subkey,
+            view_flag=flag,
+            target_values=target_values,
+            include_subkeys=include_subkeys,
+            max_subkeys=max_subkeys
+        )
+
+        return {
+            "status": "success",
+            "hive": norm_hive,
+            "subkey": subkey,
+            "view": view,
+            "result": single_res
         }

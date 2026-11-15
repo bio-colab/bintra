@@ -334,6 +334,12 @@ bintra dev-list --class-filter Display
 bintra dev-search --query "Realtek"
 bintra dev-info --device "Intel(R) UHD Graphics 620"
 
+# Windows Registry Editor (regedit.exe) Intelligence: dual-view reading, deep search, export & drift audit
+bintra reg-read --key "SOFTWARE\Microsoft\Windows NT\CurrentVersion" --hive HKLM
+bintra reg-search --query "Windows 10" --hive HKLM --root-key "SOFTWARE\Microsoft\Windows NT"
+bintra reg-export --key "SOFTWARE\Microsoft\Windows NT\CurrentVersion" --output version.reg
+bintra reg-import version.reg --diff
+
 # Match PnP devices against Driver Store packages and evaluate driver ranks
 bintra dev-match --query "PCI" --problems-only
 ```

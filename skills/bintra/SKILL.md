@@ -126,6 +126,10 @@ bintra dev-classes [--format md]
 bintra dev-list [--class-filter <class>] [--problems-only] [--limit 50]
 bintra dev-search --query <name_or_id> [--limit 50]
 bintra dev-info --device <name_or_instance_id>
+bintra reg-read --key <subkey> [--hive HKLM|HKCU|HKCR|HKU|HKCC] [--view dual|64|32]
+bintra reg-search --query <query> [--hive HKLM] [--root-key <subkey>] [--limit 50]
+bintra reg-export --key <subkey> [--output <path.reg>] [--recursive]
+bintra reg-import <path.reg> [--diff]
 bintra dmp-inspect --file <path>
 bintra wsp-audit --model <model.safetensors>
 bintra patch-weights --source <in> --output <out> --tensor <name> --num-columns 64

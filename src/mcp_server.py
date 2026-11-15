@@ -361,17 +361,69 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
     },
     {
         "name": "bintra_registry_audit",
-        "description": "Performs dual-view (64-bit and 32-bit WOW64) inspection across 11 Windows Registry functional domains, detecting redirection divergence and security/loader policy anomalies.",
+        "description": "Windows Registry Editor & Intelligence suite: audits 11 OS domains, reads keys in 64/32/dual views, searches keys/values/data (regedit Ctrl+F), parses and diffs .reg files, and exports live keys to Windows Registry Editor Version 5.00 format.",
         "inputSchema": {
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["audit", "read", "search", "parse_reg", "export_reg", "diff_reg"],
+                    "description": "Action: 'audit' (11-domain policy audit), 'read' (read registry key/values), 'search' (search keys/values/data), 'parse_reg' (parse .reg file AST), 'export_reg' (export key to .reg format), 'diff_reg' (compare .reg file against live registry)",
+                    "default": "audit"
+                },
                 "domain": {
                     "type": "string",
-                    "description": "Optional functional domain (e.g. 'OPERATING_SYSTEM', 'SECURITY_POLICIES', 'DLL_SEARCH_CONFIGURATION', 'KNOWN_DLLS')"
+                    "description": "Functional domain for 'audit' (e.g. 'OPERATING_SYSTEM', 'SECURITY_POLICIES', 'DLL_SEARCH_CONFIGURATION', 'KNOWN_DLLS')"
                 },
                 "target_binary": {
                     "type": "string",
                     "description": "Optional target executable path to check for compatibility shims"
+                },
+                "hive": {
+                    "type": "string",
+                    "description": "Registry hive for read/search/export (HKLM, HKCU, HKCR, HKU, HKCC)",
+                    "default": "HKLM"
+                },
+                "key": {
+                    "type": "string",
+                    "description": "Registry subkey path for read or export (e.g. 'SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion')"
+                },
+                "subkey": {
+                    "type": "string",
+                    "description": "Alias for key parameter"
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Search term for 'search' action"
+                },
+                "reg_content": {
+                    "type": "string",
+                    "description": "Raw string content of .reg file for parse_reg or diff_reg"
+                },
+                "reg_path": {
+                    "type": "string",
+                    "description": "Filesystem path to .reg file for parse_reg, diff_reg, or output of export_reg"
+                },
+                "view": {
+                    "type": "string",
+                    "enum": ["dual", "64", "32"],
+                    "description": "Architecture view flag (dual, 64, or 32)",
+                    "default": "dual"
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "Recursively export subkeys for 'export_reg' action",
+                    "default": False
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "description": "Maximum traversal depth for search or export_reg",
+                    "default": 3
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum results to return for search",
+                    "default": 50
                 }
             }
         }
@@ -1674,7 +1726,37 @@ class BintraMcpServer:
             return CommandExecutor.execute(cmd_id, extra_flags=flags)
 
         elif name == "bintra_registry_audit":
-            from windows_intelligence import WindowsRegistryAnalyzer
+            from windows_intelligence import WindowsRegistryAnalyzer, WindowsRegistryEditor
+            action = args.get("action", "audit")
+            if action == "read":
+                hive = args.get("hive", "HKLM")
+                subkey = args.get("subkey") or args.get("key", "")
+                view = args.get("view", "dual")
+                return WindowsRegistryEditor.read_key(hive=hive, subkey=subkey, view=view)
+            elif action == "search":
+                q = args.get("query") or args.get("search_query", "")
+                hive = args.get("hive", "HKLM")
+                root_k = args.get("root_key") or args.get("subkey") or args.get("key", "")
+                limit = int(args.get("limit", 50))
+                max_d = int(args.get("max_depth", 3))
+                view = args.get("view", "64")
+                return WindowsRegistryEditor.search(query=q, hive=hive, root_key=root_k, limit=limit, max_depth=max_d, view=view)
+            elif action == "parse_reg":
+                target = args.get("reg_path") or args.get("reg_content") or ""
+                return WindowsRegistryEditor.parse_reg_file(target)
+            elif action == "export_reg":
+                hive = args.get("hive", "HKLM")
+                subkey = args.get("subkey") or args.get("key", "")
+                out_path = args.get("output_path") or args.get("reg_path")
+                rec = bool(args.get("recursive", False))
+                max_d = int(args.get("max_depth", 1))
+                view = args.get("view", "64")
+                return WindowsRegistryEditor.export_key(hive=hive, subkey=subkey, output_path=out_path, recursive=rec, max_depth=max_d, view=view)
+            elif action == "diff_reg":
+                target = args.get("reg_path") or args.get("reg_content") or ""
+                view = args.get("view", "64")
+                return WindowsRegistryEditor.diff_reg_file(target, view=view)
+
             domain = args.get("domain")
             target_b = args.get("target_binary")
             if domain:

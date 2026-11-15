@@ -29,7 +29,8 @@ from .registry_intelligence import (
     RegistryCatalog,
     RegistryKeySpec,
     WindowsRegistryReader,
-    WindowsRegistryAnalyzer
+    WindowsRegistryAnalyzer,
+    WindowsRegistryEditor
 )
 
 # Native System Introspection Submodule (Phase 2)
@@ -95,6 +96,7 @@ __all__ = [
     "RegistryKeySpec",
     "WindowsRegistryReader",
     "WindowsRegistryAnalyzer",
+    "WindowsRegistryEditor",
     # Native System Introspection (Phase 2)
     "NativeDeviceInspector",
     "KernelDriverInspector",

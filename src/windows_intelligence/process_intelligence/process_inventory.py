@@ -38,9 +38,12 @@ class ProcessInventory:
 
     @classmethod
     def _get_kernel32(cls):
-        if os.name != "nt":
+        windll = getattr(ctypes, "windll", None)
+        if not windll or os.name != "nt":
             return None
-        k32 = ctypes.windll.kernel32
+        k32 = getattr(windll, "kernel32", None)
+        if not k32:
+            return None
         k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
         k32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
 

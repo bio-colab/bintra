@@ -163,7 +163,8 @@ class TestTaskManagerInspector(unittest.TestCase):
         mock_k32.GetSystemTimes.return_value = 1
 
         with patch("os.name", "nt"), \
-             patch.object(TaskManagerInspector, "_get_k32", return_value=mock_k32):
+             patch.object(TaskManagerInspector, "_get_k32", return_value=mock_k32), \
+             patch("windows_intelligence.process_intelligence.process_inventory.ProcessInventory.enumerate_processes", return_value=[]):
             perf = TaskManagerInspector.get_system_performance()
             self.assertEqual(perf["status"], "success")
             self.assertEqual(perf["uptime"]["uptime_ms"], large_tick)

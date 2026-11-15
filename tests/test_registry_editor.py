@@ -154,16 +154,23 @@ class TestRegistryEditor(unittest.TestCase):
                 return k_dict[val_name]
             raise FileNotFoundError(f"Value {val_name} not found")
 
-        with patch("os.name", "nt"):
-            with patch("windows_intelligence.registry_intelligence.registry_editor.winreg.OpenKey", side_effect=mock_open_key):
-                with patch("windows_intelligence.registry_intelligence.registry_editor.winreg.QueryValueEx", side_effect=mock_query_value_ex):
-                    diff_res = WindowsRegistryEditor.diff_reg_file(sample_reg)
-                    self.assertEqual(diff_res["status"], "success")
-                    self.assertEqual(diff_res["total_items_checked"], 3)
-                    self.assertEqual(diff_res["matched_count"], 1)
-                    self.assertEqual(diff_res["drifted_count"], 1)
-                    self.assertEqual(diff_res["missing_count"], 1)
-                    self.assertAlmostEqual(diff_res["compliance_percentage"], 33.33, places=2)
+        mock_winreg = MagicMock()
+        mock_winreg.OpenKey.side_effect = mock_open_key
+        mock_winreg.QueryValueEx.side_effect = mock_query_value_ex
+        mock_winreg.KEY_READ = 0x20019
+        mock_winreg.KEY_WOW64_64KEY = 0x0100
+        mock_winreg.KEY_WOW64_32KEY = 0x0200
+        mock_winreg.HKEY_LOCAL_MACHINE = 0x80000002
+
+        with patch("os.name", "nt"), \
+             patch("windows_intelligence.registry_intelligence.registry_editor.winreg", mock_winreg):
+            diff_res = WindowsRegistryEditor.diff_reg_file(sample_reg)
+            self.assertEqual(diff_res["status"], "success")
+            self.assertEqual(diff_res["total_items_checked"], 3)
+            self.assertEqual(diff_res["matched_count"], 1)
+            self.assertEqual(diff_res["drifted_count"], 1)
+            self.assertEqual(diff_res["missing_count"], 1)
+            self.assertAlmostEqual(diff_res["compliance_percentage"], 33.33, places=2)
 
     def test_mcp_server_registry_tool_actions(self):
         """Verifies that MCP server dispatches all bintra_registry_audit extended actions."""

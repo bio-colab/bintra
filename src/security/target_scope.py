@@ -228,7 +228,12 @@ class TargetScope:
         """Verifies if a file was created by Bintra in the current session."""
         try:
             can = PathIdentity.canonicalize(file_path)
-            return can in self._session_created_files
+            if can in self._session_created_files:
+                return True
+            return any(
+                PathIdentity.is_within_directory(can, f)
+                for f in self._session_created_files
+            )
         except Exception:
             return False
 

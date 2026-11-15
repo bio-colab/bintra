@@ -19,6 +19,7 @@ from .safe_file_access import SafeFileAccess
 from .safe_registry_access import SafeRegistryAccess
 from .safe_process_access import SafeProcessAccess
 from .safe_subprocess import SafeSubprocessBroker
+from .ghidra_project_guard import GhidraProjectGuard
 
 __all__ = [
     "Capability",
@@ -40,4 +41,5 @@ __all__ = [
     "SafeRegistryAccess",
     "SafeProcessAccess",
     "SafeSubprocessBroker",
+    "GhidraProjectGuard",
 ]

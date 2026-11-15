@@ -95,14 +95,24 @@ class GhidraExportStore:
 
     @classmethod
     def _get_cache_dir(cls) -> str:
-        """Resolves standard cache directory under user .bintra workspace or temp."""
-        user_home = os.environ.get("USERPROFILE") or os.environ.get("HOME") or tempfile.gettempdir()
-        cache_dir = os.path.join(user_home, ".bintra", "workspace", "exports_cache")
+        """Resolves standard cache directory under active scope workspace or user .bintra workspace."""
+        try:
+            from security import ExecutionGuard
+            scope = ExecutionGuard.get_current_scope()
+            if scope and getattr(scope, "workspace_dir", None):
+                cache_dir = os.path.join(scope.workspace_dir, "exports_cache")
+            else:
+                user_home = os.environ.get("USERPROFILE") or os.environ.get("HOME") or tempfile.gettempdir()
+                cache_dir = os.path.join(user_home, ".bintra", "workspace", "exports_cache")
+        except Exception:
+            user_home = os.environ.get("USERPROFILE") or os.environ.get("HOME") or tempfile.gettempdir()
+            cache_dir = os.path.join(user_home, ".bintra", "workspace", "exports_cache")
+
         try:
             os.makedirs(cache_dir, exist_ok=True)
             return cache_dir
         except Exception:
-            return tempfile.gettempdir()
+            return cache_dir
 
     @classmethod
     def _compute_cache_path(cls, source_path: str) -> str:
@@ -132,9 +142,13 @@ class GhidraExportStore:
                 return cache_path
             except Exception:
                 try:
-                    os.remove(cache_path)
+                    from security import SafeFileAccess
+                    SafeFileAccess.delete_workspace_file(cache_path)
                 except Exception:
-                    pass
+                    try:
+                        os.remove(cache_path)
+                    except Exception:
+                        pass
 
         # Build new cache
         try:
@@ -168,12 +182,28 @@ class GhidraExportStore:
         """
         Surgically ingests a Ghidra .json or .jsonl export into an indexed SQLite database.
         Uses in-memory journaling and chunked batch transactions with guaranteed handle cleanup.
+        Mediated by ExecutionGuard for Capability.WORKSPACE_WRITE.
         """
-        if os.path.exists(target_db_path):
-            try:
-                os.remove(target_db_path)
-            except Exception:
-                pass
+        try:
+            from security import ExecutionGuard, Capability, SafeFileAccess
+            ExecutionGuard.request_access(
+                component="ghidra_export_store",
+                operation="ingest_to_sqlite",
+                target=target_db_path,
+                capability=Capability.WORKSPACE_WRITE,
+                access_mode="WRITE"
+            )
+            scope = ExecutionGuard.get_current_scope()
+            if scope:
+                scope.record_session_file(target_db_path)
+            if os.path.exists(target_db_path):
+                SafeFileAccess.delete_workspace_file(target_db_path)
+        except Exception:
+            if os.path.exists(target_db_path):
+                try:
+                    os.remove(target_db_path)
+                except Exception:
+                    pass
 
         con = sqlite3.connect(target_db_path)
         try:
@@ -207,6 +237,14 @@ class GhidraExportStore:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_func_size ON functions(size);")
 
             cur.execute("""
+            CREATE TABLE IF NOT EXISTS function_opcodes (
+                entry_point TEXT,
+                opcode TEXT
+            );
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_fn_opc ON function_opcodes(opcode, entry_point);")
+
+            cur.execute("""
             CREATE TABLE IF NOT EXISTS call_edges (
                 caller_name TEXT,
                 caller_addr TEXT,
@@ -233,7 +271,12 @@ class GhidraExportStore:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_xref_fn ON xrefs(function_name);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_xref_to ON xrefs(to_addr);")
 
-            def _insert_func_batch(batch: List[Tuple[Any, ...]], edges_batch: List[Tuple[Any, ...]], xrefs_batch: List[Tuple[Any, ...]]):
+            def _insert_func_batch(
+                batch: List[Tuple[Any, ...]],
+                edges_batch: List[Tuple[Any, ...]],
+                xrefs_batch: List[Tuple[Any, ...]],
+                opcodes_batch: List[Tuple[str, str]]
+            ):
                 if batch:
                     cur.executemany(
                         "INSERT OR REPLACE INTO functions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -249,10 +292,16 @@ class GhidraExportStore:
                         "INSERT INTO xrefs VALUES (?, ?, ?, ?, ?)",
                         xrefs_batch
                     )
+                if opcodes_batch:
+                    cur.executemany(
+                        "INSERT INTO function_opcodes VALUES (?, ?)",
+                        opcodes_batch
+                    )
 
             func_batch: List[Tuple[Any, ...]] = []
             edge_batch: List[Tuple[Any, ...]] = []
             xref_batch: List[Tuple[Any, ...]] = []
+            opcode_batch: List[Tuple[str, str]] = []
 
             def _process_function(fn: Dict[str, Any]):
                 name = str(fn.get("name", "unknown"))
@@ -263,16 +312,22 @@ class GhidraExportStore:
                 pcode = fn.get("pcode_ops", [])
                 blocks = fn.get("basic_blocks", [])
 
-                # Check sensitive APIs
+                # Check sensitive APIs & index opcodes
                 callees = list(fn.get("callees", []))
+                unique_opcs = set()
                 for op in pcode:
                     opc = str(op.get("opcode", "")).upper()
+                    if opc:
+                        unique_opcs.add(opc)
                     if opc == "CALL":
                         tgt = op.get("target_name") or op.get("target_address")
                         if tgt and tgt not in callees:
                             callees.append(str(tgt))
                     elif opc == "CALLIND":
                         edge_batch.append((name, entry, "INDIRECT_CALL", "0x0", 1, str(op.get("address", entry))))
+
+                for opc in unique_opcs:
+                    opcode_batch.append((entry, opc))
 
                 has_sens = 1 if any(any(pat.lower() in str(c).lower() for pat in SENSITIVE_API_PATTERNS) for c in callees) else 0
 
@@ -301,10 +356,11 @@ class GhidraExportStore:
                 ))
 
                 if len(func_batch) >= 1000:
-                    _insert_func_batch(func_batch, edge_batch, xref_batch)
+                    _insert_func_batch(func_batch, edge_batch, xref_batch, opcode_batch)
                     func_batch.clear()
                     edge_batch.clear()
                     xref_batch.clear()
+                    opcode_batch.clear()
 
             if is_jsonl:
                 with open(source_path, "r", encoding="utf-8", errors="replace") as f:
@@ -335,8 +391,8 @@ class GhidraExportStore:
                     for fn in payload:
                         _process_function(fn)
 
-            if func_batch or edge_batch or xref_batch:
-                _insert_func_batch(func_batch, edge_batch, xref_batch)
+            if func_batch or edge_batch or xref_batch or opcode_batch:
+                _insert_func_batch(func_batch, edge_batch, xref_batch, opcode_batch)
 
             con.commit()
             cur.close()
@@ -589,27 +645,38 @@ class GhidraExportStore:
             params: List[Any] = []
 
             if sensitive_only:
-                query_conds.append("has_sensitive_api = 1")
+                query_conds.append("f.has_sensitive_api = 1")
 
             if clean_query:
-                query_conds.append("(name LIKE ? OR entry_point LIKE ? OR data LIKE ?)")
+                query_conds.append("(f.name LIKE ? OR f.entry_point LIKE ? OR f.data LIKE ?)")
                 like_p = f"%{clean_query}%"
                 params.extend([like_p, like_p, like_p])
 
+            if clean_opcode:
+                query_conds.append("f.entry_point IN (SELECT entry_point FROM function_opcodes WHERE opcode = ?)")
+                params.append(clean_opcode)
+
+            if clean_xref:
+                query_conds.append(
+                    "(f.name IN (SELECT function_name FROM xrefs WHERE to_addr LIKE ? OR symbol LIKE ? OR from_addr LIKE ?) "
+                    "OR f.entry_point IN (SELECT from_addr FROM xrefs WHERE to_addr LIKE ? OR symbol LIKE ?))"
+                )
+                like_x = f"%{clean_xref}%"
+                params.extend([like_x, like_x, like_x, like_x, like_x])
+
             where_clause = " WHERE " + " AND ".join(query_conds) if query_conds else ""
-            sql = f"SELECT data FROM functions{where_clause} ORDER BY size DESC"
-            cur.execute(sql, params)
-            while True:
-                rows = cur.fetchmany(100)
-                if not rows:
-                    break
-                for r in rows:
-                    fn = json.loads(r["data"])
-                    m = _check_fn(fn)
-                    if m:
-                        total_matches += 1
-                        if len(matched_summaries) < limit and total_matches > offset:
-                            matched_summaries.append(m)
+            count_sql = f"SELECT COUNT(*) FROM functions f{where_clause}"
+            cur.execute(count_sql, params)
+            total_matches = int(cur.fetchone()[0])
+
+            page_sql = f"SELECT f.data FROM functions f{where_clause} ORDER BY f.size DESC LIMIT ? OFFSET ?"
+            cur.execute(page_sql, params + [limit, offset])
+            rows = cur.fetchall()
+            for r in rows:
+                fn = json.loads(r["data"])
+                m = _check_fn(fn)
+                if m:
+                    matched_summaries.append(m)
         else:
             funcs = self._in_memory.get("functions", []) if self._in_memory else []
             for fn in funcs:
@@ -808,8 +875,16 @@ class GhidraExportStore:
             "arithmetic_to_control_ratio": arith_to_ctrl,
             "memory_io_ratio": mem_to_total,
             "architectural_classification": profile,
+            "confidence_score": 0.85,
+            "threshold_criteria": {
+                "algorithmic_compute": "arith_to_ctrl > 2.0",
+                "logic_state_machine": "control_ops > arith_ops",
+                "memory_buffer_io": "mem_to_total > 0.4",
+                "balanced": "fallback baseline"
+            },
             "category_distribution": cat_counts,
-            "epistemic_classification": "GHIDRA_GLOBAL_COMPUTATIONAL_PROFILE",
+            "epistemic_classification": "EXPLORATORY_HEURISTIC_ARCHITECTURAL_PROFILE",
+            "disclaimer": "Heuristic categorization based on static P-Code category distribution; does not guarantee dynamic runtime behavior."
         }
 
     def build_call_graph_and_xrefs(

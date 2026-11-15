@@ -2257,10 +2257,13 @@ def _dispatch_cli():
                 print(f"Error: {headless_name} not found. Please set GHIDRA_INSTALL_DIR or pass --ghidra-path.")
                 sys.exit(1)
 
+            from security import GhidraProjectGuard
+
             repo_root = P(__file__).resolve().parent.parent
             script_dir = repo_root / "ghidra_scripts"
-            proj_dir = args.project_dir or tempfile.gettempdir()
-            proj_name = args.project_name or f"BintraHeadless_{uuid.uuid4().hex[:8]}"
+            proj_name = GhidraProjectGuard.sanitize_project_name(args.project_name)
+            proj_dir = GhidraProjectGuard.resolve_project_dir(args.project_dir)
+            rep_path, gpr_path = GhidraProjectGuard.register_and_prepare_project("cli", proj_dir, proj_name)
             script_args = ["apply"] if args.apply else []
 
             cmd_args = [
@@ -2300,15 +2303,9 @@ def _dispatch_cli():
                 returncode = 124
 
             if not args.keep_project:
-                try:
-                    rep_dir = P(proj_dir) / f"{proj_name}.rep"
-                    gpr_file = P(proj_dir) / f"{proj_name}.gpr"
-                    if rep_dir.exists() and rep_dir.is_dir():
-                        shutil.rmtree(rep_dir, ignore_errors=True)
-                    if gpr_file.exists():
-                        gpr_file.unlink(missing_ok=True)
-                except Exception:
-                    pass
+                cleaned = GhidraProjectGuard.clean_transient_project("cli", proj_dir, proj_name)
+                if cleaned:
+                    print(f"[Bintra] Transient Ghidra project '{proj_name}' safely cleaned.")
 
             print(stdout, end="")
             if stderr:

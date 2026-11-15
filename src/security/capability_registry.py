@@ -102,8 +102,16 @@ class CapabilityRegistry:
         "device_intelligence": {Capability.DEVICE_QUERY, Capability.DRIVER_QUERY},
         "process_intelligence": {Capability.PROCESS_QUERY, Capability.FILE_READ},
         "registry_editor": {Capability.REGISTRY_READ, Capability.WORKSPACE_WRITE, Capability.FILE_READ},
-        "ghidra_headless": {Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE, Capability.FILE_READ},
-        "ghidra_analyzer": {Capability.FILE_READ, Capability.WORKSPACE_WRITE},
+        "ghidra_headless": {
+            Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE,
+            Capability.FILE_READ, Capability.WORKSPACE_WRITE, Capability.WORKSPACE_TEMP_CLEAN
+        },
+        "ghidra_analyzer": {
+            Capability.FILE_READ, Capability.WORKSPACE_WRITE, Capability.WORKSPACE_TEMP_CLEAN
+        },
+        "ghidra_export_store": {
+            Capability.FILE_READ, Capability.WORKSPACE_WRITE, Capability.WORKSPACE_TEMP_CLEAN
+        },
         "binary_diff": {Capability.FILE_READ},
 
         # High-Level Invocation Interfaces
@@ -112,14 +120,16 @@ class CapabilityRegistry:
             Capability.REGISTRY_READ, Capability.PROCESS_QUERY, Capability.SERVICE_QUERY,
             Capability.DEVICE_QUERY, Capability.DRIVER_QUERY, Capability.EVENT_LOG_READ,
             Capability.MINIDUMP_READ, Capability.SUBPROCESS_CATALOG_EXEC,
-            Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE
+            Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE,
+            Capability.WORKSPACE_TEMP_CLEAN
         },
         "cli": {
             Capability.FILE_READ, Capability.FILE_HASH, Capability.WORKSPACE_WRITE,
             Capability.REGISTRY_READ, Capability.PROCESS_QUERY, Capability.SERVICE_QUERY,
             Capability.DEVICE_QUERY, Capability.DRIVER_QUERY, Capability.EVENT_LOG_READ,
             Capability.MINIDUMP_READ, Capability.SUBPROCESS_CATALOG_EXEC,
-            Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE
+            Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE,
+            Capability.WORKSPACE_TEMP_CLEAN
         },
 
         # Test Fixtures & Internal Testing

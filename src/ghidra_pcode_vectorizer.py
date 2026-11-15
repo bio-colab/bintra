@@ -980,6 +980,7 @@ class GhidraDeepAnalyzer:
         """
         Pure-Python zero-dependency MSVC C++ symbol demangler.
         Recovers namespaces, classes, methods, constructors, destructors, operators,
+        template instantiations, compound struct/class/enum types, pointer-to-pointer chains,
         return types, and parameter lists from Microsoft mangled identifiers (e.g. ?Func@Class@@...).
         Returns the original symbol untouched if not mangled or on parse anomaly.
         """
@@ -990,20 +991,98 @@ class GhidraDeepAnalyzer:
             "X": "void", "_N": "bool", "D": "char", "C": "signed char", "E": "unsigned char",
             "F": "short", "G": "unsigned short", "H": "int", "I": "unsigned int",
             "J": "long", "K": "unsigned long", "_J": "__int64", "_K": "unsigned __int64",
-            "M": "float", "N": "double", "PEAX": "void*", "PEBX": "void const*",
-            "PEAD": "char*", "PEBD": "char const*", "AEAD": "char&", "AEBD": "char const&"
+            "_W": "wchar_t", "M": "float", "N": "double",
         }
 
-        def _parse_type(s: str, pos: int) -> Tuple[str, int]:
-            for k in sorted(type_map.keys(), key=len, reverse=True):
-                if s.startswith(k, pos):
-                    return type_map[k], pos + len(k)
-            if s.startswith("PEAV", pos) or s.startswith("PEAU", pos):
-                end = s.find("@@", pos + 4)
-                if end != -1:
-                    cls_name = s[pos+4:end].replace("@", "::")
-                    return f"{cls_name}*", end + 2
-            return "void*", pos + 1
+        def _parse_single_type(s: str, pos: int) -> Tuple[str, int]:
+            ptr_mods = []
+            while pos < len(s):
+                if s.startswith("PEA", pos):
+                    ptr_mods.append("*")
+                    pos += 3
+                elif s.startswith("PEB", pos):
+                    ptr_mods.append(" const*")
+                    pos += 3
+                elif s.startswith("AEA", pos):
+                    ptr_mods.append("&")
+                    pos += 3
+                elif s.startswith("AEB", pos):
+                    ptr_mods.append(" const&")
+                    pos += 3
+                elif s.startswith("PA", pos):
+                    ptr_mods.append("*")
+                    pos += 2
+                elif s.startswith("PB", pos):
+                    ptr_mods.append(" const*")
+                    pos += 2
+                else:
+                    break
+
+            # Compound class / struct / enum
+            if s.startswith("V", pos) or s.startswith("U", pos):
+                pos += 1
+                name, pos = _parse_name_or_template(s, pos)
+                base = name
+            elif s.startswith("W4", pos):
+                pos += 2
+                name, pos = _parse_name_or_template(s, pos)
+                base = name
+            elif s.startswith("?$", pos):
+                name, pos = _parse_name_or_template(s, pos)
+                base = name
+            else:
+                matched_basic = False
+                for k in sorted(type_map.keys(), key=len, reverse=True):
+                    if s.startswith(k, pos):
+                        base = type_map[k]
+                        pos += len(k)
+                        matched_basic = True
+                        break
+                if not matched_basic:
+                    base = "void"
+                    pos += 1
+
+            res = base + "".join(ptr_mods)
+            return res, pos
+
+        def _parse_name_or_template(s: str, pos: int) -> Tuple[str, int]:
+            if s.startswith("?$", pos):
+                pos += 2
+                at_idx = s.find("@", pos)
+                if at_idx == -1:
+                    return s[pos:], len(s)
+                tmpl_name = s[pos:at_idx]
+                pos = at_idx + 1
+                args = []
+                while pos < len(s) and not s.startswith("@", pos):
+                    if s.startswith("$0", pos):
+                        end = s.find("@", pos)
+                        if end == -1:
+                            val = s[pos+2:]
+                            pos = len(s)
+                        else:
+                            val = s[pos+2:end]
+                            pos = end + 1
+                        args.append(val)
+                    else:
+                        arg_type, pos = _parse_single_type(s, pos)
+                        args.append(arg_type)
+                        if pos < len(s) and s[pos] == "@":
+                            pos += 1
+                if pos < len(s) and s[pos] == "@":
+                    pos += 1
+                return f"{tmpl_name}<{', '.join(args)}>", pos
+            else:
+                end = s.find("@@", pos)
+                end_at = s.find("@", pos)
+                if end != -1 and (end_at == -1 or end <= end_at):
+                    name = s[pos:end].replace("@", "::")
+                    return name, end + 2
+                elif end_at != -1:
+                    name = s[pos:end_at]
+                    return name, end_at + 1
+                else:
+                    return s[pos:], len(s)
 
         try:
             s = sym[1:]
@@ -1033,13 +1112,28 @@ class GhidraDeepAnalyzer:
                 op_name = "operator!="
                 s = s[2:]
 
-            parts = s.split("@@")
-            if len(parts) < 2:
-                return sym
-            scope_part = parts[0]
-            rest = "@@".join(parts[1:])
+            tokens: List[str] = []
+            pos = 0
+            while pos < len(s):
+                if (
+                    s.startswith("QEAA", pos) or s.startswith("QEBA", pos) or
+                    s.startswith("YAA", pos) or s.startswith("YCA", pos) or
+                    s.startswith("QAE", pos) or s.startswith("QBE", pos)
+                ):
+                    break
+                if s.startswith("@", pos):
+                    pos += 1
+                    if pos < len(s) and s[pos] == "@":
+                        pos += 1
+                    break
+                token, pos = _parse_name_or_template(s, pos)
+                if token:
+                    tokens.append(token)
 
-            tokens = scope_part.split("@")
+            rest = s[pos:]
+            if not tokens:
+                return sym
+
             if is_ctor:
                 qualifiers = tokens
                 fn_name = qualifiers[0] if qualifiers else "Ctor"
@@ -1061,22 +1155,21 @@ class GhidraDeepAnalyzer:
             full_fn = f"{full_qual}::{fn_name}" if full_qual else fn_name
 
             idx = 0
-            while idx < len(rest) and rest[idx] in "QIAESUYB":
-                idx += 1
-            if rest.startswith("A", idx):
-                idx += 1
-            if rest.startswith("A", idx):
+            while idx < len(rest) and rest[idx] in "QIAESUYB@":
                 idx += 1
 
             if ret is None:
-                ret, idx = _parse_type(rest, idx)
+                ret, idx = _parse_single_type(rest, idx)
 
             params = []
             if rest.startswith("XZ", idx) or rest.startswith("Z", idx):
                 params = ["void"]
             else:
                 while idx < len(rest) and not rest.startswith("@Z", idx) and not rest.startswith("Z", idx):
-                    p, idx = _parse_type(rest, idx)
+                    if rest[idx] == "@":
+                        idx += 1
+                        continue
+                    p, idx = _parse_single_type(rest, idx)
                     params.append(p)
                     if idx >= len(rest) or rest[idx] == "@":
                         idx += 1

@@ -1790,8 +1790,11 @@ class BintraMcpServer:
 
             script_dir = SRC_DIR.parent / "ghidra_scripts"
             post_script = args.get("post_script") or "BintraGhidraBridge.java"
-            proj_dir = args.get("project_dir") or tempfile.gettempdir()
-            proj_name = args.get("project_name") or f"BintraHeadless_{uuid.uuid4().hex[:8]}"
+            from security import GhidraProjectGuard
+
+            proj_name = GhidraProjectGuard.sanitize_project_name(args.get("project_name"))
+            proj_dir = GhidraProjectGuard.resolve_project_dir(args.get("project_dir"))
+            rep_path, gpr_path = GhidraProjectGuard.register_and_prepare_project("ghidra_headless", proj_dir, proj_name)
 
             script_args = list(args.get("script_args", []))
             if apply_flag and "apply" not in script_args:
@@ -1829,17 +1832,10 @@ class BintraMcpServer:
                 returncode = 124
                 timed_out = True
 
-            # Cleanup transient project directory if requested
+            # Safely cleanup transient project directory through GhidraProjectGuard & SafeFileAccess
+            project_cleaned = False
             if delete_proj:
-                try:
-                    rep_dir = Path(proj_dir) / f"{proj_name}.rep"
-                    gpr_file = Path(proj_dir) / f"{proj_name}.gpr"
-                    if rep_dir.exists() and rep_dir.is_dir():
-                        shutil.rmtree(rep_dir, ignore_errors=True)
-                    if gpr_file.exists():
-                        gpr_file.unlink(missing_ok=True)
-                except Exception:
-                    pass
+                project_cleaned = GhidraProjectGuard.clean_transient_project("ghidra_headless", proj_dir, proj_name)
 
             combined = stdout + "\n" + stderr
             error_markers = [
@@ -1880,7 +1876,7 @@ class BintraMcpServer:
                 "script_error_detected": has_script_error,
                 "is_error": effective_exit != 0,
                 "project_name": proj_name,
-                "project_cleaned": delete_proj,
+                "project_cleaned": project_cleaned,
                 "analyzed_functions_count": analyzed_funcs,
                 "opaque_predicates_detected": opaque_detected,
                 "cff_backbones_detected": cff_detected,

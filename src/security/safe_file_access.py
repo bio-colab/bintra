@@ -116,3 +116,25 @@ class SafeFileAccess:
             os.remove(can_path)
             return True
         return False
+
+    @classmethod
+    def delete_workspace_dir(cls, dir_path: str) -> bool:
+        """
+        Recursively deletes a temporary directory created by Bintra in the current session.
+        Enforces Capability.WORKSPACE_TEMP_CLEAN, session provenance, and workspace boundary confinement.
+        Attempts to delete target directories or external paths are unconditionally blocked.
+        """
+        ExecutionGuard.request_access(
+            component="safe_file_access",
+            operation="delete_workspace_dir",
+            target=dir_path,
+            capability=Capability.WORKSPACE_TEMP_CLEAN,
+            access_mode="DELETE"
+        )
+
+        can_path = PathIdentity.canonicalize(dir_path)
+        if os.path.exists(can_path) and os.path.isdir(can_path):
+            import shutil
+            shutil.rmtree(can_path, ignore_errors=True)
+            return not os.path.exists(can_path)
+        return False

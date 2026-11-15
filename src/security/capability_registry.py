@@ -29,6 +29,8 @@ class Capability(str, Enum):
 
     # Gated Subprocess Capabilities
     SUBPROCESS_CATALOG_EXEC = "cap.subprocess.catalog_exec"
+    GHIDRA_HEADLESS_EXEC = "cap.ghidra.headless_exec"
+    GHIDRA_PROJECT_MUTATE = "cap.ghidra.project_mutate"
 
     # Strictly Prohibited System Mutation Capabilities (Always Denied by Policy)
     TARGET_MUTATE = "cap.hazard.target_mutate"
@@ -99,26 +101,30 @@ class CapabilityRegistry:
         "causality_synthesizer": {Capability.FILE_READ, Capability.WORKSPACE_WRITE},
         "device_intelligence": {Capability.DEVICE_QUERY, Capability.DRIVER_QUERY},
         "process_intelligence": {Capability.PROCESS_QUERY, Capability.FILE_READ},
+        "registry_editor": {Capability.REGISTRY_READ, Capability.WORKSPACE_WRITE, Capability.FILE_READ},
+        "ghidra_headless": {Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE, Capability.FILE_READ},
 
         # High-Level Invocation Interfaces
         "mcp_server": {
             Capability.FILE_READ, Capability.FILE_HASH, Capability.WORKSPACE_WRITE,
             Capability.REGISTRY_READ, Capability.PROCESS_QUERY, Capability.SERVICE_QUERY,
             Capability.DEVICE_QUERY, Capability.DRIVER_QUERY, Capability.EVENT_LOG_READ,
-            Capability.MINIDUMP_READ, Capability.SUBPROCESS_CATALOG_EXEC
+            Capability.MINIDUMP_READ, Capability.SUBPROCESS_CATALOG_EXEC,
+            Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE
         },
         "cli": {
             Capability.FILE_READ, Capability.FILE_HASH, Capability.WORKSPACE_WRITE,
             Capability.REGISTRY_READ, Capability.PROCESS_QUERY, Capability.SERVICE_QUERY,
             Capability.DEVICE_QUERY, Capability.DRIVER_QUERY, Capability.EVENT_LOG_READ,
-            Capability.MINIDUMP_READ, Capability.SUBPROCESS_CATALOG_EXEC
+            Capability.MINIDUMP_READ, Capability.SUBPROCESS_CATALOG_EXEC,
+            Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE
         },
 
         # Test Fixtures & Internal Testing
         "test_suite": {
             Capability.FILE_READ, Capability.FILE_HASH, Capability.WORKSPACE_WRITE,
             Capability.WORKSPACE_TEMP_CLEAN, Capability.REGISTRY_READ, Capability.PROCESS_QUERY,
-            Capability.SUBPROCESS_CATALOG_EXEC
+            Capability.SUBPROCESS_CATALOG_EXEC, Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE
         },
         "sec_test": {
             Capability.FILE_READ, Capability.WORKSPACE_WRITE, Capability.WORKSPACE_TEMP_CLEAN,

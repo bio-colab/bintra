@@ -1334,7 +1334,7 @@ class BintraMcpServer:
         "bintra_match_pcode": ("cap.file.read", "READ", None),
         "bintra_deobfuscate_pcode": ("cap.file.read", "READ", None),
         "bintra_ghidra_analyze": ("cap.file.read", "READ", "input_file"),
-        "bintra_ghidra_headless": ("cap.file.read", "READ", "binary_path"),
+        "bintra_ghidra_headless": ("cap.ghidra.headless_exec", "EXECUTE", "binary_path"),
         "bintra_windows_env_audit": ("cap.registry.read", "READ", "file_path"),
         "bintra_resolve_dependencies": ("cap.file.read", "READ", "file_path"),
         "bintra_inspect_crash_reports": ("cap.minidump.read", "READ", "file_path"),
@@ -1629,7 +1629,26 @@ class BintraMcpServer:
 
         elif name == "bintra_ghidra_headless":
             import subprocess, tempfile
+            from security import ExecutionGuard, Capability
             bin_path = args["binary_path"]
+            apply_flag = bool(args.get("apply", False))
+            ExecutionGuard.request_access(
+                component="ghidra_headless",
+                operation="run_ghidra_headless",
+                target=bin_path,
+                capability=Capability.GHIDRA_HEADLESS_EXEC,
+                access_mode="EXECUTE",
+                metadata={"shell": False, "apply": apply_flag}
+            )
+            if apply_flag:
+                ExecutionGuard.request_access(
+                    component="ghidra_headless",
+                    operation="apply_project_mutations",
+                    target=bin_path,
+                    capability=Capability.GHIDRA_PROJECT_MUTATE,
+                    access_mode="WRITE",
+                    metadata={"target": "ghidra_project_database"}
+                )
             ghidra_path_val = args.get("ghidra_path") or os.environ.get("GHIDRA_INSTALL_DIR") or os.environ.get("GHIDRA_HOME")
             headless_name = "analyzeHeadless.bat" if os.name == "nt" else "analyzeHeadless"
             alt_name = "analyzeHeadless" if os.name == "nt" else "analyzeHeadless.bat"
@@ -1742,18 +1761,45 @@ class BintraMcpServer:
                 view = args.get("view", "64")
                 return WindowsRegistryEditor.search(query=q, hive=hive, root_key=root_k, limit=limit, max_depth=max_d, view=view)
             elif action == "parse_reg":
+                from security import ExecutionGuard, Capability
                 target = args.get("reg_path") or args.get("reg_content") or ""
+                if args.get("reg_path") or (isinstance(target, str) and len(target) < 1024 and os.path.isfile(target)):
+                    ExecutionGuard.request_access(
+                        component="mcp_server",
+                        operation="parse_reg_file",
+                        target=str(target),
+                        capability=Capability.FILE_READ,
+                        access_mode="READ"
+                    )
                 return WindowsRegistryEditor.parse_reg_file(target)
             elif action == "export_reg":
+                from security import ExecutionGuard, Capability
                 hive = args.get("hive", "HKLM")
                 subkey = args.get("subkey") or args.get("key", "")
                 out_path = args.get("output_path") or args.get("reg_path")
                 rec = bool(args.get("recursive", False))
                 max_d = int(args.get("max_depth", 1))
                 view = args.get("view", "64")
+                if out_path:
+                    ExecutionGuard.request_access(
+                        component="mcp_server",
+                        operation="export_reg",
+                        target=str(out_path),
+                        capability=Capability.WORKSPACE_WRITE,
+                        access_mode="WRITE"
+                    )
                 return WindowsRegistryEditor.export_key(hive=hive, subkey=subkey, output_path=out_path, recursive=rec, max_depth=max_d, view=view)
             elif action == "diff_reg":
+                from security import ExecutionGuard, Capability
                 target = args.get("reg_path") or args.get("reg_content") or ""
+                if args.get("reg_path") or (isinstance(target, str) and len(target) < 1024 and os.path.isfile(target)):
+                    ExecutionGuard.request_access(
+                        component="mcp_server",
+                        operation="diff_reg_file",
+                        target=str(target),
+                        capability=Capability.FILE_READ,
+                        access_mode="READ"
+                    )
                 view = args.get("view", "64")
                 return WindowsRegistryEditor.diff_reg_file(target, view=view)
 

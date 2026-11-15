@@ -28,8 +28,27 @@ class TestTokenEfficiency(unittest.TestCase):
         sample = {"status": "ok", "items": [1, 2, 3, 4, 5]}
         waste = measure_serialization_waste(sample)
         self.assertGreater(waste["pretty_tokens"], waste["compact_tokens"])
-        cost = estimate_cost_usd(1_000_000, model="claude-3.5-sonnet", direction="input")
-        self.assertAlmostEqual(cost, 3.0, places=4)
+        cost_in = estimate_cost_usd(1_000_000, model="claude-3.5-sonnet", direction="input")
+        cost_out = estimate_cost_usd(1_000_000, model="claude-3.5-sonnet", direction="output")
+        self.assertAlmostEqual(cost_in, 3.0, places=4)
+        self.assertAlmostEqual(cost_out, 15.0, places=4)
+
+    def test_directional_pricing_and_actual_usage(self):
+        tracker = TokenSessionTracker(model="claude-3.5-sonnet")
+        call_entry = tracker.record_tool_call(
+            tool_name="bintra_test",
+            args_text="a" * 3700,
+            output_text="b" * 3700,
+        )
+        self.assertIn("estimated_input_cost_usd", call_entry)
+        self.assertIn("estimated_output_cost_usd", call_entry)
+        self.assertGreater(call_entry["estimated_output_cost_usd"], call_entry["estimated_input_cost_usd"])
+
+        usage = tracker.record_actual_usage(prompt_tokens=1500, completion_tokens=500)
+        self.assertEqual(usage["prompt_tokens"], 1500)
+        self.assertEqual(usage["completion_tokens"], 500)
+        self.assertEqual(usage["total_tokens"], 2000)
+        self.assertGreater(usage["total_cost_usd"], 0)
 
     def test_prune_payload_preserves_truncation_metadata(self):
         data = {"imports": [f"func_{i}" for i in range(50)], "empty_field": []}

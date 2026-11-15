@@ -83,7 +83,40 @@ class TaskManagerInspector:
     @classmethod
     def _get_k32(cls):
         windll = getattr(ctypes, "windll", None)
-        return getattr(windll, "kernel32", None) if windll else None
+        k32 = getattr(windll, "kernel32", None) if windll else None
+        if k32 and not getattr(k32, "_bintra_initialized", False):
+            try:
+                if hasattr(k32, "GetTickCount64"):
+                    k32.GetTickCount64.restype = ctypes.c_ulonglong
+                    k32.GetTickCount64.argtypes = []
+                if hasattr(k32, "GetTickCount"):
+                    k32.GetTickCount.restype = ctypes.c_ulong
+                    k32.GetTickCount.argtypes = []
+                if hasattr(k32, "OpenProcess"):
+                    k32.OpenProcess.restype = ctypes.wintypes.HANDLE
+                    k32.OpenProcess.argtypes = [ctypes.wintypes.DWORD, ctypes.wintypes.BOOL, ctypes.wintypes.DWORD]
+                if hasattr(k32, "CloseHandle"):
+                    k32.CloseHandle.restype = ctypes.wintypes.BOOL
+                    k32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
+                if hasattr(k32, "ProcessIdToSessionId"):
+                    k32.ProcessIdToSessionId.restype = ctypes.wintypes.BOOL
+                    k32.ProcessIdToSessionId.argtypes = [ctypes.wintypes.DWORD, ctypes.POINTER(ctypes.wintypes.DWORD)]
+                if hasattr(k32, "GetProcessHandleCount"):
+                    k32.GetProcessHandleCount.restype = ctypes.wintypes.BOOL
+                    k32.GetProcessHandleCount.argtypes = [ctypes.wintypes.HANDLE, ctypes.POINTER(ctypes.wintypes.DWORD)]
+                if hasattr(k32, "GlobalMemoryStatusEx"):
+                    k32.GlobalMemoryStatusEx.restype = ctypes.wintypes.BOOL
+                    k32.GlobalMemoryStatusEx.argtypes = [ctypes.c_void_p]
+                if hasattr(k32, "GetSystemTimes"):
+                    k32.GetSystemTimes.restype = ctypes.wintypes.BOOL
+                    k32.GetSystemTimes.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+                if hasattr(k32, "GetProcessTimes"):
+                    k32.GetProcessTimes.restype = ctypes.wintypes.BOOL
+                    k32.GetProcessTimes.argtypes = [ctypes.wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+                k32._bintra_initialized = True
+            except Exception:
+                pass
+        return k32
 
     @classmethod
     def _get_psapi(cls):
@@ -154,7 +187,11 @@ class TaskManagerInspector:
         commit_pct = round((committed_gb / total_page_gb * 100.0), 1) if total_page_gb > 0 else 0.0
 
         # 2. System Uptime (GetTickCount64)
-        uptime_ms = k32.GetTickCount64() if hasattr(k32, "GetTickCount64") else k32.GetTickCount()
+        if hasattr(k32, "GetTickCount64"):
+            uptime_ms = int(k32.GetTickCount64())
+        else:
+            uptime_ms = int(k32.GetTickCount())
+        uptime_ms = max(0, uptime_ms)
         uptime_sec = uptime_ms / 1000.0
         uptime_hours = round(uptime_sec / 3600.0, 2)
         uptime_days = round(uptime_hours / 24.0, 2)
@@ -195,6 +232,7 @@ class TaskManagerInspector:
                 "commit_percent": commit_pct,
             },
             "uptime": {
+                "uptime_ms": uptime_ms,
                 "uptime_seconds": round(uptime_sec, 1),
                 "uptime_hours": uptime_hours,
                 "uptime_days": uptime_days,

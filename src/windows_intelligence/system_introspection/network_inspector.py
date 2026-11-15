@@ -89,6 +89,19 @@ class MIB_TCPROW_OWNER_PID(ctypes.Structure):
     ]
 
 
+class MIB_TCP6ROW_OWNER_PID(ctypes.Structure):
+    _fields_ = [
+        ("ucLocalAddr", ctypes.c_ubyte * 16),
+        ("dwLocalScopeId", wintypes.DWORD),
+        ("dwLocalPort", wintypes.DWORD),
+        ("ucRemoteAddr", ctypes.c_ubyte * 16),
+        ("dwRemoteScopeId", wintypes.DWORD),
+        ("dwRemotePort", wintypes.DWORD),
+        ("dwState", wintypes.DWORD),
+        ("dwOwningPid", wintypes.DWORD),
+    ]
+
+
 class NetworkHardwareInspector:
     """
     Authoritative read-only hardware intelligence engine for Windows network adapters
@@ -99,6 +112,7 @@ class NetworkHardwareInspector:
     IP_ADAPTER_UNICAST_ADDRESS = IP_ADAPTER_UNICAST_ADDRESS
     IP_ADAPTER_ADDRESSES = IP_ADAPTER_ADDRESSES
     MIB_TCPROW_OWNER_PID = MIB_TCPROW_OWNER_PID
+    MIB_TCP6ROW_OWNER_PID = MIB_TCP6ROW_OWNER_PID
 
     TCP_STATE_NAMES = {
         1: "CLOSED",
@@ -351,75 +365,113 @@ class NetworkHardwareInspector:
                 "connections": []
             }
 
-        size = wintypes.DWORD(0)
-        AF_INET = 2
-        TCP_TABLE_OWNER_PID_ALL = 5
-        size_ptr = ctypes.pointer(size)
-        ret = iphlpapi.GetExtendedTcpTable(None, size_ptr, True, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0)
-        if size.value == 0:
-            return {
-                "status": "success",
-                "filter_pid": pid,
-                "total_connections": 0,
-                "connections": [],
-                "epistemic_classification": "WIN32_IPHLPAPI_EXTENDED_TCP_TABLE"
-            }
-
-        buf = (ctypes.c_ubyte * size.value)()
-        ret = iphlpapi.GetExtendedTcpTable(buf, size_ptr, True, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0)
-        if ret != 0:
-            return {
-                "status": "error",
-                "message": f"GetExtendedTcpTable failed with Win32 error code {ret}.",
-                "total_connections": 0,
-                "connections": []
-            }
-
-        raw_bytes = bytes(buf)
-        if len(raw_bytes) < 4:
-            return {
-                "status": "success",
-                "filter_pid": pid,
-                "total_connections": 0,
-                "connections": [],
-                "epistemic_classification": "WIN32_IPHLPAPI_EXTENDED_TCP_TABLE"
-            }
-
-        num_entries = struct.unpack('<I', raw_bytes[:4])[0]
-        row_size = ctypes.sizeof(MIB_TCPROW_OWNER_PID)
         connections = []
+        ipv4_count = 0
+        ipv6_count = 0
+        AF_INET = 2
+        AF_INET6 = 23
+        TCP_TABLE_OWNER_PID_ALL = 5
 
-        for i in range(num_entries):
-            offset = 4 + i * row_size
-            if offset + row_size > len(raw_bytes):
-                break
-            row = MIB_TCPROW_OWNER_PID.from_buffer_copy(raw_bytes[offset:offset+row_size])
-            if pid is not None and row.dwOwningPid != pid:
-                continue
+        # 1. Query IPv4 TCP Table
+        try:
+            size_v4 = wintypes.DWORD(0)
+            size_ptr_v4 = ctypes.pointer(size_v4)
+            iphlpapi.GetExtendedTcpTable(None, size_ptr_v4, True, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0)
+            if size_v4.value > 0:
+                buf_v4 = (ctypes.c_ubyte * size_v4.value)()
+                ret_v4 = iphlpapi.GetExtendedTcpTable(buf_v4, size_ptr_v4, True, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0)
+                if ret_v4 == 0:
+                    raw_bytes_v4 = bytes(buf_v4)
+                    if len(raw_bytes_v4) >= 4:
+                        num_entries_v4 = struct.unpack('<I', raw_bytes_v4[:4])[0]
+                        row_size_v4 = ctypes.sizeof(MIB_TCPROW_OWNER_PID)
+                        for i in range(num_entries_v4):
+                            offset = 4 + i * row_size_v4
+                            if offset + row_size_v4 > len(raw_bytes_v4):
+                                break
+                            row = MIB_TCPROW_OWNER_PID.from_buffer_copy(raw_bytes_v4[offset:offset+row_size_v4])
+                            if pid is not None and row.dwOwningPid != pid:
+                                continue
 
-            local_ip = socket.inet_ntoa(struct.pack('<I', row.dwLocalAddr))
-            remote_ip = socket.inet_ntoa(struct.pack('<I', row.dwRemoteAddr))
-            local_port = socket.ntohs(row.dwLocalPort & 0xffff)
-            remote_port = socket.ntohs(row.dwRemotePort & 0xffff)
-            state_code = int(row.dwState)
-            state_str = cls.TCP_STATE_NAMES.get(state_code, f"UNKNOWN_{state_code}")
+                            local_ip = socket.inet_ntoa(struct.pack('<I', row.dwLocalAddr))
+                            remote_ip = socket.inet_ntoa(struct.pack('<I', row.dwRemoteAddr))
+                            local_port = socket.ntohs(row.dwLocalPort & 0xffff)
+                            remote_port = socket.ntohs(row.dwRemotePort & 0xffff)
+                            state_code = int(row.dwState)
+                            state_str = cls.TCP_STATE_NAMES.get(state_code, f"UNKNOWN_{state_code}")
 
-            connections.append({
-                "pid": int(row.dwOwningPid),
-                "local_address": f"{local_ip}:{local_port}",
-                "local_ip": local_ip,
-                "local_port": local_port,
-                "remote_address": f"{remote_ip}:{remote_port}",
-                "remote_ip": remote_ip,
-                "remote_port": remote_port,
-                "state": state_str,
-                "state_code": state_code
-            })
+                            connections.append({
+                                "family": "IPv4",
+                                "pid": int(row.dwOwningPid),
+                                "local_address": f"{local_ip}:{local_port}",
+                                "local_ip": local_ip,
+                                "local_port": local_port,
+                                "remote_address": f"{remote_ip}:{remote_port}",
+                                "remote_ip": remote_ip,
+                                "remote_port": remote_port,
+                                "state": state_str,
+                                "state_code": state_code
+                            })
+                            ipv4_count += 1
+        except Exception:
+            pass
+
+        # 2. Query IPv6 TCP Table
+        try:
+            size_v6 = wintypes.DWORD(0)
+            size_ptr_v6 = ctypes.pointer(size_v6)
+            iphlpapi.GetExtendedTcpTable(None, size_ptr_v6, True, AF_INET6, TCP_TABLE_OWNER_PID_ALL, 0)
+            if size_v6.value > 0:
+                buf_v6 = (ctypes.c_ubyte * size_v6.value)()
+                ret_v6 = iphlpapi.GetExtendedTcpTable(buf_v6, size_ptr_v6, True, AF_INET6, TCP_TABLE_OWNER_PID_ALL, 0)
+                if ret_v6 == 0:
+                    raw_bytes_v6 = bytes(buf_v6)
+                    if len(raw_bytes_v6) >= 4:
+                        num_entries_v6 = struct.unpack('<I', raw_bytes_v6[:4])[0]
+                        row_size_v6 = ctypes.sizeof(MIB_TCP6ROW_OWNER_PID)
+                        for i in range(num_entries_v6):
+                            offset = 4 + i * row_size_v6
+                            if offset + row_size_v6 > len(raw_bytes_v6):
+                                break
+                            row6 = MIB_TCP6ROW_OWNER_PID.from_buffer_copy(raw_bytes_v6[offset:offset+row_size_v6])
+                            if pid is not None and row6.dwOwningPid != pid:
+                                continue
+
+                            try:
+                                local_ip6 = socket.inet_ntop(socket.AF_INET6, bytes(row6.ucLocalAddr))
+                            except Exception:
+                                local_ip6 = "::"
+                            try:
+                                remote_ip6 = socket.inet_ntop(socket.AF_INET6, bytes(row6.ucRemoteAddr))
+                            except Exception:
+                                remote_ip6 = "::"
+                            local_port6 = socket.ntohs(row6.dwLocalPort & 0xffff)
+                            remote_port6 = socket.ntohs(row6.dwRemotePort & 0xffff)
+                            state_code6 = int(row6.dwState)
+                            state_str6 = cls.TCP_STATE_NAMES.get(state_code6, f"UNKNOWN_{state_code6}")
+
+                            connections.append({
+                                "family": "IPv6",
+                                "pid": int(row6.dwOwningPid),
+                                "local_address": f"[{local_ip6}]:{local_port6}",
+                                "local_ip": local_ip6,
+                                "local_port": local_port6,
+                                "remote_address": f"[{remote_ip6}]:{remote_port6}",
+                                "remote_ip": remote_ip6,
+                                "remote_port": remote_port6,
+                                "state": state_str6,
+                                "state_code": state_code6
+                            })
+                            ipv6_count += 1
+        except Exception:
+            pass
 
         return {
             "status": "success",
             "filter_pid": pid,
             "total_connections": len(connections),
+            "ipv4_count": ipv4_count,
+            "ipv6_count": ipv6_count,
             "connections": connections,
             "epistemic_classification": "WIN32_IPHLPAPI_EXTENDED_TCP_TABLE"
         }

@@ -114,7 +114,7 @@ class TestRegistryEditor(unittest.TestCase):
         self.assertTrue(old_key["is_deletion"])
 
     def test_diff_reg_file_simulation(self):
-        """Tests registry drift auditing with matched, drifted, and missing values."""
+        """Tests registry drift auditing with matched, drifted, missing values, and deletion semantics."""
         from windows_intelligence.registry_intelligence.registry_editor import WindowsRegistryEditor
 
         sample_reg = (
@@ -124,14 +124,22 @@ class TestRegistryEditor(unittest.TestCase):
             "\"MatchedVal\"=\"MatchMe\"\r\n"
             "\"DriftedVal\"=dword:00000001\r\n"
             "\"MissingVal\"=\"DoesNotExist\"\r\n"
+            "\"DeletedVal\"=-\r\n"
+            "\"DriftedDelVal\"=-\r\n"
+            "\r\n"
+            "[-HKEY_LOCAL_MACHINE\\SOFTWARE\\MockAbsentKey]\r\n"
+            "[-HKEY_LOCAL_MACHINE\\SOFTWARE\\MockPresentKeyToDelete]\r\n"
         )
 
         fake_live_registry = {
             "SOFTWARE\\MockApp": {
                 "MatchedVal": ("MatchMe", 1),       # REG_SZ match
                 "DriftedVal": (2, 4),               # REG_DWORD drifted (expected 1, actual 2)
-                # MissingVal is absent
-            }
+                "DriftedDelVal": ("StillHere", 1),  # Value exists, so deletion drifted!
+                # DeletedVal is absent (matched deletion)
+                # MissingVal is absent (missing value)
+            },
+            "SOFTWARE\\MockPresentKeyToDelete": {}
         }
 
         # Mock OpenKey and QueryValueEx
@@ -166,11 +174,45 @@ class TestRegistryEditor(unittest.TestCase):
              patch("windows_intelligence.registry_intelligence.registry_editor.winreg", mock_winreg):
             diff_res = WindowsRegistryEditor.diff_reg_file(sample_reg)
             self.assertEqual(diff_res["status"], "success")
-            self.assertEqual(diff_res["total_items_checked"], 3)
-            self.assertEqual(diff_res["matched_count"], 1)
-            self.assertEqual(diff_res["drifted_count"], 1)
+            # 5 values + 2 key deletions = 7 items
+            self.assertEqual(diff_res["total_items_checked"], 7)
+            # MatchedVal + DeletedVal absent + MockAbsentKey absent = 3 matched
+            self.assertEqual(diff_res["matched_count"], 3)
+            # DriftedVal + DriftedDelVal present + MockApp present = 3 drifted
+            self.assertEqual(diff_res["drifted_count"], 3)
+            # MissingVal absent = 1 missing
             self.assertEqual(diff_res["missing_count"], 1)
-            self.assertAlmostEqual(diff_res["compliance_percentage"], 33.33, places=2)
+            self.assertAlmostEqual(diff_res["compliance_percentage"], 42.86, places=2)
+
+    def test_export_reg_workspace_write_confinement(self):
+        """Verifies that export_key strictly enforces workspace containment when output_path is provided."""
+        from security import ExecutionGuard, TargetScope, SecurityViolationError
+        from mcp_server import BintraMcpServer
+
+        server = BintraMcpServer()
+        import tempfile
+        real_ws = tempfile.mkdtemp(prefix="bintra_ws_test_")
+        scope = TargetScope(target_binary_path=None, workspace_dir=real_ws)
+        ExecutionGuard.set_current_scope(scope)
+
+        # 1. Writing outside workspace must be blocked by ExecutionGuard
+        forbidden_path = r"C:\Windows\System32\malicious_overwrite.reg" if os.name == "nt" else "/etc/malicious.reg"
+        with self.assertRaises(SecurityViolationError):
+            server.dispatch_tool("bintra_registry_audit", {
+                "action": "export_reg",
+                "hive": "HKLM",
+                "key": "SOFTWARE\\Test",
+                "output_path": forbidden_path
+            })
+
+    def test_ghidra_headless_permission_classification(self):
+        """Verifies that bintra_ghidra_headless is classified under EXECUTE and cap.ghidra.headless_exec."""
+        from mcp_server import BintraMcpServer
+        server = BintraMcpServer()
+        cap, mode, target_param = server.TOOL_SECURITY_METADATA["bintra_ghidra_headless"]
+        self.assertEqual(cap, "cap.ghidra.headless_exec")
+        self.assertEqual(mode, "EXECUTE")
+        self.assertEqual(target_param, "binary_path")
 
     def test_mcp_server_registry_tool_actions(self):
         """Verifies that MCP server dispatches all bintra_registry_audit extended actions."""

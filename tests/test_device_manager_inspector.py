@@ -78,25 +78,43 @@ class TestDeviceManagerInspector(unittest.TestCase):
                 "problem_code": 43,
                 "is_started": False,
             },
+            {
+                "device_instance_id": "ACPI\\UNKNOWN\\0004",
+                "name": "Undetermined Device Node",
+                "class": "System",
+                "has_problem": False,
+                "status_available": False,
+                "problem_description": "Status Unavailable (CM_Get_DevNode_Status failed)",
+                "problem_name": "CM_PROB_STATUS_UNAVAILABLE",
+                "problem_code": 0,
+                "is_started": False,
+            },
         ]
 
         with patch("os.name", "nt"):
             with patch("windows_intelligence.system_introspection.device_inspector.NativeDeviceInspector.enumerate_devices", return_value=fake_devices):
                 res = DeviceManagerInspector.get_device_classes()
                 self.assertEqual(res["status"], "success")
-                self.assertEqual(res["total_classes"], 3)
-                self.assertEqual(res["total_devices"], 3)
+                self.assertEqual(res["total_classes"], 4)
+                self.assertEqual(res["total_devices"], 4)
                 self.assertEqual(res["total_problems"], 1)
+                self.assertEqual(res["total_unknown"], 1)
 
                 class_names = [c["class_name"] for c in res["classes"]]
                 self.assertIn("Display", class_names)
                 self.assertIn("Net", class_names)
                 self.assertIn("USB", class_names)
+                self.assertIn("System", class_names)
 
                 usb_cls = next(c for c in res["classes"] if c["class_name"] == "USB")
                 self.assertEqual(usb_cls["friendly_name"], "Universal Serial Bus controllers")
                 self.assertEqual(usb_cls["device_count"], 1)
                 self.assertEqual(usb_cls["problem_count"], 1)
+
+                sys_cls = next(c for c in res["classes"] if c["class_name"] == "System")
+                self.assertEqual(sys_cls["device_count"], 1)
+                self.assertEqual(sys_cls["unknown_count"], 1)
+                self.assertEqual(sys_cls["devices"][0]["status_classification"], "unknown")
 
     def test_synthetic_device_search_and_filtering(self):
         """Tests multi-field search and driver metadata enrichment."""

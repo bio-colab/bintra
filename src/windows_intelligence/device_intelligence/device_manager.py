@@ -145,12 +145,23 @@ class DeviceManagerInspector:
 
         class_map: Dict[str, Dict[str, Any]] = {}
         total_problems = 0
+        total_unknown = 0
 
         for d in raw_devices:
             c_name = d.get("class") or "Other"
             has_prob = bool(d.get("has_problem")) or (d.get("problem_code", 0) > 0)
+            status_avail = d.get("status_available", True)
+            prob_desc = d.get("problem_description", "")
+            is_unknown = (not status_avail) or ("Status Unavailable" in prob_desc) or (d.get("problem_name") == "CM_PROB_STATUS_UNAVAILABLE")
+
             if has_prob:
+                status_cat = "problem"
                 total_problems += 1
+            elif is_unknown:
+                status_cat = "unknown"
+                total_unknown += 1
+            else:
+                status_cat = "healthy"
 
             if c_name not in class_map:
                 class_map[c_name] = {
@@ -158,16 +169,23 @@ class DeviceManagerInspector:
                     "friendly_name": cls.get_friendly_class_name(c_name),
                     "device_count": 0,
                     "problem_count": 0,
+                    "unknown_count": 0,
+                    "healthy_count": 0,
                     "devices": []
                 }
 
             class_map[c_name]["device_count"] += 1
-            if has_prob:
+            if status_cat == "problem":
                 class_map[c_name]["problem_count"] += 1
+            elif status_cat == "unknown":
+                class_map[c_name]["unknown_count"] += 1
+            else:
+                class_map[c_name]["healthy_count"] += 1
 
             class_map[c_name]["devices"].append({
                 "device_instance_id": d.get("device_instance_id"),
                 "name": d.get("name"),
+                "status_classification": status_cat,
                 "has_problem": has_prob,
                 "problem_code": d.get("problem_code", 0),
                 "is_started": d.get("is_started", False),
@@ -181,6 +199,7 @@ class DeviceManagerInspector:
             "total_classes": len(sorted_classes),
             "total_devices": len(raw_devices),
             "total_problems": total_problems,
+            "total_unknown": total_unknown,
             "classes": sorted_classes
         }
 

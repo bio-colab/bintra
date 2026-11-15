@@ -84,6 +84,29 @@ class PolicyEngine:
                 capability=cap
             )
 
+        # Rule 3b: Ghidra Headless Gated Process Execution
+        if cap == Capability.GHIDRA_HEADLESS_EXEC:
+            if request.metadata.get("shell") is True:
+                return AccessDecision(
+                    verdict="DENY",
+                    reason="Arbitrary shell execution (shell=True) is unconditionally prohibited.",
+                    capability=cap
+                )
+            return AccessDecision(
+                verdict="ALLOW_SCOPED",
+                reason=f"Authorized Ghidra headless analysis on target: '{target}'.",
+                capability=cap,
+                side_effects=["ghidra_headless_execution"]
+            )
+
+        if cap == Capability.GHIDRA_PROJECT_MUTATE:
+            return AccessDecision(
+                verdict="ALLOW_SCOPED",
+                reason=f"Authorized Ghidra project database mutation in quarantined temp project.",
+                capability=cap,
+                side_effects=["ghidra_project_mutation"]
+            )
+
         # Rule 4: Target binary and target directory write protection
         if mode in ("WRITE", "DELETE", "MODIFY"):
             # Dedicated strictly scoped capability for Ghidra bridge discovery marker in tempdir

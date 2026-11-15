@@ -1447,14 +1447,20 @@ def _dispatch_cli():
                     f"- **Total Hardware Classes:** {res.get('total_classes', 0)}",
                     f"- **Total Active Devices:** {res.get('total_devices', 0)}",
                     f"- **Devices with Problem Codes:** {res.get('total_problems', 0)}",
+                    f"- **Devices with Indeterminate/Unknown Status:** {res.get('total_unknown', 0)}",
                     "",
-                    "| Class | Friendly Category | Devices | Problems | Status |",
-                    "| :--- | :--- | :--- | :--- | :--- |",
+                    "| Class | Friendly Category | Devices | Problems | Unknown | Status |",
+                    "| :--- | :--- | :--- | :--- | :--- | :--- |",
                 ]
                 for c in res.get("classes", []):
-                    c_status = "⚠️ Error" if c.get("problem_count", 0) > 0 else "✅ Healthy"
+                    if c.get("problem_count", 0) > 0:
+                        c_status = f"⚠️ Error ({c['problem_count']})"
+                    elif c.get("unknown_count", 0) > 0:
+                        c_status = f"❓ Unknown ({c['unknown_count']})"
+                    else:
+                        c_status = "✅ Healthy"
                     lines.append(
-                        f"| `{c.get('class_name')}` | {c.get('friendly_name')} | {c.get('device_count')} | {c.get('problem_count')} | {c_status} |"
+                        f"| `{c.get('class_name')}` | {c.get('friendly_name')} | {c.get('device_count')} | {c.get('problem_count', 0)} | {c.get('unknown_count', 0)} | {c_status} |"
                     )
                 print("\n".join(lines))
             else:

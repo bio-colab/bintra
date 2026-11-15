@@ -404,13 +404,21 @@ class TestNetworkHardwareInspector(unittest.TestCase):
         row2.dwRemotePort = 0
         row2.dwOwningPid = 9999
 
-        buf = bytearray(struct.pack("<I", 2)) + bytes(row1) + bytes(row2)
+        buf_v4 = bytearray(struct.pack("<I", 2)) + bytes(row1) + bytes(row2)
+
+        from windows_intelligence.system_introspection.network_inspector import MIB_TCP6ROW_OWNER_PID
+        row_v6 = MIB_TCP6ROW_OWNER_PID()
+        row_v6.dwState = 2  # LISTEN
+        row_v6.dwLocalPort = socket.htons(135)
+        row_v6.dwOwningPid = 1136
+        buf_v6 = bytearray(struct.pack("<I", 1)) + bytes(row_v6)
 
         def fake_get_tcp_table(p_buf, p_size, b_order, ul_af, tbl_cls, rsv):
+            cur_buf = buf_v6 if ul_af == 23 else buf_v4
             if not p_buf:
-                p_size.contents.value = len(buf)
+                p_size.contents.value = len(cur_buf)
                 return 122
-            ctypes.memmove(p_buf, bytes(buf), len(buf))
+            ctypes.memmove(p_buf, bytes(cur_buf), len(cur_buf))
             return 0
 
         mock_dll = MagicMock()
@@ -424,13 +432,21 @@ class TestNetworkHardwareInspector(unittest.TestCase):
                 self.assertEqual(rep_filtered["total_connections"], 1)
                 conn = rep_filtered["connections"][0]
                 self.assertEqual(conn["pid"], 10324)
+                self.assertEqual(conn["family"], "IPv4")
                 self.assertEqual(conn["local_address"], "192.168.1.50:5000")
                 self.assertEqual(conn["remote_address"], "188.114.97.7:443")
                 self.assertEqual(conn["state"], "ESTABLISHED")
 
-                # All connections
+                # Filter by IPv6 PID 1136
+                rep_v6 = NetworkHardwareInspector.audit_tcp_connections(pid=1136)
+                self.assertEqual(rep_v6["total_connections"], 1)
+                self.assertEqual(rep_v6["connections"][0]["family"], "IPv6")
+
+                # All connections: 2 IPv4 + 1 IPv6 = 3
                 rep_all = NetworkHardwareInspector.audit_tcp_connections()
-                self.assertEqual(rep_all["total_connections"], 2)
+                self.assertEqual(rep_all["total_connections"], 3)
+                self.assertEqual(rep_all["ipv4_count"], 2)
+                self.assertEqual(rep_all["ipv6_count"], 1)
 
     def test_live_execution_on_windows_host(self):
         """When executed on a live Windows NT machine, validates that live calls succeed without crashing."""

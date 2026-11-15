@@ -151,6 +151,27 @@ class TestTaskManagerInspector(unittest.TestCase):
         self.assertIn("security", details)
 
 
+    def test_uptime_gettickcount64_large_64bit_integer(self):
+        """Verifies GetTickCount64 ctypes prototype handles values > 0x7FFFFFFF (>24.8 days) without 32-bit sign extension."""
+        from windows_intelligence.process_intelligence.task_manager import TaskManagerInspector
+
+        large_tick = 3_000_000_000  # ~34.7 days uptime, > 0x7FFFFFFF signed int limit
+
+        mock_k32 = MagicMock()
+        mock_k32.GetTickCount64.return_value = large_tick
+        mock_k32.GlobalMemoryStatusEx.return_value = 1
+        mock_k32.GetSystemTimes.return_value = 1
+
+        with patch("os.name", "nt"), \
+             patch.object(TaskManagerInspector, "_get_k32", return_value=mock_k32):
+            perf = TaskManagerInspector.get_system_performance()
+            self.assertEqual(perf["status"], "success")
+            self.assertEqual(perf["uptime"]["uptime_ms"], large_tick)
+            self.assertGreater(perf["uptime"]["uptime_seconds"], 0)
+            self.assertAlmostEqual(perf["uptime"]["uptime_hours"], round(large_tick / 1000.0 / 3600.0, 2))
+            self.assertAlmostEqual(perf["uptime"]["uptime_days"], round(large_tick / 1000.0 / 3600.0 / 24.0, 2))
+            self.assertIn("boot_time_utc", perf["uptime"])
+
     def test_cli_task_manager_commands(self):
         """Verifies CLI execution of proc-list, proc-search, proc-info, and sys-perf."""
         import subprocess

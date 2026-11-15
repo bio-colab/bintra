@@ -25,6 +25,11 @@ try:
 except ImportError:
     winreg = None
 
+try:
+    from security import SafeFileAccess
+except ImportError:
+    SafeFileAccess = None
+
 from .registry_reader import WindowsRegistryReader
 
 
@@ -318,8 +323,11 @@ class WindowsRegistryEditor:
                 if os.path.isfile(reg_content_or_path):
                     is_file = True
                     source_path = os.path.abspath(reg_content_or_path)
-                    with open(source_path, "rb") as f:
-                        raw_bytes = f.read()
+                    if SafeFileAccess:
+                        raw_bytes = SafeFileAccess.read_bytes(source_path)
+                    else:
+                        with open(source_path, "rb") as f:
+                            raw_bytes = f.read()
                     # Decode BOM or encoding
                     if raw_bytes.startswith(b"\xff\xfe"):
                         content = raw_bytes.decode("utf-16le", errors="replace")
@@ -576,10 +584,13 @@ class WindowsRegistryEditor:
         full_text = "\n".join(exported_lines)
 
         if output_path:
-            out_file = os.path.abspath(output_path)
-            os.makedirs(os.path.dirname(out_file), exist_ok=True)
-            with open(out_file, "w", encoding="utf-8-sig") as f:
-                f.write(full_text)
+            if SafeFileAccess:
+                out_file = SafeFileAccess.write_workspace_file(output_path, full_text)
+            else:
+                out_file = os.path.abspath(output_path)
+                os.makedirs(os.path.dirname(out_file), exist_ok=True)
+                with open(out_file, "w", encoding="utf-8-sig") as f:
+                    f.write(full_text)
 
         return {
             "status": "success",
@@ -626,6 +637,8 @@ class WindowsRegistryEditor:
             norm_hive = cls.normalize_hive(raw_hive)
             hive_handle = cls.HIVE_FULL_MAP.get(norm_hive)
 
+            is_key_deletion = bool(k_data.get("is_deletion", False))
+
             if not hive_handle:
                 diff_results.append({
                     "full_key": full_key,
@@ -635,7 +648,39 @@ class WindowsRegistryEditor:
                 missing_count += 1
                 continue
 
-            # Check if key exists in live registry
+            # Case A: Key Deletion specified [-HKEY_...]
+            if is_key_deletion:
+                try:
+                    with winreg.OpenKey(hive_handle, subkey_path, 0, access) as key:
+                        drifted_count += 1
+                        diff_results.append({
+                            "full_key": full_key,
+                            "status": "drifted",
+                            "type": "KEY_DELETION",
+                            "expected": "KEY_ABSENT",
+                            "actual": "KEY_PRESENT",
+                            "detail": "Registry key exists in live registry but .reg specified deletion"
+                        })
+                except FileNotFoundError:
+                    matched_count += 1
+                    diff_results.append({
+                        "full_key": full_key,
+                        "status": "matched",
+                        "type": "KEY_DELETION",
+                        "expected": "KEY_ABSENT",
+                        "actual": "KEY_ABSENT",
+                        "detail": "Registry key is absent from live registry as specified"
+                    })
+                except Exception as e:
+                    drifted_count += 1
+                    diff_results.append({
+                        "full_key": full_key,
+                        "status": "error",
+                        "error": str(e)
+                    })
+                continue
+
+            # Case B: Standard Key
             try:
                 with winreg.OpenKey(hive_handle, subkey_path, 0, access) as key:
                     values_in_file = k_data.get("values", {})
@@ -644,6 +689,34 @@ class WindowsRegistryEditor:
                         exp_type = v_spec.get("type")
                         query_name = "" if v_name == "(Default)" else v_name
 
+                        # Subcase B1: Value Deletion specified "Val"=-
+                        if exp_type == "DELETE":
+                            try:
+                                live_val, live_type_int = winreg.QueryValueEx(key, query_name)
+                                drifted_count += 1
+                                diff_results.append({
+                                    "full_key": full_key,
+                                    "value_name": v_name,
+                                    "status": "drifted",
+                                    "type": "VALUE_DELETION",
+                                    "expected": "VALUE_ABSENT",
+                                    "actual": str(live_val),
+                                    "detail": f"Value '{v_name}' exists in live registry but .reg specified deletion"
+                                })
+                            except FileNotFoundError:
+                                matched_count += 1
+                                diff_results.append({
+                                    "full_key": full_key,
+                                    "value_name": v_name,
+                                    "status": "matched",
+                                    "type": "VALUE_DELETION",
+                                    "expected": "VALUE_ABSENT",
+                                    "actual": "VALUE_ABSENT",
+                                    "detail": f"Value '{v_name}' is absent from live registry as specified"
+                                })
+                            continue
+
+                        # Subcase B2: Normal Value check
                         try:
                             live_val, live_type_int = winreg.QueryValueEx(key, query_name)
                             live_type_str = WindowsRegistryReader.REG_TYPE_NAMES.get(live_type_int, f"TYPE_{live_type_int}")

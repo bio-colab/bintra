@@ -203,6 +203,26 @@ class TokenSessionTracker:
             int(baseline_tokens if baseline_tokens is not None else actual_tokens),
         )
 
+    def record_actual_usage(self, prompt_tokens: int, completion_tokens: int, model: Optional[str] = None) -> Dict[str, Any]:
+        """Record real API usage tokens from model provider response metadata."""
+        m = model or self.model
+        in_cost = estimate_cost_usd(prompt_tokens, model=m, direction="input")
+        out_cost = estimate_cost_usd(completion_tokens, model=m, direction="output")
+        total_cost = round(in_cost + out_cost, 8)
+        usage_entry = {
+            "model": m,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+            "input_cost_usd": in_cost,
+            "output_cost_usd": out_cost,
+            "total_cost_usd": total_cost,
+        }
+        if not hasattr(self, "actual_usage_records"):
+            self.actual_usage_records = []
+        self.actual_usage_records.append(usage_entry)
+        return usage_entry
+
     def record_tool_call(
         self,
         tool_name: str,
@@ -214,13 +234,17 @@ class TokenSessionTracker:
         out_tok = estimate_tokens(output_text)
         base_out = max(out_tok, int(baseline_output_tokens)) if baseline_output_tokens is not None else out_tok
         saved_out = max(0, base_out - out_tok)
-        cost_usd = estimate_cost_usd(in_tok + out_tok, model=self.model, direction="input")
+        in_cost = estimate_cost_usd(in_tok, model=self.model, direction="input")
+        out_cost = estimate_cost_usd(out_tok, model=self.model, direction="output")
+        cost_usd = round(in_cost + out_cost, 8)
         entry = {
             "tool": tool_name,
             "args_tokens": in_tok,
             "output_tokens": out_tok,
             "baseline_output_tokens": base_out,
             "saved_output_tokens": saved_out,
+            "estimated_input_cost_usd": in_cost,
+            "estimated_output_cost_usd": out_cost,
             "estimated_context_cost_usd": cost_usd,
         }
         self.calls.append(entry)
@@ -238,8 +262,14 @@ class TokenSessionTracker:
         saved_tokens = max(0, total_baseline - total_actual)
         savings_pct = round((saved_tokens / total_baseline) * 100.0, 2) if total_baseline > 0 else 0.0
 
-        actual_cost = estimate_cost_usd(total_actual, model=self.model, direction="input")
-        baseline_cost = estimate_cost_usd(total_baseline, model=self.model, direction="input")
+        actual_in_cost = estimate_cost_usd(schema_actual + total_args, model=self.model, direction="input")
+        actual_out_cost = estimate_cost_usd(total_out, model=self.model, direction="output")
+        actual_cost = round(actual_in_cost + actual_out_cost, 8)
+
+        baseline_in_cost = estimate_cost_usd(schema_base + total_args, model=self.model, direction="input")
+        baseline_out_cost = estimate_cost_usd(total_base_out, model=self.model, direction="output")
+        baseline_cost = round(baseline_in_cost + baseline_out_cost, 8)
+
         saved_cost = round(max(0.0, baseline_cost - actual_cost), 8)
 
         return {

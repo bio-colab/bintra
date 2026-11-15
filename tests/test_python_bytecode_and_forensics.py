@@ -114,6 +114,28 @@ def helper_b():
             self.assertGreaterEqual(res["complexity_hotspots_count"], 1)
             self.assertGreaterEqual(res["algorithmic_hazards"]["redos_patterns_detected"], 1)
             self.assertGreaterEqual(res["algorithmic_hazards"]["quadratic_loop_concats_detected"], 1)
+            self.assertGreaterEqual(res["total_functions_cataloged"], 2)
+            self.assertIn("supply_chain_audit", res)
+            self.assertIn("argument_map", res)
+            self.assertIn("execution_workflows", res)
+
+            # Function Catalog Extraction
+            catalog = PythonPackageArchitect.extract_full_function_catalog(pkg_dir)
+            self.assertEqual(len(catalog), 2)
+            self.assertEqual(catalog[0]["name"], "complex_func")
+            self.assertEqual(len(catalog[0]["parameters"]), 1)
+            self.assertEqual(catalog[0]["parameters"][0]["name"], "x")
+
+            # Supply Chain & Argument Map
+            supply = PythonPackageArchitect.audit_supply_chain(pkg_dir)
+            self.assertEqual(supply["status"], "ok")
+            self.assertIn("re", supply["stdlib_modules_used"])
+
+            arg_map = PythonPackageArchitect.build_argument_map(pkg_dir)
+            self.assertEqual(arg_map["status"], "ok")
+
+            workflows = PythonPackageArchitect.trace_execution_workflows()
+            self.assertEqual(len(workflows), 10)
 
             # MCP tool routing on directory
             mcp_res = srv.dispatch_tool("bintra_python_bytecode", {"file_path": pkg_dir})

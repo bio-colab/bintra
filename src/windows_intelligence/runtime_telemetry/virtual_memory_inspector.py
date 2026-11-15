@@ -412,6 +412,14 @@ class VirtualMemoryInspector:
 
         if not h_proc:
             err = ctypes.GetLastError()
+            if err == 5:
+                # Access denied: PPL, Anticheat kernel handle stripping, or missing elevation
+                raise PermissionError(
+                    f"Failed to open process PID {pid} for memory query (Win32 Error: 5 - ACCESS_DENIED). "
+                    "Target is either protected by Windows PPL (Protected Process Light / lsass / csrss), "
+                    "subject to kernel anticheat handle-stripping, or requires an elevated administrator session. "
+                    "Recommendation: Use MiniDump crash analysis (dmp-inspect) or ETW tracing (etw-capture)."
+                )
             raise PermissionError(f"Failed to open process PID {pid} for memory query (Win32 Error: {err})")
 
         detected_arch = "x86-64"
@@ -785,6 +793,12 @@ class VirtualMemoryInspector:
             h_proc = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, False, pid)
         if not h_proc:
             err = ctypes.GetLastError()
+            if err == 5:
+                raise PermissionError(
+                    f"Failed to open process PID {pid} with PROCESS_VM_READ (Win32 Error: 5 - ACCESS_DENIED). "
+                    "Memory read rights were denied by Windows security policies, kernel handle stripping, or PPL protection. "
+                    "Recommendation: Elevate session with SeDebugPrivilege or inspect offline dump."
+                )
             raise PermissionError(f"Failed to open process PID {pid} with PROCESS_VM_READ (Win32 Error: {err})")
 
         try:

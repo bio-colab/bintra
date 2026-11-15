@@ -2622,14 +2622,17 @@ def _dispatch_cli():
 
         bintra_engine.main()
 
-    elif cmd == "py-bytecode":
-        ap = argparse.ArgumentParser(prog="bintra py-bytecode")
-        ap.add_argument("--file", required=True)
-        ap.add_argument("--compare-with", dest="compare_with", default=None)
-        ap.add_argument("--limit", type=int, default=50)
+    elif cmd in ("py-bytecode", "py-dissect"):
+        ap = argparse.ArgumentParser(prog=f"bintra {cmd}")
+        ap.add_argument("--file", "-f", "--path", "-p", dest="file", required=True, help="Path to .py, .pyc, or package directory")
+        ap.add_argument("--compare-with", dest="compare_with", default=None, help="Optional second file for bytecode diffing")
+        ap.add_argument("--limit", type=int, default=50, help="Maximum code objects to inspect (default 50)")
+        ap.add_argument("--threshold", type=int, default=15, help="Complexity threshold for hotspots (default 15)")
         ns = ap.parse_args(sys.argv[2:])
-        from python_intelligence import PythonBytecodeAnalyzer
-        if ns.compare_with:
+        from python_intelligence import PythonBytecodeAnalyzer, PythonPackageArchitect
+        if os.path.isdir(ns.file):
+            print(json.dumps(PythonPackageArchitect.analyze_package(ns.file, complexity_threshold=ns.threshold), indent=2))
+        elif ns.compare_with:
             print(json.dumps(PythonBytecodeAnalyzer.compare_bytecode(ns.file, ns.compare_with), indent=2))
         else:
             print(json.dumps(PythonBytecodeAnalyzer.analyze_file(ns.file, limit=ns.limit), indent=2))

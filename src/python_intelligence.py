@@ -18,6 +18,9 @@ import types
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from ghidra_pcode_vectorizer import WeisfeilerLehmanCfgHasher
+from python_package_intelligence import PythonPackageArchitect
+
+__all__ = ["PythonBytecodeAnalyzer", "FrozenPythonDetector", "PythonPackageArchitect"]
 
 
 # Mapping from CPython opname categories to canonical P-Code-like opcodes

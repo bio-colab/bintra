@@ -1070,13 +1070,14 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
     ,
     {
         "name": "bintra_python_bytecode",
-        "description": "Strictly read-only CPython bytecode analyzer: disassembles .py/.pyc via dis & marshal into Control-Flow Basic Blocks and computes Weisfeiler-Lehman CFG hashes.",
+        "description": "Strictly read-only CPython bytecode and package architecture analyzer: inspects .py/.pyc or entire package directory to extract module topology, circular dependencies, McCabe/Cognitive complexity, and ReDoS/quadratic hazards.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "file_path": {"type": "string", "description": "Path to .py or .pyc file"},
+                "file_path": {"type": "string", "description": "Path to Python source file (.py), compiled bytecode (.pyc), or package directory"},
                 "compare_with": {"type": "string", "description": "Optional second .py/.pyc path for WL-CFG bytecode diffing"},
-                "limit": {"type": "integer", "description": "Maximum code objects to analyze (default 50)"}
+                "limit": {"type": "integer", "description": "Maximum code objects to analyze (default 50)"},
+                "complexity_threshold": {"type": "integer", "description": "Complexity threshold for hotspot detection in package mode (default 15)"}
             },
             "required": ["file_path"]
         }
@@ -2487,10 +2488,17 @@ class BintraMcpServer:
                 return {"status": "error", "error": f"Unknown action: '{action}'"}
 
         elif name == "bintra_python_bytecode":
-            from python_intelligence import PythonBytecodeAnalyzer
+            from python_intelligence import PythonBytecodeAnalyzer, PythonPackageArchitect
+            target_path = args["file_path"]
+            if os.path.isdir(target_path) or bool(args.get("package_mode")):
+                return PythonPackageArchitect.analyze_package(
+                    target_path,
+                    max_files=int(args.get("max_files", 500)),
+                    complexity_threshold=int(args.get("complexity_threshold", 15))
+                )
             if args.get("compare_with"):
-                return PythonBytecodeAnalyzer.compare_bytecode(args["file_path"], args["compare_with"])
-            return PythonBytecodeAnalyzer.analyze_file(args["file_path"], limit=int(args.get("limit", 50)))
+                return PythonBytecodeAnalyzer.compare_bytecode(target_path, args["compare_with"])
+            return PythonBytecodeAnalyzer.analyze_file(target_path, limit=int(args.get("limit", 50)))
 
         elif name == "bintra_cpython_memory_forensics":
             from windows_intelligence.runtime_telemetry.cpython_memory_forensics import CPythonMemoryForensics

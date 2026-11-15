@@ -67,6 +67,59 @@ class TestPythonBytecodeAndForensics(unittest.TestCase):
         resp = srv.dispatch_tool("bintra_python_bytecode", {"file_path": target_py, "limit": 5})
         self.assertEqual(resp["status"], "ok")
 
+    def test_python_package_architect_dissection(self):
+        from python_intelligence import PythonPackageArchitect
+        srv = BintraMcpServer()
+
+        with tempfile.TemporaryDirectory() as td:
+            pkg_dir = os.path.join(td, "mock_pkg")
+            os.makedirs(pkg_dir, exist_ok=True)
+
+            mod_a = os.path.join(pkg_dir, "mod_a.py")
+            with open(mod_a, "w", encoding="utf-8") as f:
+                f.write("""import re
+import mod_b
+
+DANGEROUS_RE = re.compile(r"([a-zA-Z]+)+$")
+
+def complex_func(x):
+    total = ""
+    for i in range(x):
+        total += str(i)
+        if i % 2 == 0:
+            if i % 4 == 0:
+                print("even")
+            elif i % 6 == 0:
+                print("six")
+            else:
+                print("half-even")
+        elif i % 3 == 0:
+            print("three")
+    return total
+""")
+
+            mod_b = os.path.join(pkg_dir, "mod_b.py")
+            with open(mod_b, "w", encoding="utf-8") as f:
+                f.write("""import mod_a
+
+def helper_b():
+    return 42
+""")
+
+            # Direct analysis
+            res = PythonPackageArchitect.analyze_package(pkg_dir, complexity_threshold=5)
+            self.assertEqual(res["status"], "ok")
+            self.assertEqual(res["total_modules"], 2)
+            self.assertGreaterEqual(res["circular_dependencies_count"], 1)
+            self.assertGreaterEqual(res["complexity_hotspots_count"], 1)
+            self.assertGreaterEqual(res["algorithmic_hazards"]["redos_patterns_detected"], 1)
+            self.assertGreaterEqual(res["algorithmic_hazards"]["quadratic_loop_concats_detected"], 1)
+
+            # MCP tool routing on directory
+            mcp_res = srv.dispatch_tool("bintra_python_bytecode", {"file_path": pkg_dir})
+            self.assertEqual(mcp_res["status"], "ok")
+            self.assertEqual(mcp_res["package_name"], "mock_pkg")
+
 
 if __name__ == "__main__":
     unittest.main()

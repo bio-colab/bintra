@@ -101,6 +101,7 @@ class CapabilityRegistry:
         "causality_synthesizer": {Capability.FILE_READ, Capability.WORKSPACE_WRITE},
         "device_intelligence": {Capability.DEVICE_QUERY, Capability.DRIVER_QUERY},
         "process_intelligence": {Capability.PROCESS_QUERY, Capability.FILE_READ},
+        "python_intelligence": {Capability.FILE_READ},
         "registry_editor": {Capability.REGISTRY_READ, Capability.WORKSPACE_WRITE, Capability.FILE_READ},
         "ghidra_headless": {
             Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE,

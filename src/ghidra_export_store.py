@@ -484,6 +484,334 @@ class GhidraExportStore:
         for fn in funcs:
             yield fn
 
+    def search_functions(
+        self,
+        query: Optional[str] = None,
+        opcode: Optional[str] = None,
+        xref_target: Optional[str] = None,
+        sensitive_only: bool = False,
+        limit: int = 50,
+        offset: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Advanced query and search engine across the Ghidra program export.
+        Allows searching functions by:
+        - query: substring in name, entry point, signature, or decompiled C pseudocode
+        - opcode: specific P-Code mnemonic (e.g. CALLIND, INT_XOR, FLOAT_SQRT)
+        - xref_target: target symbol, address, or string referenced by the function
+        - sensitive_only: whether to filter to functions invoking sensitive Win32 APIs
+        """
+        matched_summaries: List[Dict[str, Any]] = []
+        clean_query = query.strip().lower() if query else None
+        clean_opcode = opcode.strip().upper() if opcode else None
+        clean_xref = xref_target.strip().lower() if xref_target else None
+
+        def _check_fn(fn: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            fn_name = str(fn.get("name", "unknown"))
+            entry = str(fn.get("entry_point", fn.get("address", "0x0")))
+            sig = str(fn.get("signature", ""))
+            decomp_c = str(fn.get("decompiled_c", ""))
+            callees = fn.get("callees", [])
+            pcode = fn.get("pcode_ops", [])
+            blocks = fn.get("basic_blocks", [])
+            reasons = []
+
+            # 1. Sensitive API filter
+            has_sens = any(any(pat.lower() in str(c).lower() for pat in SENSITIVE_API_PATTERNS) for c in callees)
+            if sensitive_only and not has_sens:
+                return None
+
+            # 2. Text query filter
+            if clean_query:
+                q_matched = False
+                if clean_query in fn_name.lower():
+                    reasons.append(f"name matches '{query}'")
+                    q_matched = True
+                elif clean_query in entry.lower():
+                    reasons.append(f"entry_point matches '{query}'")
+                    q_matched = True
+                elif clean_query in sig.lower():
+                    reasons.append(f"signature matches '{query}'")
+                    q_matched = True
+                elif clean_query in decomp_c.lower():
+                    reasons.append(f"decompiled C contains '{query}'")
+                    q_matched = True
+                if not q_matched:
+                    return None
+
+            # 3. Opcode filter
+            if clean_opcode:
+                op_found = False
+                for op in pcode:
+                    if str(op.get("opcode", "")).upper() == clean_opcode:
+                        op_found = True
+                        break
+                if not op_found:
+                    return None
+                reasons.append(f"contains P-Code opcode '{clean_opcode}'")
+
+            # 4. XREF target filter
+            if clean_xref:
+                xref_found = False
+                for xr in fn.get("xrefs", []):
+                    to_s = str(xr.get("to", "")).lower()
+                    sym_s = str(xr.get("symbol", "")).lower()
+                    from_s = str(xr.get("from", "")).lower()
+                    if clean_xref in to_s or clean_xref in sym_s or clean_xref in from_s:
+                        xref_found = True
+                        reasons.append(f"references '{xr.get('symbol') or xr.get('to')}'")
+                        break
+                if not xref_found:
+                    return None
+
+            from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
+            demangled = GhidraDeepAnalyzer.demangle_msvc_symbol(fn_name)
+
+            return {
+                "name": fn_name,
+                "demangled_name": demangled if demangled != fn_name else None,
+                "entry_point": entry,
+                "size": int(fn.get("size", 0)),
+                "signature": sig or None,
+                "parameter_count": int(fn.get("parameter_count", 0)),
+                "return_type": str(fn.get("return_type", "void")),
+                "has_sensitive_api": has_sens,
+                "pcode_ops_count": len(pcode),
+                "basic_blocks_count": len(blocks),
+                "match_reasons": reasons or ["matched filter criteria"],
+            }
+
+        total_matches = 0
+        if self.is_sqlite:
+            con = self._get_connection()
+            cur = con.cursor()
+            query_conds = []
+            params: List[Any] = []
+
+            if sensitive_only:
+                query_conds.append("has_sensitive_api = 1")
+
+            if clean_query:
+                query_conds.append("(name LIKE ? OR entry_point LIKE ? OR data LIKE ?)")
+                like_p = f"%{clean_query}%"
+                params.extend([like_p, like_p, like_p])
+
+            where_clause = " WHERE " + " AND ".join(query_conds) if query_conds else ""
+            sql = f"SELECT data FROM functions{where_clause} ORDER BY size DESC"
+            cur.execute(sql, params)
+            while True:
+                rows = cur.fetchmany(100)
+                if not rows:
+                    break
+                for r in rows:
+                    fn = json.loads(r["data"])
+                    m = _check_fn(fn)
+                    if m:
+                        total_matches += 1
+                        if len(matched_summaries) < limit and total_matches > offset:
+                            matched_summaries.append(m)
+        else:
+            funcs = self._in_memory.get("functions", []) if self._in_memory else []
+            for fn in funcs:
+                m = _check_fn(fn)
+                if m:
+                    total_matches += 1
+                    if len(matched_summaries) < limit and total_matches > offset:
+                        matched_summaries.append(m)
+
+        return {
+            "status": "ok",
+            "query": query,
+            "opcode_filter": opcode,
+            "xref_target": xref_target,
+            "sensitive_only": sensitive_only,
+            "total_matches": total_matches,
+            "limit": limit,
+            "offset": offset,
+            "matches": matched_summaries,
+            "epistemic_classification": "GHIDRA_INDEXED_FUNCTION_SEARCH",
+        }
+
+    def inspect_function(self, name_or_addr: str) -> Optional[Dict[str, Any]]:
+        """
+        Recovers comprehensive architectural and decompiler telemetry for a single function.
+        Includes demangled prototype, parameter details, local variables, 12-category P-Code
+        distribution, cyclomatic complexity, call hierarchy, and decompiled C preview.
+        """
+        fn = self.get_function(name_or_addr)
+        if not fn:
+            return None
+
+        from ghidra_pcode_vectorizer import (
+            PCODE_CATEGORIES, OPCODE_MAP, GhidraDeepAnalyzer
+        )
+
+        fn_name = str(fn.get("name", "unknown"))
+        entry = str(fn.get("entry_point", fn.get("address", "0x0")))
+        pcode = fn.get("pcode_ops", [])
+        blocks = fn.get("basic_blocks", [])
+        callees = fn.get("callees", [])
+        xrefs = fn.get("xrefs", [])
+        c_code = fn.get("decompiled_c", "")
+        locals_list = fn.get("local_variables", [])
+
+        # 1. P-Code category distribution
+        cat_counts = {cat: 0 for cat in PCODE_CATEGORIES}
+        opcode_counts: Dict[str, int] = {}
+        for op in pcode:
+            opc = str(op.get("opcode", "")).upper()
+            opcode_counts[opc] = opcode_counts.get(opc, 0) + 1
+            cat = OPCODE_MAP.get(opc, "SUBPIECE_CAST")
+            cat_counts[cat] = cat_counts.get(cat, 0) + 1
+
+        # 2. Control flow metrics
+        num_blocks = len(blocks)
+        total_out = sum(b.get("out_degree", len(b.get("successors", []))) for b in blocks)
+        cyclomatic = max(1, total_out - num_blocks + 2) if num_blocks > 0 else 1
+
+        # 3. Callers discovery
+        callers = []
+        if self.is_sqlite:
+            con = self._get_connection()
+            cur = con.cursor()
+            cur.execute("SELECT DISTINCT caller_name FROM call_edges WHERE callee_name = ? LIMIT 50", (fn_name,))
+            callers = [r["caller_name"] for r in cur.fetchall()]
+        else:
+            funcs = self._in_memory.get("functions", []) if self._in_memory else []
+            for other_fn in funcs:
+                if fn_name in other_fn.get("callees", []):
+                    callers.append(str(other_fn.get("name", other_fn.get("entry_point"))))
+                if len(callers) >= 50:
+                    break
+
+        # 4. Sensitive API reachability
+        sensitive_apis = [c for c in callees if any(pat.lower() in str(c).lower() for pat in SENSITIVE_API_PATTERNS)]
+
+        demangled = GhidraDeepAnalyzer.demangle_msvc_symbol(fn_name)
+
+        return {
+            "status": "ok",
+            "name": fn_name,
+            "demangled_name": demangled if demangled != fn_name else None,
+            "entry_point": entry,
+            "size_bytes": int(fn.get("size", 0)),
+            "signature": fn.get("signature"),
+            "return_type": fn.get("return_type", "void"),
+            "parameter_count": int(fn.get("parameter_count", 0)),
+            "parameters": fn.get("parameters", []),
+            "local_variables_count": len(locals_list) if isinstance(locals_list, list) else 0,
+            "local_variables": locals_list[:30] if isinstance(locals_list, list) else [],
+            "cyclomatic_complexity": cyclomatic,
+            "basic_blocks_count": num_blocks,
+            "pcode_ops_total": len(pcode),
+            "pcode_category_distribution": cat_counts,
+            "top_opcodes": sorted(opcode_counts.items(), key=lambda x: x[1], reverse=True)[:10],
+            "callees": callees[:50],
+            "callers": callers[:50],
+            "sensitive_apis_called": sensitive_apis,
+            "xrefs_count": len(xrefs),
+            "xrefs_sample": xrefs[:20],
+            "has_decompiled_c": bool(c_code),
+            "decompiled_c_preview": c_code[:4000] if c_code else None,
+            "epistemic_classification": "GHIDRA_DEEP_FUNCTION_INSPECTION",
+        }
+
+    def search_xrefs(self, target: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Finds all cross-references pointing to or originating from target."""
+        clean_target = target.strip().lower()
+        if self.is_sqlite:
+            con = self._get_connection()
+            cur = con.cursor()
+            cur.execute(
+                "SELECT function_name, from_addr, to_addr, xref_type, symbol FROM xrefs WHERE to_addr LIKE ? OR symbol LIKE ? OR from_addr LIKE ? LIMIT ?",
+                (f"%{clean_target}%", f"%{clean_target}%", f"%{clean_target}%", limit)
+            )
+            return [
+                {
+                    "function": r["function_name"],
+                    "from": r["from_addr"],
+                    "to": r["to_addr"],
+                    "type": r["xref_type"],
+                    "symbol": r["symbol"],
+                }
+                for r in cur.fetchall()
+            ]
+
+        res = []
+        funcs = self._in_memory.get("functions", []) if self._in_memory else []
+        for fn in funcs:
+            fn_name = fn.get("name", "unknown")
+            for xr in fn.get("xrefs", []):
+                t = str(xr.get("to", "")).lower()
+                s = str(xr.get("symbol", "")).lower()
+                f = str(xr.get("from", "")).lower()
+                if clean_target in t or clean_target in s or clean_target in f:
+                    res.append({
+                        "function": fn_name,
+                        "from": xr.get("from", ""),
+                        "to": xr.get("to", ""),
+                        "type": xr.get("type", "REF"),
+                        "symbol": xr.get("symbol", ""),
+                    })
+                    if len(res) >= limit:
+                        return res
+        return res
+
+    def query_computational_profile(self) -> Dict[str, Any]:
+        """
+        Synthesizes the computational and architectural profile across all functions:
+        computes aggregate opcode category distribution and cognitive complexity profile.
+        """
+        from ghidra_pcode_vectorizer import PCODE_CATEGORIES, OPCODE_MAP
+
+        total_funcs = 0
+        total_pcode_ops = 0
+        total_blocks = 0
+        cat_counts = {cat: 0 for cat in PCODE_CATEGORIES}
+        sensitive_funcs = 0
+
+        for fn in self.iter_functions():
+            total_funcs += 1
+            pcode = fn.get("pcode_ops", [])
+            total_pcode_ops += len(pcode)
+            total_blocks += len(fn.get("basic_blocks", []))
+            callees = fn.get("callees", [])
+            if any(any(pat.lower() in str(c).lower() for pat in SENSITIVE_API_PATTERNS) for c in callees):
+                sensitive_funcs += 1
+            for op in pcode:
+                opc = str(op.get("opcode", "")).upper()
+                cat = OPCODE_MAP.get(opc, "SUBPIECE_CAST")
+                cat_counts[cat] = cat_counts.get(cat, 0) + 1
+
+        arith_ops = cat_counts.get("ALU_ARITH", 0) + cat_counts.get("ALU_LOGIC", 0) + cat_counts.get("BIT_SHIFT", 0)
+        control_ops = cat_counts.get("CONTROL_BRANCH_COND", 0) + cat_counts.get("CONTROL_BRANCH_UNCOND", 0) + cat_counts.get("CONTROL_CALL", 0)
+        mem_ops = cat_counts.get("MEMORY_LOAD", 0) + cat_counts.get("MEMORY_STORE", 0)
+
+        arith_to_ctrl = round(arith_ops / max(1, control_ops), 3)
+        mem_to_total = round(mem_ops / max(1, total_pcode_ops), 3)
+
+        if arith_to_ctrl > 2.0:
+            profile = "ALGORITHMIC_COMPUTE_INTENSIVE"
+        elif control_ops > arith_ops:
+            profile = "LOGIC_AND_STATE_MACHINE_HEAVY"
+        elif mem_to_total > 0.4:
+            profile = "MEMORY_AND_BUFFER_IO_INTENSIVE"
+        else:
+            profile = "BALANCED_SYSTEM_CODE"
+
+        return {
+            "status": "ok",
+            "total_functions": total_funcs,
+            "total_pcode_ops": total_pcode_ops,
+            "total_basic_blocks": total_blocks,
+            "sensitive_api_functions_count": sensitive_funcs,
+            "arithmetic_to_control_ratio": arith_to_ctrl,
+            "memory_io_ratio": mem_to_total,
+            "architectural_classification": profile,
+            "category_distribution": cat_counts,
+            "epistemic_classification": "GHIDRA_GLOBAL_COMPUTATIONAL_PROFILE",
+        }
+
     def build_call_graph_and_xrefs(
         self, target_function: Optional[str] = None, max_depth: int = 4
     ) -> Dict[str, Any]:

@@ -103,6 +103,8 @@ class CapabilityRegistry:
         "process_intelligence": {Capability.PROCESS_QUERY, Capability.FILE_READ},
         "registry_editor": {Capability.REGISTRY_READ, Capability.WORKSPACE_WRITE, Capability.FILE_READ},
         "ghidra_headless": {Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE, Capability.FILE_READ},
+        "ghidra_analyzer": {Capability.FILE_READ, Capability.WORKSPACE_WRITE},
+        "binary_diff": {Capability.FILE_READ},
 
         # High-Level Invocation Interfaces
         "mcp_server": {

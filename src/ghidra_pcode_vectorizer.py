@@ -964,6 +964,7 @@ class GhidraDeepAnalyzer:
       1. Call-Graph & XREF topology + sensitive API import reachability paths.
       2. Intra-procedural High P-Code SSA data-flow / taint slice summary.
       3. Decompiler C AST / pseudocode & local variable correlation.
+      4. Pure-Python MSVC C++ symbol demangling for native Windows binaries.
     """
 
     SENSITIVE_API_PATTERNS = (
@@ -973,6 +974,118 @@ class GhidraDeepAnalyzer:
         "InternetOpen", "HttpSendRequest", "CryptDecrypt", "BCryptDecrypt",
         "RtlCopyMemory", "memcpy", "strcpy", "sprintf",
     )
+
+    @staticmethod
+    def demangle_msvc_symbol(sym: str) -> str:
+        """
+        Pure-Python zero-dependency MSVC C++ symbol demangler.
+        Recovers namespaces, classes, methods, constructors, destructors, operators,
+        return types, and parameter lists from Microsoft mangled identifiers (e.g. ?Func@Class@@...).
+        Returns the original symbol untouched if not mangled or on parse anomaly.
+        """
+        if not isinstance(sym, str) or not sym.startswith("?"):
+            return sym
+
+        type_map = {
+            "X": "void", "_N": "bool", "D": "char", "C": "signed char", "E": "unsigned char",
+            "F": "short", "G": "unsigned short", "H": "int", "I": "unsigned int",
+            "J": "long", "K": "unsigned long", "_J": "__int64", "_K": "unsigned __int64",
+            "M": "float", "N": "double", "PEAX": "void*", "PEBX": "void const*",
+            "PEAD": "char*", "PEBD": "char const*", "AEAD": "char&", "AEBD": "char const&"
+        }
+
+        def _parse_type(s: str, pos: int) -> Tuple[str, int]:
+            for k in sorted(type_map.keys(), key=len, reverse=True):
+                if s.startswith(k, pos):
+                    return type_map[k], pos + len(k)
+            if s.startswith("PEAV", pos) or s.startswith("PEAU", pos):
+                end = s.find("@@", pos + 4)
+                if end != -1:
+                    cls_name = s[pos+4:end].replace("@", "::")
+                    return f"{cls_name}*", end + 2
+            return "void*", pos + 1
+
+        try:
+            s = sym[1:]
+            is_ctor = False
+            is_dtor = False
+            op_name = None
+
+            if s.startswith("?0"):
+                is_ctor = True
+                s = s[2:]
+            elif s.startswith("?1"):
+                is_dtor = True
+                s = s[2:]
+            elif s.startswith("?_U"):
+                op_name = "operator new[]"
+                s = s[3:]
+            elif s.startswith("?_V"):
+                op_name = "operator delete[]"
+                s = s[3:]
+            elif s.startswith("?4"):
+                op_name = "operator="
+                s = s[2:]
+            elif s.startswith("?8"):
+                op_name = "operator=="
+                s = s[2:]
+            elif s.startswith("?9"):
+                op_name = "operator!="
+                s = s[2:]
+
+            parts = s.split("@@")
+            if len(parts) < 2:
+                return sym
+            scope_part = parts[0]
+            rest = "@@".join(parts[1:])
+
+            tokens = scope_part.split("@")
+            if is_ctor:
+                qualifiers = tokens
+                fn_name = qualifiers[0] if qualifiers else "Ctor"
+                ret = ""
+            elif is_dtor:
+                qualifiers = tokens
+                fn_name = "~" + (qualifiers[0] if qualifiers else "Dtor")
+                ret = ""
+            elif op_name:
+                fn_name = op_name
+                qualifiers = tokens
+                ret = None
+            else:
+                fn_name = tokens[0]
+                qualifiers = tokens[1:]
+                ret = None
+
+            full_qual = "::".join(reversed(qualifiers))
+            full_fn = f"{full_qual}::{fn_name}" if full_qual else fn_name
+
+            idx = 0
+            while idx < len(rest) and rest[idx] in "QIAESUYB":
+                idx += 1
+            if rest.startswith("A", idx):
+                idx += 1
+            if rest.startswith("A", idx):
+                idx += 1
+
+            if ret is None:
+                ret, idx = _parse_type(rest, idx)
+
+            params = []
+            if rest.startswith("XZ", idx) or rest.startswith("Z", idx):
+                params = ["void"]
+            else:
+                while idx < len(rest) and not rest.startswith("@Z", idx) and not rest.startswith("Z", idx):
+                    p, idx = _parse_type(rest, idx)
+                    params.append(p)
+                    if idx >= len(rest) or rest[idx] == "@":
+                        idx += 1
+                        break
+            p_str = ", ".join(params) if params else "void"
+            res = f"{ret} {full_fn}({p_str})".strip()
+            return res if res else sym
+        except Exception:
+            return sym
 
     def build_call_graph_and_xrefs(
         self, export_data: Union[Dict[str, Any], str, Any], target_function: Optional[str] = None, max_depth: int = 4

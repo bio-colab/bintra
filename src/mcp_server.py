@@ -241,24 +241,56 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
     },
     {
         "name": "bintra_ghidra_analyze",
-        "description": "Batch-processes a full Ghidra exported High P-Code program payload. Scans all functions, detects opaque predicates, calculates spectral effective rank, and synthesizes a mutation plan (renames, plate comments).",
+        "description": "Batch-processes, queries, and searches Ghidra exported High P-Code program payloads (JSON, JSONL, SQLite .db). Detects opaque predicates, computes Roy-Vetterli spectral rank, synthesizes mutation plans, searches functions/opcodes/xrefs, and inspects decompiled C pseudocode.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "input_file": {
                     "type": "string",
-                    "description": "Recommended token-efficient path to exported JSON file on disk (pass-by-reference avoids prompt token bloat)"
+                    "description": "Recommended path to exported Ghidra JSON, JSONL, or SQLite (.db) file on disk (pass-by-reference avoids prompt token bloat)"
                 },
                 "payload": {
                     "type": "object",
-                    "description": "Optional inline exported program payload containing 'functions' array of High P-Code ops (pass-by-reference via 'input_file' is strongly preferred for token efficiency)"
+                    "description": "Optional inline exported program payload containing 'functions' array of High P-Code ops"
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Optional search query to filter functions by substring matching name, entry RVA, signature, or decompiled C text"
+                },
+                "opcode_filter": {
+                    "type": "string",
+                    "description": "Optional opcode filter (e.g. CALLIND, FLOAT_SQRT, INT_XOR) to find functions containing this P-Code mnemonic"
+                },
+                "xref_target": {
+                    "type": "string",
+                    "description": "Optional symbol, address, or string to find referencing functions"
+                },
+                "function_name": {
+                    "type": "string",
+                    "description": "Optional target function name or entry point to retrieve full architectural inspection and decompiled C pseudocode"
+                },
+                "sensitive_only": {
+                    "type": "boolean",
+                    "description": "Filter to functions invoking sensitive Win32 APIs (e.g. VirtualAlloc, CreateProcess, CryptDecrypt)"
+                },
+                "profile": {
+                    "type": "boolean",
+                    "description": "Synthesize global computational and architectural profile (12-category P-Code distribution, arithmetic/control ratio)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of search matches to return (default: 50)"
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Offset for paginating search results (default: 0)"
                 }
             }
         }
     },
     {
         "name": "bintra_ghidra_headless",
-        "description": "Automates running Ghidra analyzeHeadless with BintraGhidraBridge.java on Windows. Decompiles functions, extracts High P-Code, analyzes semantics, and applies database mutations in one command.",
+        "description": "Automates running Ghidra analyzeHeadless with Bintra bridge scripts on Windows/Linux. Decompiles functions, extracts High P-Code, analyzes semantics, and applies database mutations in one command with timeout protection.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -270,9 +302,38 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                     "type": "string",
                     "description": "Optional Ghidra install path (defaults to C:\\ghidra or GHIDRA_INSTALL_DIR)"
                 },
+                "project_dir": {
+                    "type": "string",
+                    "description": "Optional directory for Ghidra project database (defaults to isolated temp)"
+                },
+                "project_name": {
+                    "type": "string",
+                    "description": "Optional Ghidra project name (defaults to auto-generated unique name)"
+                },
+                "post_script": {
+                    "type": "string",
+                    "description": "Bridge script to execute (default: 'BintraGhidraBridge.java' or 'bintra_extract_pcode.py')"
+                },
+                "script_args": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional arguments to pass to the post-script"
+                },
                 "apply": {
                     "type": "boolean",
                     "description": "Automatically commit function renames and plate comments to Ghidra database"
+                },
+                "delete_project": {
+                    "type": "boolean",
+                    "description": "Automatically delete temporary Ghidra project files after analysis completes (default: true)"
+                },
+                "timeout_seconds": {
+                    "type": "integer",
+                    "description": "Maximum execution time in seconds before aborting (default: 300)"
+                },
+                "max_cpu": {
+                    "type": "integer",
+                    "description": "Maximum CPU cores for Ghidra analysis threads"
                 }
             },
             "required": ["binary_path"]
@@ -1618,27 +1679,71 @@ class BintraMcpServer:
             return PcodeDeobfuscator.detect_opaque_predicates(pcode_ops)
 
         elif name == "bintra_ghidra_analyze":
+            from security import ExecutionGuard, Capability
+            from ghidra_export_store import GhidraExportStore
             payload = args.get("payload")
             input_file = args.get("input_file")
-            if not payload and input_file and os.path.exists(input_file):
-                with open(input_file, "r", encoding="utf-8") as f:
-                    payload = json.load(f)
-            if not payload:
+            if input_file:
+                ExecutionGuard.request_access(
+                    component="ghidra_analyzer",
+                    operation="read_ghidra_export",
+                    target=input_file,
+                    capability=Capability.FILE_READ,
+                    access_mode="READ",
+                    metadata={"file_path": input_file}
+                )
+            if not payload and not input_file:
                 raise ValueError("Must provide 'payload' object or valid 'input_file'")
-            return GhidraAnnotationPlanner.analyze_program_export(payload)
+
+            store = GhidraExportStore.from_path(input_file if input_file else payload)
+
+            # 1. Targeted single-function deep architectural inspection
+            fn_target = args.get("function_name")
+            if fn_target:
+                res = store.inspect_function(fn_target)
+                if not res:
+                    return {"status": "not_found", "function_name": fn_target}
+                return res
+
+            # 2. Advanced search across functions, opcodes, xrefs, and decompiled C
+            query = args.get("query")
+            opcode_filter = args.get("opcode_filter")
+            xref_target = args.get("xref_target")
+            sensitive_only = bool(args.get("sensitive_only", False))
+            if query or opcode_filter or xref_target or sensitive_only:
+                limit = int(args.get("limit", 50))
+                offset = int(args.get("offset", 0))
+                return store.search_functions(
+                    query=query,
+                    opcode=opcode_filter,
+                    xref_target=xref_target,
+                    sensitive_only=sensitive_only,
+                    limit=limit,
+                    offset=offset
+                )
+
+            # 3. Global computational and architectural profile
+            if args.get("profile"):
+                return store.query_computational_profile()
+
+            # 4. Standard batch mutation plan generation (default)
+            return GhidraAnnotationPlanner.analyze_program_export(store)
 
         elif name == "bintra_ghidra_headless":
-            import subprocess, tempfile
+            import subprocess, tempfile, uuid, shutil
             from security import ExecutionGuard, Capability
             bin_path = args["binary_path"]
             apply_flag = bool(args.get("apply", False))
+            timeout_sec = int(args.get("timeout_seconds", 300))
+            delete_proj = bool(args.get("delete_project", True))
+
             ExecutionGuard.request_access(
                 component="ghidra_headless",
                 operation="run_ghidra_headless",
                 target=bin_path,
                 capability=Capability.GHIDRA_HEADLESS_EXEC,
                 access_mode="EXECUTE",
-                metadata={"shell": False, "apply": apply_flag}
+                metadata={"shell": False, "apply": apply_flag, "timeout": timeout_sec}
             )
             if apply_flag:
                 ExecutionGuard.request_access(
@@ -1684,17 +1789,59 @@ class BintraMcpServer:
                 raise FileNotFoundError(f"analyzeHeadless executable not found. Configure GHIDRA_INSTALL_DIR or pass 'ghidra_path'.")
 
             script_dir = SRC_DIR.parent / "ghidra_scripts"
-            script_args = ["apply"] if args.get("apply", False) else []
+            post_script = args.get("post_script") or "BintraGhidraBridge.java"
+            proj_dir = args.get("project_dir") or tempfile.gettempdir()
+            proj_name = args.get("project_name") or f"BintraHeadless_{uuid.uuid4().hex[:8]}"
+
+            script_args = list(args.get("script_args", []))
+            if apply_flag and "apply" not in script_args:
+                script_args.append("apply")
+
             cmd = [
                 str(headless_bat),
-                tempfile.gettempdir(),
-                "BintraMcpHeadless",
+                proj_dir,
+                proj_name,
                 "-import", bin_path,
+                "-overwrite",
                 "-scriptPath", str(script_dir),
-                "-postScript", "BintraGhidraBridge.java"
-            ] + script_args
-            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-            combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
+                "-postScript", post_script
+            ]
+            if args.get("max_cpu"):
+                cmd.extend(["-maxCpu", str(args["max_cpu"])])
+            cmd.extend(script_args)
+
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=timeout_sec
+                )
+                stdout = proc.stdout or ""
+                stderr = proc.stderr or ""
+                returncode = proc.returncode
+                timed_out = False
+            except subprocess.TimeoutExpired as tex:
+                stdout = tex.stdout or "" if isinstance(tex.stdout, str) else ""
+                stderr = tex.stderr or "" if isinstance(tex.stderr, str) else ""
+                returncode = 124
+                timed_out = True
+
+            # Cleanup transient project directory if requested
+            if delete_proj:
+                try:
+                    rep_dir = Path(proj_dir) / f"{proj_name}.rep"
+                    gpr_file = Path(proj_dir) / f"{proj_name}.gpr"
+                    if rep_dir.exists() and rep_dir.is_dir():
+                        shutil.rmtree(rep_dir, ignore_errors=True)
+                    if gpr_file.exists():
+                        gpr_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+            combined = stdout + "\n" + stderr
             error_markers = [
                 "SCRIPT ERROR:",
                 "Analysis failed for file:",
@@ -1703,13 +1850,43 @@ class BintraMcpServer:
                 "ERROR (GhidraScript)",
             ]
             has_script_error = any(m in combined for m in error_markers)
-            effective_exit = proc.returncode if proc.returncode != 0 else (1 if has_script_error else 0)
+            effective_exit = returncode if returncode != 0 else (1 if has_script_error else 0)
+
+            # Heuristically parse summary metrics from bridge output if present
+            analyzed_funcs = 0
+            opaque_detected = 0
+            cff_detected = 0
+            for line in stdout.splitlines():
+                if "Proven Invariant Tautologies" in line:
+                    try:
+                        opaque_detected = int(line.split(":")[-1].strip())
+                    except Exception:
+                        pass
+                elif "Control Flow Flattening" in line:
+                    try:
+                        cff_detected = int(line.split(":")[-1].strip())
+                    except Exception:
+                        pass
+                elif "Extracted High P-Code & Full CFG for" in line:
+                    try:
+                        analyzed_funcs = int(line.split("for")[-1].split("/")[0].strip())
+                    except Exception:
+                        pass
+
             return {
                 "exit_code": effective_exit,
+                "is_timeout": timed_out,
+                "timeout_seconds": timeout_sec,
                 "script_error_detected": has_script_error,
                 "is_error": effective_exit != 0,
-                "stdout_tail": proc.stdout[-3000:],
-                "stderr_tail": proc.stderr[-2000:]
+                "project_name": proj_name,
+                "project_cleaned": delete_proj,
+                "analyzed_functions_count": analyzed_funcs,
+                "opaque_predicates_detected": opaque_detected,
+                "cff_backbones_detected": cff_detected,
+                "stdout_tail": stdout[-3000:],
+                "stderr_tail": stderr[-2000:],
+                "epistemic_classification": "GHIDRA_HEADLESS_BATCH_EXECUTION"
             }
 
         elif name == "bintra_windows_env_audit":
@@ -2338,12 +2515,14 @@ class BintraMcpServer:
 
         elif name == "bintra_binary_diff":
             from pe_deep_forensics import SemanticBinaryDiffer
-            from security import SafeFileAccess, TargetScope
+            from security import SafeFileAccess, TargetScope, ExecutionGuard, Capability
             mode_val = args.get("mode", "pe")
             b_path = args["baseline_path"]
             t_path = args["target_path"]
             if mode_val == "ghidra_export":
                 from ghidra_export_store import GhidraExportStore
+                ExecutionGuard.request_access(component="binary_diff", operation="diff_ghidra_baseline", target=b_path, capability=Capability.FILE_READ, access_mode="READ")
+                ExecutionGuard.request_access(component="binary_diff", operation="diff_ghidra_target", target=t_path, capability=Capability.FILE_READ, access_mode="READ")
                 with GhidraExportStore.from_path(b_path) as b_store, GhidraExportStore.from_path(t_path) as t_store:
                     b_funcs = list(b_store.iter_functions()) if b_store.is_sqlite else b_store.to_dict().get("functions", [])
                     t_funcs = list(t_store.iter_functions()) if t_store.is_sqlite else t_store.to_dict().get("functions", [])
@@ -2351,9 +2530,18 @@ class BintraMcpServer:
             return SemanticBinaryDiffer().diff_pe_binaries(b_path, t_path)
 
         elif name == "bintra_ghidra_call_graph":
+            from security import ExecutionGuard, Capability
             from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
             from ghidra_export_store import GhidraExportStore
             ep = args["export_path"]
+            ExecutionGuard.request_access(
+                component="ghidra_analyzer",
+                operation="read_ghidra_export_call_graph",
+                target=ep,
+                capability=Capability.FILE_READ,
+                access_mode="READ",
+                metadata={"file_path": ep}
+            )
             with GhidraExportStore.from_path(ep) as store:
                 return GhidraDeepAnalyzer().build_call_graph_and_xrefs(
                     store,
@@ -2362,10 +2550,19 @@ class BintraMcpServer:
                 )
 
         elif name == "bintra_ghidra_data_flow":
+            from security import ExecutionGuard, Capability
             from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
             from ghidra_export_store import GhidraExportStore
             ep = args["export_path"]
             fn_target = args["function_name"]
+            ExecutionGuard.request_access(
+                component="ghidra_analyzer",
+                operation="read_ghidra_export_data_flow",
+                target=ep,
+                capability=Capability.FILE_READ,
+                access_mode="READ",
+                metadata={"file_path": ep, "function_name": fn_target}
+            )
             with GhidraExportStore.from_path(ep) as store:
                 matched_fn = store.get_function(fn_target)
                 if not matched_fn:

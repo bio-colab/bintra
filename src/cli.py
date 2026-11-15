@@ -2106,15 +2106,29 @@ def _dispatch_cli():
             print(json.dumps(plan, indent=2))
             return
         elif cmd == "ghidra-analyze":
-            parser = argparse.ArgumentParser(description="Analyze Ghidra exported High P-Code and emit mutation plan")
+            parser = argparse.ArgumentParser(description="Analyze Ghidra exported High P-Code and emit mutation plan, search functions, or profile binary")
             parser.add_argument("command")
             parser.add_argument("--input", "--file", dest="input", required=True, help="Path to exported Ghidra JSON/JSONL/DB file")
             parser.add_argument("--output", default=None, help="Path to write the generated mutation plan JSON")
             parser.add_argument("--to-sqlite", default=None, help="Optional path to convert export to indexed SQLite database")
             parser.add_argument("--workspace", default=None, help="Optional workspace directory override")
+            parser.add_argument("--query", default=None, help="Filter functions by name, entry RVA, signature, or decompiled C substring")
+            parser.add_argument("--opcode", default=None, help="Filter functions containing specific P-Code opcode (e.g. CALLIND, FLOAT_SQRT, INT_XOR)")
+            parser.add_argument("--xref", default=None, help="Filter functions referencing specific symbol, address, or string")
+            parser.add_argument("--function", default=None, help="Retrieve full architectural inspection and decompiled C for a single function")
+            parser.add_argument("--sensitive-only", action="store_true", help="Filter to functions invoking sensitive Win32 APIs")
+            parser.add_argument("--profile", action="store_true", help="Synthesize global computational and architectural profile across binary")
+            parser.add_argument("--limit", type=int, default=50, help="Max search results to return (default: 50)")
             args = parser.parse_args()
 
             from security import SafeFileAccess, ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="ghidra-analyze-input",
+                target=args.input,
+                capability=Capability.FILE_READ,
+                access_mode="READ"
+            )
             if args.output:
                 ExecutionGuard.request_access(
                     component="cli",
@@ -2125,12 +2139,48 @@ def _dispatch_cli():
                 )
             from ghidra_export_store import GhidraExportStore
             if args.to_sqlite:
+                ExecutionGuard.request_access(
+                    component="cli",
+                    operation="ghidra-analyze-to-sqlite",
+                    target=args.to_sqlite,
+                    capability=Capability.WORKSPACE_WRITE,
+                    access_mode="WRITE"
+                )
                 is_jsonl = str(args.input).lower().endswith(".jsonl")
                 GhidraExportStore.ingest_to_sqlite(args.input, args.to_sqlite, is_jsonl=is_jsonl)
                 print(json.dumps({"status": "ok", "action": "exported_to_sqlite", "sqlite_db": args.to_sqlite}, indent=2))
                 return
 
             store = GhidraExportStore.from_path(args.input)
+
+            # 1. Inspect single function
+            if args.function:
+                res = store.inspect_function(args.function)
+                if not res:
+                    print(json.dumps({"status": "not_found", "function_name": args.function}, indent=2))
+                else:
+                    print(json.dumps(res, indent=2))
+                return
+
+            # 2. Search / Query functions
+            if args.query or args.opcode or args.xref or args.sensitive_only:
+                res = store.search_functions(
+                    query=args.query,
+                    opcode=args.opcode,
+                    xref_target=args.xref,
+                    sensitive_only=args.sensitive_only,
+                    limit=args.limit
+                )
+                print(json.dumps(res, indent=2))
+                return
+
+            # 3. Global computational profile
+            if args.profile:
+                res = store.query_computational_profile()
+                print(json.dumps(res, indent=2))
+                return
+
+            # 4. Batch annotation plan (default)
             plan = GhidraAnnotationPlanner.analyze_program_export(store)
             if args.output:
                 SafeFileAccess.write_workspace_file(args.output, json.dumps(plan, indent=2))
@@ -2142,12 +2192,36 @@ def _dispatch_cli():
             parser.add_argument("--binary", "--file", "--input", dest="binary", required=True, help="Path to target executable (PE/ELF)")
             parser.add_argument("--ghidra-path", default=None, help="Ghidra installation directory (default: auto-discover)")
             parser.add_argument("--project-dir", default=None, help="Ghidra project directory (default: temp)")
-            parser.add_argument("--project-name", default="BintraHeadless", help="Ghidra project name")
+            parser.add_argument("--project-name", default=None, help="Ghidra project name (default: auto-generated isolated)")
+            parser.add_argument("--post-script", default="BintraGhidraBridge.java", help="Bridge script to execute (default: BintraGhidraBridge.java)")
             parser.add_argument("--apply", action="store_true", help="Automatically commit mutations to Ghidra database")
+            parser.add_argument("--timeout", type=int, default=300, help="Timeout in seconds for headless analysis (default: 300)")
+            parser.add_argument("--max-cpu", type=int, default=None, help="Max CPU cores for Ghidra analysis threads")
+            parser.add_argument("--keep-project", action="store_true", help="Do not delete temporary Ghidra project files after run")
             args = parser.parse_args()
 
-            import subprocess, tempfile
+            import subprocess, tempfile, uuid, shutil
             from pathlib import Path as P
+            from security import ExecutionGuard, Capability
+
+            ExecutionGuard.request_access(
+                component="cli",
+                operation="ghidra-headless-exec",
+                target=args.binary,
+                capability=Capability.GHIDRA_HEADLESS_EXEC,
+                access_mode="EXECUTE",
+                metadata={"shell": False, "apply": args.apply, "timeout": args.timeout}
+            )
+            if args.apply:
+                ExecutionGuard.request_access(
+                    component="cli",
+                    operation="ghidra-headless-mutate",
+                    target=args.binary,
+                    capability=Capability.GHIDRA_PROJECT_MUTATE,
+                    access_mode="WRITE",
+                    metadata={"target": "ghidra_project_database"}
+                )
+
             ghidra_path_val = args.ghidra_path or os.environ.get("GHIDRA_INSTALL_DIR") or os.environ.get("GHIDRA_HOME")
             headless_name = "analyzeHeadless.bat" if os.name == "nt" else "analyzeHeadless"
             alt_name = "analyzeHeadless" if os.name == "nt" else "analyzeHeadless.bat"
@@ -2186,26 +2260,60 @@ def _dispatch_cli():
             repo_root = P(__file__).resolve().parent.parent
             script_dir = repo_root / "ghidra_scripts"
             proj_dir = args.project_dir or tempfile.gettempdir()
+            proj_name = args.project_name or f"BintraHeadless_{uuid.uuid4().hex[:8]}"
             script_args = ["apply"] if args.apply else []
 
             cmd_args = [
                 str(headless_cmd),
                 proj_dir,
-                args.project_name,
+                proj_name,
                 "-import", args.binary,
                 "-overwrite",
                 "-scriptPath", str(script_dir),
-                "-postScript", "BintraGhidraBridge.java"
-            ] + script_args
+                "-postScript", args.post_script
+            ]
+            if args.max_cpu:
+                cmd_args.extend(["-maxCpu", str(args.max_cpu)])
+            cmd_args.extend(script_args)
 
             print(f"[Bintra] Launching Ghidra Headless Analyzer...")
             print(f"[Bintra] Binary: {args.binary}")
-            print(f"[Bintra] Script: {script_dir / 'BintraGhidraBridge.java'}")
-            res = subprocess.run(cmd_args, capture_output=True, text=True, encoding="utf-8", errors="replace")
-            print(res.stdout, end="")
-            if res.stderr:
-                sys.stderr.write(res.stderr)
-            combined = (res.stdout or "") + "\n" + (res.stderr or "")
+            print(f"[Bintra] Script: {script_dir / args.post_script}")
+            print(f"[Bintra] Project: {proj_name} in {proj_dir}")
+
+            try:
+                res = subprocess.run(
+                    cmd_args,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=args.timeout
+                )
+                stdout = res.stdout or ""
+                stderr = res.stderr or ""
+                returncode = res.returncode
+            except subprocess.TimeoutExpired as tex:
+                stdout = tex.stdout or "" if isinstance(tex.stdout, str) else ""
+                stderr = tex.stderr or "" if isinstance(tex.stderr, str) else ""
+                sys.stderr.write(f"[Bintra] Ghidra Headless Analyzer timed out after {args.timeout}s.\n")
+                returncode = 124
+
+            if not args.keep_project:
+                try:
+                    rep_dir = P(proj_dir) / f"{proj_name}.rep"
+                    gpr_file = P(proj_dir) / f"{proj_name}.gpr"
+                    if rep_dir.exists() and rep_dir.is_dir():
+                        shutil.rmtree(rep_dir, ignore_errors=True)
+                    if gpr_file.exists():
+                        gpr_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+            print(stdout, end="")
+            if stderr:
+                sys.stderr.write(stderr)
+            combined = stdout + "\n" + stderr
             error_markers = [
                 "SCRIPT ERROR:",
                 "Analysis failed for file:",
@@ -2214,9 +2322,9 @@ def _dispatch_cli():
                 "ERROR (GhidraScript)",
             ]
             has_script_error = any(m in combined for m in error_markers)
-            if res.returncode != 0 or has_script_error:
-                sys.stderr.write(f"[Bintra] Ghidra Headless Analyzer failed (rc={res.returncode}, script_error={has_script_error})\n")
-                sys.exit(res.returncode if res.returncode != 0 else 1)
+            if returncode != 0 or has_script_error:
+                sys.stderr.write(f"[Bintra] Ghidra Headless Analyzer failed (rc={returncode}, script_error={has_script_error})\n")
+                sys.exit(returncode if returncode != 0 else 1)
             sys.exit(0)
 
         elif cmd == "ghidra-bridge":

@@ -792,8 +792,14 @@ class GhidraAnnotationPlanner:
         Supports in-memory dicts, .json, .jsonl, and .db via GhidraExportStore.
         """
         if isinstance(payload, str) or hasattr(payload, "__fspath__"):
-            from ghidra_export_store import GhidraExportStore
-            payload = GhidraExportStore.from_path(payload)
+            fpath_str = str(payload)
+            if fpath_str.endswith(".json") and os.path.exists(fpath_str):
+                with open(fpath_str, "r", encoding="utf-8", errors="replace") as f:
+                    payload = json.load(f)
+            else:
+                import importlib
+                store_mod = importlib.import_module("ghidra_export_store")
+                payload = store_mod.GhidraExportStore.from_path(payload)
 
         if hasattr(payload, "iter_functions"):
             functions = payload.iter_functions()
@@ -1184,8 +1190,14 @@ class GhidraDeepAnalyzer:
         self, export_data: Union[Dict[str, Any], str, Any], target_function: Optional[str] = None, max_depth: int = 4
     ) -> Dict[str, Any]:
         if isinstance(export_data, str) or hasattr(export_data, "__fspath__"):
-            from ghidra_export_store import GhidraExportStore
-            export_data = GhidraExportStore.from_path(export_data)
+            fpath_str = str(export_data)
+            if fpath_str.endswith(".json") and os.path.exists(fpath_str):
+                with open(fpath_str, "r", encoding="utf-8", errors="replace") as f:
+                    export_data = json.load(f)
+            else:
+                import importlib
+                store_mod = importlib.import_module("ghidra_export_store")
+                export_data = store_mod.GhidraExportStore.from_path(export_data)
 
         if hasattr(export_data, "build_call_graph_and_xrefs") and getattr(export_data, "is_sqlite", False):
             return export_data.build_call_graph_and_xrefs(target_function=target_function, max_depth=max_depth)

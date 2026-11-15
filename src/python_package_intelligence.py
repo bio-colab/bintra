@@ -28,7 +28,6 @@ from security import Capability, ExecutionGuard, PathIdentity
 # Patterns indicative of exponential or polynomial catastrophic regex backtracking (ReDoS)
 _REDOS_SUSPECT_PATTERNS = [
     re.compile(r"(\([^\)]*[\+\*][^\)]*\))[\+\*]"),          # Nested quantifiers: (a+)+ or (x*)*
-    re.compile(r"(\[[^\]]*[\+\*][^\]]*\])[\+\*]"),          # Character class repetition: [0-9+]+
     re.compile(r"(\.\*|\.\+)\s*(\.\*|\.\+)"),               # Adjacent unanchored greedy dot-stars
     re.compile(r"\([a-zA-Z0-9_|]*\+[\+\*]"),                # Overlapping alternation with quantifier: (a|a+)+
 ]
@@ -294,6 +293,8 @@ class PythonPackageArchitect:
                     if isinstance(item.value, (ast.List, ast.Dict, ast.Set)):
                         for t in item.targets:
                             if isinstance(t, ast.Name):
+                                if t.id.startswith("__") or t.id in ("__all__", "__version__"):
+                                    continue
                                 mutable_globals.append({
                                     "module": mod_name,
                                     "variable": t.id,
@@ -326,16 +327,30 @@ class PythonPackageArchitect:
                                 if isinstance(loop_child, ast.AugAssign) and isinstance(loop_child.op, ast.Add):
                                     if isinstance(loop_child.target, ast.Name):
                                         target_name = loop_child.target.id
-                                        # Flag string-like variable names or str calls
-                                        is_str_call = isinstance(loop_child.value, ast.Call) and getattr(getattr(loop_child.value, "func", None), "id", "") == "str"
-                                        if is_str_call or any(k in target_name.lower() for k in ("text", "str", "line", "buf", "out", "res", "total", "msg", "data")):
-                                            quadratic_concats.append({
-                                                "module": mod_name,
-                                                "function": item.name,
-                                                "variable": target_name,
-                                                "line": loop_child.lineno,
-                                                "risk": "QUADRATIC_STRING_CONCATENATION_IN_LOOP"
-                                            })
+                                        target_lower = target_name.lower()
+
+                                        # Exclude numeric literals and len() calls
+                                        is_num_literal = isinstance(loop_child.value, ast.Constant) and isinstance(loop_child.value.value, (int, float, complex))
+                                        is_len_call = isinstance(loop_child.value, ast.Call) and getattr(getattr(loop_child.value, "func", None), "id", "") == "len"
+
+                                        if not is_num_literal and not is_len_call:
+                                            is_str_val = (
+                                                (isinstance(loop_child.value, ast.Constant) and isinstance(loop_child.value.value, str))
+                                                or isinstance(loop_child.value, ast.JoinedStr)
+                                                or (isinstance(loop_child.value, ast.Call) and getattr(getattr(loop_child.value, "func", None), "id", "") == "str")
+                                            )
+                                            # Check if target is string-like and NOT an obvious counter
+                                            is_counter = any(target_lower.startswith(p) for p in ("total", "count", "num_", "idx", "len", "n_"))
+                                            is_str_target = not is_counter and any(k in target_lower for k in ("text", "str", "line", "buf", "out_str", "result_str", "msg"))
+
+                                            if is_str_val or is_str_target:
+                                                quadratic_concats.append({
+                                                    "module": mod_name,
+                                                    "function": item.name,
+                                                    "variable": target_name,
+                                                    "line": loop_child.lineno,
+                                                    "risk": "QUADRATIC_STRING_CONCATENATION_IN_LOOP"
+                                                })
 
         except Exception as exc:
             pass

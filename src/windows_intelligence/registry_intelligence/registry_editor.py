@@ -352,22 +352,22 @@ class WindowsRegistryEditor:
         header = lines[0].strip()
         format_version = "5.00" if "Version 5.00" in header else ("4.0" if "REGEDIT4" in header else "Unknown")
 
-        # Pre-process multi-line continuations (lines ending with \)
+        # Pre-process multi-line continuations (lines ending with \) using O(N) list builder
         merged_lines: List[str] = []
-        buffer = ""
+        buffer_parts: List[str] = []
         for raw_l in lines[1:]:
             l = raw_l.strip()
             if not l or l.startswith(";") or l.startswith("#"):
                 continue  # skip comments and blank lines
 
             if l.endswith("\\"):
-                buffer += l[:-1].strip()
+                buffer_parts.append(l[:-1].strip())
             else:
-                buffer += l
-                merged_lines.append(buffer)
-                buffer = ""
-        if buffer:
-            merged_lines.append(buffer)
+                buffer_parts.append(l)
+                merged_lines.append("".join(buffer_parts))
+                buffer_parts = []
+        if buffer_parts:
+            merged_lines.append("".join(buffer_parts))
 
         # Parse sections and key values
         parsed_keys: Dict[str, Dict[str, Any]] = {}

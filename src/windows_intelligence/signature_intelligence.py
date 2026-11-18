@@ -510,19 +510,19 @@ class WindowsSignatureIntelligence:
             with open(file_path, "rb") as f:
                 data = f.read()
         except Exception as exc:
-            return {"is_signed": False, "trust_status": "UNSIGNED", "error": str(exc)}
+            return {"is_signed": False, "signature_type": "NONE", "trust_status": "UNSIGNED", "error": str(exc)}
 
         if data[:2] != b"MZ":
-            return {"is_signed": False, "trust_status": "UNSIGNED", "error": "Not a PE binary"}
+            return {"is_signed": False, "signature_type": "NONE", "trust_status": "UNSIGNED", "error": "Not a PE binary"}
 
         pe_off = struct.unpack_from("<I", data, 0x3C)[0]
         if pe_off + 28 > len(data):
-            return {"is_signed": False, "trust_status": "UNSIGNED"}
+            return {"is_signed": False, "signature_type": "NONE", "trust_status": "UNSIGNED"}
 
         magic = struct.unpack_from("<H", data, pe_off + 24)[0]
         dd_off = pe_off + 24 + (112 if magic == 0x20B else 96)
         if dd_off + 40 > len(data):
-            return {"is_signed": False, "trust_status": "UNSIGNED"}
+            return {"is_signed": False, "signature_type": "NONE", "trust_status": "UNSIGNED"}
 
         sec_va, sec_sz = struct.unpack_from("<II", data, dd_off + 4 * 8)
         if sec_va == 0 or sec_sz == 0 or sec_va + 8 > len(data):

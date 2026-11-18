@@ -100,6 +100,7 @@ class CapabilityRegistry:
         "dossier_generator": {Capability.WORKSPACE_WRITE},
         "causality_synthesizer": {Capability.FILE_READ, Capability.WORKSPACE_WRITE},
         "device_intelligence": {Capability.DEVICE_QUERY, Capability.DRIVER_QUERY},
+        "signature_intelligence": {Capability.FILE_READ, Capability.DRIVER_QUERY, Capability.DEVICE_QUERY},
         "process_intelligence": {Capability.PROCESS_QUERY, Capability.FILE_READ},
         "python_intelligence": {Capability.FILE_READ},
         "registry_editor": {Capability.REGISTRY_READ, Capability.WORKSPACE_WRITE, Capability.FILE_READ},

@@ -41,7 +41,7 @@ WEIGHT_COMMANDS = {
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless", "ghidra-bridge"}
-WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "port-audit", "hw-tree", "hw-net", "hw-dissect", "net-conns", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations", "proc-list", "proc-search", "proc-info", "sys-perf", "dev-classes", "dev-list", "dev-search", "dev-info", "reg-read", "reg-search", "reg-export", "reg-import"}
+WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "port-audit", "hw-tree", "hw-net", "hw-dissect", "net-conns", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations", "proc-list", "proc-search", "proc-info", "sys-perf", "dev-classes", "dev-list", "dev-search", "dev-info", "reg-read", "reg-search", "reg-export", "reg-import", "sig-verify", "sig-audit"}
 
 
 def print_help():
@@ -118,6 +118,8 @@ Windows System Intelligence & Failure Diagnostic Commands:
   dissect-struct    Runtime object structure field analysis (vftables, pointers, floats, ints, C struct)
   crash-rca         Automated Crash Root Cause Analysis (MiniDump + Disassembly + Culprit Register)
   etw-capture       Establish real-time ETW capture session and stream diagnostic timeline events
+  sig-verify        Verify Authenticode and Security Catalog (.cat) signatures with full certificate chain
+  sig-audit         Audit executable and driver signatures across directories with WHQL/OEM classification
 
 Python Ecosystem & Runtime Forensics Commands:
   py-bytecode       Disassemble and inspect Python bytecode (.pyc / .py) with opcode and constant analysis
@@ -2037,6 +2039,79 @@ def _dispatch_cli():
                         f"- **Description:** {report.get('status_description')}"
                     ]
                     print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "sig-verify":
+            parser = argparse.ArgumentParser(prog="bintra sig-verify", description="Verify Authenticode and Security Catalog (.cat) digital signatures")
+            parser.add_argument("command")
+            parser.add_argument("file_path", help="Target executable (.exe), DLL (.dll), or kernel driver (.sys)")
+            parser.add_argument("--no-catalog", action="store_true", help="Disable Windows Security Catalog (.cat) resolution")
+            parser.add_argument("--verify-revocation", action="store_true", help="Enable online CRL/OCSP revocation checks")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args(sys.argv[1:])
+
+            from windows_intelligence import WindowsSignatureIntelligence
+            report = WindowsSignatureIntelligence.verify_file(
+                args.file_path,
+                check_catalog=not args.no_catalog,
+                verify_revocation=args.verify_revocation
+            )
+            if args.format == "md":
+                lines = [
+                    f"# Windows Digital Signature Intelligence: `{report.get('file_name')}`",
+                    f"- **Trust Status:** `{report.get('trust_status')}`",
+                    f"- **Signature Type:** `{report.get('signature_type')}`",
+                    f"- **Win32 Status Code:** `{report.get('win32_status_code')}`",
+                    f"- **Microsoft System Binary:** `{report.get('is_microsoft_system_binary')}`",
+                    f"- **WHQL Certified:** `{report.get('is_whql_certified')}`",
+                    f"- **Kernel Driver:** `{report.get('is_driver')}`"
+                ]
+                if report.get("catalog_file"):
+                    lines.append(f"- **Security Catalog:** `{os.path.basename(report['catalog_file'])}`")
+                if report.get("primary_signer"):
+                    s = report["primary_signer"]
+                    lines.append(f"- **Primary Signer:** `{s.get('subject')}` (Issuer: `{s.get('issuer')}`)")
+                if report.get("risk_flags"):
+                    lines.append("\n### Risk Flags:")
+                    for rf in report["risk_flags"]:
+                        lines.append(f"- ⚠️ `{rf}`")
+                print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd == "sig-audit":
+            parser = argparse.ArgumentParser(prog="bintra sig-audit", description="Audit digital signatures across a directory of executables or drivers")
+            parser.add_argument("command")
+            parser.add_argument("dir_path", help="Target directory path (e.g. C:\\Windows\\System32\\drivers)")
+            parser.add_argument("--pattern", default="*.sys", help="File glob pattern (default: *.sys)")
+            parser.add_argument("--recursive", action="store_true", help="Recursively traverse subdirectories")
+            parser.add_argument("--limit", type=int, default=100, help="Maximum files to audit (default: 100)")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+            args = parser.parse_args(sys.argv[1:])
+
+            from windows_intelligence import WindowsSignatureIntelligence
+            report = WindowsSignatureIntelligence.audit_directory(
+                args.dir_path,
+                pattern=args.pattern,
+                recursive=args.recursive,
+                max_files=args.limit
+            )
+            if args.format == "md":
+                m = report.get("metrics", {})
+                lines = [
+                    f"# Directory Signature Audit: `{report.get('directory')}`",
+                    f"- **Pattern:** `{report.get('pattern')}`",
+                    f"- **Total Scanned:** {m.get('total_scanned')}",
+                    f"- **Trusted (Embedded):** {m.get('trusted_embedded')}",
+                    f"- **Trusted (Catalog):** {m.get('trusted_catalog')}",
+                    f"- **Unsigned:** {m.get('unsigned')}",
+                    f"- **Untrusted / Expired:** {m.get('untrusted_or_expired')}",
+                    f"- **Microsoft Binaries:** {m.get('microsoft_system_binaries')}"
+                ]
+                print("\n".join(lines))
             else:
                 print(json.dumps(report, indent=2, ensure_ascii=False))
             return

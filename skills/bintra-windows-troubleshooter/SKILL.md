@@ -195,11 +195,13 @@ Exposes PnP device instance IDs, active problem codes (`CM_PROB_FAILED_START`, `
   bintra diagnose --binary "C:\path\to\app.exe" [--crash-json .\crash_record.json] [--ghidra-json .\pcode.json]
   ```
   Returns `verdict`, `severity`, `epistemic_classification` (`facts`, `observations`, `hypotheses`, `unknowns`), `root_cause_summary`, `binary_mapping`, `evidence_graph`, and `mermaid_diagram`.
-- **Registry, Hardware, Drivers, Services, & Read-Only Catalog Commands:**
+- **Registry, Hardware, Drivers, Services, Signatures, & Read-Only Catalog Commands:**
   - `bintra_registry_audit` (`reg-audit [--domain ...]`)
   - `bintra_hardware_audit` (`hw-audit [--problems-only]`)
   - `bintra_driver_audit` (`driver-audit`)
   - `bintra_service_audit` (`service-audit`)
+  - `sig-verify <file_path>` (Cryptographic signature verification: Embedded Authenticode & Security Catalogs `.cat`)
+  - `sig-audit <dir_path> [--pattern <pat>] [--recursive] [--limit <n>]` (Bulk directory digital trust triage)
   - `bintra_win_catalog_cmd` (`win-cmd [command_id]`)
 
 > [!NOTE]

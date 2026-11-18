@@ -68,6 +68,9 @@ from .device_intelligence import (
     DeviceManagerInspector
 )
 
+# Signature & Digital Trust Intelligence
+from .signature_intelligence import WindowsSignatureIntelligence
+
 # Evidence Graph & Causality Engine Submodule (Phase 4)
 from .evidence_engine import (
     EvidenceGraph,
@@ -127,5 +130,7 @@ __all__ = [
     "DeviceIdentity",
     "DriverPackageInventory",
     "DriverMatcher",
-    "DeviceManagerInspector"
+    "DeviceManagerInspector",
+    # Signature & Digital Trust Intelligence
+    "WindowsSignatureIntelligence"
 ]

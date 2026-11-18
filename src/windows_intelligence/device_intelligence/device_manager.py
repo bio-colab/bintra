@@ -442,6 +442,19 @@ class DeviceManagerInspector:
         driver_info = cls._get_driver_registry_info(target.get("driver_key"))
         c_name = target.get("class") or "Other"
 
+        # Check driver binary signature if service exists on Windows
+        driver_sig = None
+        svc = target.get("service")
+        if svc and cls._is_windows():
+            sys_root = os.environ.get("SystemRoot", r"C:\Windows")
+            sys_file = os.path.join(sys_root, "System32", "drivers", f"{svc}.sys")
+            if os.path.exists(sys_file):
+                try:
+                    from windows_intelligence.signature_intelligence import WindowsSignatureIntelligence
+                    driver_sig = WindowsSignatureIntelligence.verify_file(sys_file, check_catalog=True)
+                except Exception:
+                    pass
+
         return {
             "status": "success",
             "platform": sys.platform,
@@ -477,6 +490,7 @@ class DeviceManagerInspector:
                     "matching_device_id": driver_info.get("matching_device_id"),
                     "driver_desc": driver_info.get("driver_desc"),
                     "driver_key": target.get("driver_key"),
+                    "signature": driver_sig,
                 },
                 "hardware_ids": {
                     "primary_hardware_id": target.get("hardware_id"),

@@ -1595,6 +1595,13 @@ class BintraMcpServer:
         if name == "bintra_inspect_binary":
             path = args["file_path"]
             res = BinaryFormatInspector.inspect(path)
+            # Enrich with Windows Signature Intelligence (Dual Authenticode & Catalog)
+            try:
+                from windows_intelligence import WindowsSignatureIntelligence
+                sig_info = WindowsSignatureIntelligence.verify_file(path, check_catalog=True)
+                res["security_authenticode"] = sig_info
+            except Exception:
+                pass
             max_exports = args.get("max_exports")
             if "exports" in res and "functions" in res["exports"]:
                 all_funcs = res["exports"]["functions"]

@@ -174,9 +174,9 @@ class TestWindowsSignatureIntelligence(unittest.TestCase):
             file1 = os.path.join(tmp_dir, "test1.exe")
             file2 = os.path.join(tmp_dir, "test2.dll")
             with open(file1, "wb") as f:
-                f.write(b"MZ\x00" * 100)
+                f.write(b"MZ\x90\x00" + b"\x00" * 512)
             with open(file2, "wb") as f:
-                f.write(b"MZ\x00" * 100)
+                f.write(b"MZ\x90\x00" + b"\x00" * 512)
 
             audit = self.sig_intel.audit_directory(tmp_dir, pattern="*.*", recursive=False)
             self.assertEqual(audit["status"], "ok")
@@ -373,7 +373,7 @@ class TestWindowsSignatureIntelligence(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             file1 = os.path.join(tmp_dir, "test1.sys")
             with open(file1, "wb") as f:
-                f.write(b"MZ\x00" * 50)
+                f.write(b"MZ\x90\x00" + b"\x00" * 512)
 
             f = io.StringIO()
             with redirect_stdout(f):

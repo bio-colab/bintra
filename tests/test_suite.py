@@ -1935,20 +1935,22 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         """Verifies 5MB output truncation guard in CommandExecutor."""
         from windows_intelligence.command_engine import CommandExecutor
         from unittest.mock import patch
-        import subprocess
 
-        large_output_str = "A" * (6 * 1024 * 1024)
-        mock_proc = subprocess.CompletedProcess(
-            args=["cmd.exe", "/c", "ver"],
-            returncode=0,
-            stdout=large_output_str,
-            stderr=""
-        )
+        fake_run = {
+            "status": "output_limit_exceeded",
+            "exit_code": -9,
+            "stdout": "A" * (5 * 1024 * 1024),
+            "stderr": "",
+            "stdout_truncated": True,
+            "stderr_truncated": False,
+            "output_limit_exceeded": True,
+            "error": "Command output exceeded streaming safety limit.",
+        }
 
-        with patch("subprocess.run", return_value=mock_proc):
+        with patch("security.safe_subprocess.SafeSubprocessBroker.run_bounded_process", return_value=fake_run):
             res = CommandExecutor.execute("os_ver")
-            self.assertEqual(res["status"], "success")
             self.assertTrue(res["is_truncated"])
+            self.assertEqual(res["subprocess_status"], "output_limit_exceeded")
 
     @unittest.skipUnless(sys.platform == 'win32', "Requires Windows NT host")
     def test_command_executor_sc_query_arguments(self):

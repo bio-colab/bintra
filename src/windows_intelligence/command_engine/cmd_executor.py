@@ -125,57 +125,70 @@ class CommandExecutor:
                 "decision": "DENY"
             }
 
+        from security.safe_subprocess import SafeSubprocessBroker
+
+        MAX_OUTPUT_BYTES = 5 * 1024 * 1024  # 5 MB streaming ceiling
+        MAX_STDERR_BYTES = 1 * 1024 * 1024  # 1 MB streaming ceiling
         start_time = time.time()
         try:
-            res = subprocess.run(
-                cmd_vector,
-                capture_output=True,
-                text=True,
+            run_res = SafeSubprocessBroker.run_bounded_process(
+                argv=cmd_vector,
                 timeout=spec.timeout_seconds,
-                shell=False
+                max_stdout_bytes=MAX_OUTPUT_BYTES,
+                max_stderr_bytes=MAX_STDERR_BYTES,
+                terminate_on_limit=True,
             )
             elapsed_ms = round((time.time() - start_time) * 1000, 2)
+            sub_status = run_res.get("status", "error")
 
-            if res.returncode != 0 and not res.stdout:
+            if sub_status == "timeout":
                 return {
                     "status": "error",
+                    "subprocess_status": "timeout",
                     "command_id": command_id,
-                    "exit_code": res.returncode,
-                    "error": res.stderr.strip() or "Command execution returned non-zero exit code without stdout."
+                    "exit_code": run_res.get("exit_code"),
+                    "stderr": run_res.get("stderr", ""),
+                    "error": f"Execution timed out after {spec.timeout_seconds} seconds.",
+                }
+            if sub_status == "output_limit_exceeded":
+                return {
+                    "status": "error",
+                    "subprocess_status": "output_limit_exceeded",
+                    "command_id": command_id,
+                    "exit_code": run_res.get("exit_code"),
+                    "is_truncated": True,
+                    "stderr": run_res.get("stderr", ""),
+                    "error": run_res.get("error", "Command output exceeded streaming safety limit."),
+                }
+            if sub_status != "success":
+                return {
+                    "status": "error",
+                    "subprocess_status": sub_status,
+                    "command_id": command_id,
+                    "exit_code": run_res.get("exit_code"),
+                    "stderr": run_res.get("stderr", ""),
+                    "error": run_res.get("error") or f"Command exited with status {run_res.get('exit_code')}.",
                 }
 
-            # 6. Parse Output into Typed Schema (with 5MB output guard)
-            stdout_text = res.stdout
-            MAX_OUTPUT_BYTES = 5 * 1024 * 1024  # 5 MB
-            is_truncated = False
-            if len(stdout_text.encode('utf-8', errors='ignore')) > MAX_OUTPUT_BYTES:
-                stdout_text = stdout_text[:MAX_OUTPUT_BYTES] + "\n... [OUTPUT TRUNCATED AT 5MB SAFETY LIMIT]"
-                is_truncated = True
-
+            stdout_text = run_res.get("stdout", "")
             parsed_data = OutputParsers.dispatch_parser(spec.parser_name, stdout_text)
 
             return {
                 "status": "success",
+                "subprocess_status": "success",
                 "command_id": command_id,
                 "schema": spec.output_schema,
                 "executable": binary_path,
                 "arguments": list(spec.fixed_arguments) + validated_extra,
-                "exit_code": res.returncode,
+                "exit_code": run_res.get("exit_code", 0),
                 "duration_ms": elapsed_ms,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "is_truncated": is_truncated,
-                "data": parsed_data
-            }
-
-        except subprocess.TimeoutExpired:
-            return {
-                "status": "error",
-                "command_id": command_id,
-                "error": f"Execution timed out after {spec.timeout_seconds} seconds."
+                "is_truncated": False,
+                "data": parsed_data,
             }
         except Exception as e:
             return {
                 "status": "error",
                 "command_id": command_id,
-                "error": f"Execution failed with unexpected exception: {str(e)}"
+                "error": f"Execution failed with unexpected exception: {str(e)}",
             }

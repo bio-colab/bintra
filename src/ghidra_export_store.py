@@ -64,34 +64,75 @@ class GhidraExportStore:
             return cls(in_memory_dict=path)
 
         path_str = str(path)
-        if not os.path.exists(path_str):
+        can_source = cls._authorize_source_read(path_str, operation="from_path_read")
+        if not os.path.exists(can_source):
             raise FileNotFoundError(f"Ghidra export file not found: {path_str}")
 
-        suffix = Path(path_str).suffix.lower()
+        suffix = Path(can_source).suffix.lower()
 
         # 1. Direct SQLite database
         if suffix in (".db", ".sqlite", ".sqlite3"):
-            return cls(db_path=path_str, source_path=path_str)
+            return cls(db_path=can_source, source_path=can_source)
 
         # 2. JSON Lines (.jsonl)
         if suffix == ".jsonl":
-            cache_db = cls._get_or_build_cache(path_str, is_jsonl=True)
+            cache_db = cls._get_or_build_cache(can_source, is_jsonl=True)
             if cache_db:
-                return cls(db_path=cache_db, source_path=path_str)
-            # Fallback: parse into memory if cache creation failed
-            return cls(in_memory_dict=cls._read_jsonl_to_dict(path_str), source_path=path_str)
+                return cls(db_path=cache_db, source_path=can_source)
+            # Safe operational fallback: source read was already authorized above
+            return cls(in_memory_dict=cls._read_jsonl_to_dict(can_source), source_path=can_source)
 
         # 3. Standard JSON (.json)
-        file_size = os.path.getsize(path_str)
+        file_size = os.path.getsize(can_source)
         if file_size >= SQLITE_AUTO_INGEST_THRESHOLD_BYTES:
-            cache_db = cls._get_or_build_cache(path_str, is_jsonl=False)
+            cache_db = cls._get_or_build_cache(can_source, is_jsonl=False)
             if cache_db:
-                return cls(db_path=cache_db, source_path=path_str)
+                return cls(db_path=cache_db, source_path=can_source)
 
-        # Fast direct load for small JSON or when cache is not needed
-        with open(path_str, "r", encoding="utf-8", errors="replace") as f:
+        # Fast direct load for small JSON or operational cache fallback (source already authorized)
+        with open(can_source, "r", encoding="utf-8", errors="replace") as f:
             data = json.load(f)
-        return cls(in_memory_dict=data, source_path=path_str)
+        return cls(in_memory_dict=data, source_path=can_source)
+
+    @classmethod
+    def _load_security_kernel(cls):
+        """Imports Security Kernel primitives fail-closed."""
+        try:
+            from security import (
+                ExecutionGuard,
+                Capability,
+                SafeFileAccess,
+                SecurityViolationError,
+                PathIdentity,
+            )
+            return ExecutionGuard, Capability, SafeFileAccess, SecurityViolationError, PathIdentity
+        except ImportError as imp_err:
+            raise RuntimeError(
+                f"SECURITY_KERNEL_UNAVAILABLE: Refusing unmediated GhidraExportStore access: {imp_err}"
+            ) from imp_err
+
+    @classmethod
+    def _authorize_source_read(cls, source_path: str, operation: str = "read_export") -> str:
+        """Validates and authorizes read access to a Ghidra export source via ExecutionGuard."""
+        ExecutionGuard, Capability, _, _, PathIdentity = cls._load_security_kernel()
+        ExecutionGuard.request_access(
+            component="ghidra_export_store",
+            operation=operation,
+            target=source_path,
+            capability=Capability.FILE_READ,
+            access_mode="READ",
+        )
+        return PathIdentity.canonicalize(source_path)
+
+    @staticmethod
+    def _cleanup_sqlite_artifacts(db_path: str) -> None:
+        """Removes a temporary SQLite database file and its journal/WAL/SHM sidecars."""
+        for candidate in (db_path, f"{db_path}-wal", f"{db_path}-shm", f"{db_path}-journal"):
+            if os.path.exists(candidate):
+                try:
+                    os.remove(candidate)
+                except OSError:
+                    pass
 
     @classmethod
     def _get_cache_dir(cls) -> str:
@@ -149,20 +190,24 @@ class GhidraExportStore:
                 except OSError:
                     pass
 
-        # Build new cache
+        # Build new cache; security rejections and kernel failures MUST propagate (never fall back)
+        _, _, _, SecurityViolationError, _ = cls._load_security_kernel()
         try:
-            cls.ingest_to_sqlite(source_path, cache_path, is_jsonl=is_jsonl)
+            cls.ingest_to_sqlite(source_path, cache_path, is_jsonl=is_jsonl, overwrite=True)
             return cache_path
-        except Exception:
-            # On ingestion failure (e.g. disk full, permission), return None for graceful fallback
+        except (SecurityViolationError, RuntimeError):
+            raise
+        except (sqlite3.Error, OSError):
+            # Ordinary operational/storage failure only; caller already authorized source read
             return None
 
     @classmethod
     def _read_jsonl_to_dict(cls, path_str: str) -> Dict[str, Any]:
-        """Reads a .jsonl file into a legacy dictionary structure."""
+        """Reads a .jsonl file into a legacy dictionary structure under ExecutionGuard mediation."""
+        can_source = cls._authorize_source_read(path_str, operation="read_jsonl_export")
         funcs = []
         meta = {}
-        with open(path_str, "r", encoding="utf-8", errors="replace") as f:
+        with open(can_source, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -177,37 +222,56 @@ class GhidraExportStore:
         return res
 
     @classmethod
-    def ingest_to_sqlite(cls, source_path: str, target_db_path: str, is_jsonl: bool = False) -> None:
+    def ingest_to_sqlite(
+        cls,
+        source_path: str,
+        target_db_path: str,
+        is_jsonl: bool = False,
+        overwrite: bool = False,
+    ) -> None:
         """
         Surgically ingests a Ghidra .json or .jsonl export into an indexed SQLite database.
-        Uses in-memory journaling and chunked batch transactions with guaranteed handle cleanup.
-        Mediated by ExecutionGuard for Capability.WORKSPACE_WRITE.
+        Enforces fail-closed ExecutionGuard mediation for both source read and workspace write,
+        preserves pre-existing unowned files unless overwrite=True, stages into a unique
+        temporary SQLite database inside the authorized workspace, and publishes atomically.
         """
-        try:
-            from security import ExecutionGuard, Capability, SafeFileAccess, SecurityViolationError
-        except ImportError as imp_err:
-            raise RuntimeError(
-                f"SECURITY_KERNEL_UNAVAILABLE: Refusing unmediated SQLite ingestion: {imp_err}"
-            ) from imp_err
+        ExecutionGuard, Capability, _, SecurityViolationError, PathIdentity = cls._load_security_kernel()
 
+        can_source = cls._authorize_source_read(source_path, operation="ingest_to_sqlite_read")
         ExecutionGuard.request_access(
             component="ghidra_export_store",
             operation="ingest_to_sqlite",
             target=target_db_path,
             capability=Capability.WORKSPACE_WRITE,
-            access_mode="WRITE"
+            access_mode="WRITE",
         )
-        scope = ExecutionGuard.get_current_scope()
-        if scope:
-            scope.record_session_file(target_db_path)
-        if os.path.exists(target_db_path):
-            try:
-                SafeFileAccess.delete_workspace_file(target_db_path)
-            except SecurityViolationError:
-                raise
 
-        con = sqlite3.connect(target_db_path)
+        can_target = PathIdentity.canonicalize(target_db_path)
+        scope = ExecutionGuard.get_current_scope()
+
+        # Check pre-existing file provenance BEFORE any mutation or session registration
+        is_session_owned = bool(scope and scope.is_session_file(can_target))
+        if os.path.exists(can_target):
+            try:
+                existing_size = os.path.getsize(can_target)
+            except OSError:
+                existing_size = 1
+            if existing_size > 0 and not is_session_owned and not overwrite:
+                raise SecurityViolationError(
+                    f"PREEXISTING_FILE_PROTECTED: Refusing to overwrite pre-existing file '{can_target}' "
+                    f"not owned by the current session."
+                )
+
+        parent_dir = os.path.dirname(can_target) or "."
+        os.makedirs(parent_dir, exist_ok=True)
+
+        # Stage into a unique temporary file in the same authorized workspace directory
+        fd, staging_db_path = tempfile.mkstemp(prefix=".bintra_sqlite_", suffix=".tmp.db", dir=parent_dir)
+        os.close(fd)
+
+        con = sqlite3.connect(staging_db_path)
         try:
+            source_path = can_source
             cur = con.cursor()
             cur.execute("PRAGMA journal_mode = MEMORY;")
             cur.execute("PRAGMA synchronous = OFF;")
@@ -397,22 +461,47 @@ class GhidraExportStore:
 
             con.commit()
             cur.close()
-        except Exception:
-            try:
-                con.close()
-            except Exception:
-                pass
-            if os.path.exists(target_db_path):
+            con.close()
+            con = None
+
+            # Clean up any temporary sidecar files before atomic publication
+            for sidecar in (f"{staging_db_path}-wal", f"{staging_db_path}-shm", f"{staging_db_path}-journal"):
+                if os.path.exists(sidecar):
+                    try:
+                        os.remove(sidecar)
+                    except OSError:
+                        pass
+
+            # Re-verify provenance right before publication to reduce TOCTOU window
+            if os.path.exists(can_target) and not is_session_owned and not overwrite:
                 try:
-                    os.remove(target_db_path)
+                    if os.path.getsize(can_target) > 0:
+                        raise SecurityViolationError(
+                            f"PREEXISTING_FILE_PROTECTED: Destination '{can_target}' was populated concurrently."
+                        )
+                except OSError:
+                    pass
+
+            os.replace(staging_db_path, can_target)
+            if scope:
+                scope.record_session_file(can_target)
+        except Exception:
+            if con is not None:
+                try:
+                    con.close()
                 except Exception:
                     pass
+            cls._cleanup_sqlite_artifacts(staging_db_path)
             raise
         finally:
-            try:
-                con.close()
-            except Exception:
-                pass
+            if con is not None:
+                try:
+                    con.close()
+                except Exception:
+                    pass
+            # Ensure staging temp file is never left behind on any exit path
+            if os.path.exists(staging_db_path):
+                cls._cleanup_sqlite_artifacts(staging_db_path)
 
     def _get_connection(self) -> sqlite3.Connection:
         if self._conn is None:

@@ -121,6 +121,80 @@ CERT_QUERY_FORMAT_FLAG_BINARY = 1 << 1
 CERT_NAME_SIMPLE_DISPLAY_TYPE = 4
 CERT_NAME_ISSUER_FLAG = 0x1
 
+# CMS / X.509 Signer & EKU Constants
+X509_ASN_ENCODING = 0x00000001
+PKCS_7_ASN_ENCODING = 0x00010000
+CMSG_SIGNER_INFO_PARAM = 6
+CERT_FIND_SUBJECT_CERT = 0x000B0000
+ERROR_NOT_FOUND = 1168
+ERROR_NO_MORE_ITEMS = 259
+MAX_CATALOG_CANDIDATES = 64
+
+# Authoritative Authenticode / WHQL / Timestamp OIDs
+OID_WHQL_CRYPTO = "1.3.6.1.4.1.311.10.3.5"       # Windows Hardware Driver Verification (WHQL)
+OID_CODE_SIGNING = "1.3.6.1.5.5.7.3.3"           # id-kp-codeSigning
+OID_PKCS9_COUNTERSIGN = "1.2.840.113549.1.9.6"   # szOID_RSA_counterSign
+OID_RFC3161_TIMESTAMP = "1.3.6.1.4.1.311.3.3.1"  # szOID_RFC3161_counterSign
+
+
+class CRYPT_INTEGER_BLOB(ctypes.Structure):
+    _fields_ = [
+        ("cbData", wintypes.DWORD),
+        ("pbData", ctypes.c_void_p),
+    ]
+
+
+class CRYPT_ALGORITHM_IDENTIFIER(ctypes.Structure):
+    _fields_ = [
+        ("pszObjId", ctypes.c_char_p),
+        ("Parameters", CRYPT_INTEGER_BLOB),
+    ]
+
+
+class CRYPT_ATTRIBUTE(ctypes.Structure):
+    _fields_ = [
+        ("pszObjId", ctypes.c_char_p),
+        ("cValue", wintypes.DWORD),
+        ("rgValue", ctypes.c_void_p),
+    ]
+
+
+class CRYPT_ATTRIBUTES(ctypes.Structure):
+    _fields_ = [
+        ("cAttr", wintypes.DWORD),
+        ("rgAttr", ctypes.POINTER(CRYPT_ATTRIBUTE)),
+    ]
+
+
+class CMSG_SIGNER_INFO(ctypes.Structure):
+    _fields_ = [
+        ("dwVersion", wintypes.DWORD),
+        ("Issuer", CRYPT_INTEGER_BLOB),
+        ("SerialNumber", CRYPT_INTEGER_BLOB),
+        ("HashAlgorithm", CRYPT_ALGORITHM_IDENTIFIER),
+        ("HashEncryptionAlgorithm", CRYPT_ALGORITHM_IDENTIFIER),
+        ("EncryptedHash", CRYPT_INTEGER_BLOB),
+        ("AuthAttrs", CRYPT_ATTRIBUTES),
+        ("UnauthAttrs", CRYPT_ATTRIBUTES),
+    ]
+
+
+class CERT_INFO_MINIMAL(ctypes.Structure):
+    """Minimal CERT_INFO header matching WinCrypt.h up through Subject for CERT_FIND_SUBJECT_CERT."""
+    _fields_ = [
+        ("dwVersion", wintypes.DWORD),
+        ("SerialNumber", CRYPT_INTEGER_BLOB),
+        ("SignatureAlgorithm", CRYPT_ALGORITHM_IDENTIFIER),
+        ("Issuer", CRYPT_INTEGER_BLOB),
+    ]
+
+
+class CTL_USAGE(ctypes.Structure):
+    _fields_ = [
+        ("cUsageIdentifier", wintypes.DWORD),
+        ("rgpszUsageIdentifier", ctypes.POINTER(ctypes.c_char_p)),
+    ]
+
 
 class WindowsSignatureIntelligence:
     """
@@ -184,7 +258,14 @@ class WindowsSignatureIntelligence:
         elif trust_stat == "REVOKED":
             risk_flags.append("REVOKED_CERTIFICATE_KNOWN_THREAT")
         elif trust_stat == "EXPIRED":
-            risk_flags.append("EXPIRED_WITHOUT_TRUSTED_TIMESTAMP")
+            if res.get("timestamp_status") == "MISSING":
+                risk_flags.append("EXPIRED_WITHOUT_TRUSTED_TIMESTAMP")
+            elif res.get("timestamp_status") == "INVALID":
+                risk_flags.append("EXPIRED_WITH_INVALID_TIMESTAMP")
+            else:
+                risk_flags.append("EXPIRED_CERTIFICATE_TIMESTAMP_UNVERIFIED")
+        elif trust_stat == "INVALID_TIMESTAMP":
+            risk_flags.append("INVALID_TIMESTAMP_COUNTERSIGNATURE")
         elif trust_stat == "UNTRUSTED_ROOT":
             risk_flags.append("SELF_SIGNED_OR_UNTRUSTED_ROOT_CA")
         elif trust_stat == "EXPLICIT_DISTRUST":
@@ -356,22 +437,37 @@ class WindowsSignatureIntelligence:
             wtd.dwStateAction = WTD_STATEACTION_CLOSE
             wt.WinVerifyTrust(None, ctypes.byref(_WINTRUST_ACTION_GENERIC_VERIFY_V2), ctypes.byref(wtd))
 
-        certs = cls._extract_win32_certificates(file_path, cr)
+        sig_info = cls._extract_win32_signer_and_certificates(file_path, cr)
+        certs = sig_info["certificate_chain"]
+        primary_signer = sig_info["primary_signer"]
+        attribution_method = sig_info["signer_attribution_method"]
+        ts_eval = cls._classify_timestamp_and_expiration(
+            raw_code=raw_code,
+            timestamp_present=sig_info["timestamp_present"],
+            cert_expired=sig_info.get("signer_cert_expired"),
+        )
 
         if raw_code == ERROR_SUCCESS:
-            signer = certs[0] if certs else {}
-            is_ms = any("microsoft" in str(c.get("subject", "")).lower() for c in certs)
+            signer_subj = str(primary_signer.get("subject", "")).lower()
+            signer_ekus = primary_signer.get("ekus", [])
+            is_ms = (attribution_method == "CMS_SIGNER_INFO_MATCH") and ("microsoft" in signer_subj)
+            is_whql = (attribution_method == "CMS_SIGNER_INFO_MATCH") and (OID_WHQL_CRYPTO in signer_ekus)
             return {
                 "signature_present": True,
                 "is_signed": True,
                 "is_verified": True,
                 "signature_type": "EMBEDDED_AUTHENTICODE",
                 "trust_status": "TRUSTED",
+                "trust_classification": "TRUSTED_EMBEDDED",
                 "win32_status_code": hex(raw_code),
                 "is_microsoft_system_binary": is_ms,
-                "is_whql_certified": any("windows hardware" in str(c.get("subject", "")).lower() for c in certs),
-                "primary_signer": signer,
+                "is_whql_certified": is_whql,
+                "signer_attribution_method": attribution_method,
+                "primary_signer": primary_signer,
                 "certificate_chain": certs,
+                "timestamp_present": sig_info["timestamp_present"],
+                "timestamp_status": ts_eval["timestamp_status"],
+                "expiration_status": ts_eval["expiration_status"],
                 "catalog_file": None,
                 "catalog_member_hash": None,
                 "notice": "Embedded Authenticode signature verified successfully against Windows Trust Store."
@@ -398,11 +494,16 @@ class WindowsSignatureIntelligence:
             "is_verified": False,
             "signature_type": "EMBEDDED_AUTHENTICODE" if has_sig else "NONE",
             "trust_status": trust_status,
+            "trust_classification": trust_status,
             "win32_status_code": hex(raw_code),
             "is_microsoft_system_binary": False,
             "is_whql_certified": False,
-            "primary_signer": certs[0] if certs else {},
+            "signer_attribution_method": attribution_method,
+            "primary_signer": primary_signer,
             "certificate_chain": certs,
+            "timestamp_present": sig_info["timestamp_present"],
+            "timestamp_status": ts_eval["timestamp_status"],
+            "expiration_status": ts_eval["expiration_status"],
             "catalog_file": None,
             "catalog_member_hash": None,
             "notice": cls._explain_win32_trust_error(raw_code)
@@ -446,7 +547,9 @@ class WindowsSignatureIntelligence:
         wt.CryptCATAdminCalcHashFromFileHandle.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p, wintypes.DWORD]
         wt.CryptCATAdminCalcHashFromFileHandle.restype = wintypes.BOOL
 
-        wt.CryptCATAdminEnumCatalogFromHash.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p]
+        wt.CryptCATAdminEnumCatalogFromHash.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p)
+        ]
         wt.CryptCATAdminEnumCatalogFromHash.restype = ctypes.c_void_p
 
         wt.CryptCATCatalogInfoFromContext.argtypes = [ctypes.c_void_p, ctypes.POINTER(CATALOG_INFO), wintypes.DWORD]
@@ -458,113 +561,276 @@ class WindowsSignatureIntelligence:
         wt.CryptCATAdminReleaseContext.argtypes = [ctypes.c_void_p, wintypes.DWORD]
         wt.CryptCATAdminReleaseContext.restype = wintypes.BOOL
 
+        has_sha256_api = (
+            hasattr(wt, "CryptCATAdminAcquireContext2")
+            and hasattr(wt, "CryptCATAdminCalcHashFromFileHandle2")
+        )
+        if has_sha256_api:
+            wt.CryptCATAdminAcquireContext2.argtypes = [
+                ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p, wintypes.LPCWSTR, ctypes.c_void_p, wintypes.DWORD
+            ]
+            wt.CryptCATAdminAcquireContext2.restype = wintypes.BOOL
+            wt.CryptCATAdminCalcHashFromFileHandle2.argtypes = [
+                ctypes.c_void_p, wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p, wintypes.DWORD
+            ]
+            wt.CryptCATAdminCalcHashFromFileHandle2.restype = wintypes.BOOL
+
         INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
         h_file = k32.CreateFileW(file_path, GENERIC_READ, FILE_SHARE_READ, None, OPEN_EXISTING, 0, None)
         if not h_file or h_file == INVALID_HANDLE_VALUE or h_file == -1:
-            return {"found_in_catalog": False}
+            return {"found_in_catalog": False, "catalog_enumeration_complete": False, "catalog_error": "CreateFileW failed"}
 
-        h_cat_admin = ctypes.c_void_p()
-        cat_admin_acquired = False
-        catalog_path = None
-        hash_hex = ""
-        cat_raw_code = TRUST_E_NOSIGNATURE
+        selected_catalog_path: Optional[str] = None
+        selected_raw_code: int = TRUST_E_NOSIGNATURE
+        selected_hash_hex: str = ""
+        selected_algo: str = "SHA1"
+        candidates_checked: List[Dict[str, Any]] = []
+        enumeration_complete = True
+        enumeration_error: Optional[int] = None
+
+        algos_to_try = (["SHA256", "SHA1"] if has_sha256_api else ["SHA1"])
 
         try:
-            if not wt.CryptCATAdminAcquireContext(ctypes.byref(h_cat_admin), None, 0):
-                return {"found_in_catalog": False}
-            cat_admin_acquired = True
-
-            hash_size = wintypes.DWORD(0)
-            wt.CryptCATAdminCalcHashFromFileHandle(h_file, ctypes.byref(hash_size), None, 0)
-            if hash_size.value == 0:
-                return {"found_in_catalog": False}
-
-            hash_buf = (wintypes.BYTE * hash_size.value)()
-            if not wt.CryptCATAdminCalcHashFromFileHandle(h_file, ctypes.byref(hash_size), hash_buf, 0):
-                return {"found_in_catalog": False}
-
-            hash_hex = bytes(hash_buf).hex().upper()
-
-            h_cat_info = wt.CryptCATAdminEnumCatalogFromHash(h_cat_admin, hash_buf, hash_size.value, 0, None)
-            if h_cat_info:
+            for algo in algos_to_try:
+                h_cat_admin = ctypes.c_void_p()
+                cat_admin_acquired = False
+                active_cat_ctx = None
                 try:
-                    ci = CATALOG_INFO()
-                    ci.cbStruct = ctypes.sizeof(CATALOG_INFO)
-                    if wt.CryptCATCatalogInfoFromContext(h_cat_info, ctypes.byref(ci), 0):
-                        catalog_path = str(ci.wszCatalogFile)
+                    if algo == "SHA256":
+                        ok_ctx = wt.CryptCATAdminAcquireContext2(ctypes.byref(h_cat_admin), None, "SHA256", None, 0)
+                    else:
+                        ok_ctx = wt.CryptCATAdminAcquireContext(ctypes.byref(h_cat_admin), None, 0)
+                    if not ok_ctx:
+                        continue
+                    cat_admin_acquired = True
+
+                    hash_size = wintypes.DWORD(0)
+                    if algo == "SHA256":
+                        wt.CryptCATAdminCalcHashFromFileHandle2(h_cat_admin, h_file, ctypes.byref(hash_size), None, 0)
+                    else:
+                        wt.CryptCATAdminCalcHashFromFileHandle(h_file, ctypes.byref(hash_size), None, 0)
+                    if hash_size.value == 0:
+                        continue
+
+                    hash_buf = (wintypes.BYTE * hash_size.value)()
+                    if algo == "SHA256":
+                        ok_hash = wt.CryptCATAdminCalcHashFromFileHandle2(
+                            h_cat_admin, h_file, ctypes.byref(hash_size), hash_buf, 0
+                        )
+                    else:
+                        ok_hash = wt.CryptCATAdminCalcHashFromFileHandle(
+                            h_file, ctypes.byref(hash_size), hash_buf, 0
+                        )
+                    if not ok_hash:
+                        continue
+
+                    hash_hex = bytes(hash_buf).hex().upper()
+
+                    # Enumerate ALL matching catalogs by advancing phPrevCatInfo
+                    prev_cat = ctypes.c_void_p(0)
+                    for _ in range(MAX_CATALOG_CANDIDATES):
+                        h_cat_info = wt.CryptCATAdminEnumCatalogFromHash(
+                            h_cat_admin, hash_buf, hash_size.value, 0, ctypes.byref(prev_cat)
+                        )
+                        if not h_cat_info:
+                            # Previous context (if any) was released by EnumCatalogFromHash
+                            active_cat_ctx = None
+                            last_err = ctypes.get_last_error() if hasattr(ctypes, "get_last_error") else 0
+                            if last_err not in (0, ERROR_NOT_FOUND, ERROR_NO_MORE_ITEMS):
+                                enumeration_complete = False
+                                enumeration_error = last_err
+                            break
+
+                        active_cat_ctx = h_cat_info
+                        prev_cat = ctypes.c_void_p(h_cat_info)
+
+                        ci = CATALOG_INFO()
+                        ci.cbStruct = ctypes.sizeof(CATALOG_INFO)
+                        cat_path = None
+                        if wt.CryptCATCatalogInfoFromContext(h_cat_info, ctypes.byref(ci), 0):
+                            cat_path = str(ci.wszCatalogFile)
+
+                        if not cat_path or not os.path.exists(cat_path):
+                            candidates_checked.append({
+                                "catalog_file": cat_path,
+                                "hash_algorithm": algo,
+                                "exists_on_disk": False,
+                                "is_verified": False,
+                                "trust_status": "VERIFICATION_ERROR",
+                            })
+                            continue
+
+                        # Cryptographically verify file membership and catalog signature via WinVerifyTrust
+                        cat_info = WINTRUST_CATALOG_INFO()
+                        cat_info.cbStruct = ctypes.sizeof(WINTRUST_CATALOG_INFO)
+                        cat_info.dwCatalogVersion = 0
+                        cat_info.pcwszCatalogFilePath = cat_path
+                        cat_info.pcwszMemberTag = hash_hex
+                        cat_info.pcwszMemberFilePath = file_path
+                        cat_info.hMemberFile = h_file
+                        cat_info.pbCalculatedMessageDigest = ctypes.cast(hash_buf, ctypes.c_void_p)
+                        cat_info.cbCalculatedMessageDigest = hash_size.value
+                        cat_info.pcCatalogContext = None
+                        cat_info.hCatAdmin = h_cat_admin
+
+                        wtd = WINTRUST_DATA()
+                        wtd.cbStruct = ctypes.sizeof(WINTRUST_DATA)
+                        wtd.dwUIChoice = WTD_UI_NONE
+                        wtd.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN if verify_revocation else WTD_REVOKE_NONE
+                        wtd.dwUnionChoice = WTD_CHOICE_CATALOG
+                        wtd.pFile = ctypes.cast(ctypes.pointer(cat_info), ctypes.c_void_p)
+                        wtd.dwStateAction = WTD_STATEACTION_VERIFY
+                        wtd.dwProvFlags = WTD_CACHE_ONLY_URL_RETRIEVAL if not verify_revocation else 0
+                        if not verify_revocation:
+                            wtd.dwProvFlags |= WTD_REVOCATION_CHECK_NONE
+
+                        try:
+                            cat_status = wt.WinVerifyTrust(
+                                None, ctypes.byref(_WINTRUST_ACTION_GENERIC_VERIFY_V2), ctypes.byref(wtd)
+                            )
+                            cand_raw_code = cat_status & 0xFFFFFFFF
+                        finally:
+                            wtd.dwStateAction = WTD_STATEACTION_CLOSE
+                            wt.WinVerifyTrust(
+                                None, ctypes.byref(_WINTRUST_ACTION_GENERIC_VERIFY_V2), ctypes.byref(wtd)
+                            )
+
+                        cand_status = cls._classify_win32_trust_status(cand_raw_code)
+                        cand_verified = (cand_raw_code == ERROR_SUCCESS)
+                        candidates_checked.append({
+                            "catalog_file": cat_path,
+                            "hash_algorithm": algo,
+                            "exists_on_disk": True,
+                            "win32_status_code": hex(cand_raw_code),
+                            "trust_status": cand_status,
+                            "is_verified": cand_verified,
+                        })
+
+                        if selected_catalog_path is None or cand_verified:
+                            selected_catalog_path = cat_path
+                            selected_raw_code = cand_raw_code
+                            selected_hash_hex = hash_hex
+                            selected_algo = algo
+
+                        if cand_verified:
+                            # Trusted catalog found; release active context and stop enumeration
+                            wt.CryptCATAdminReleaseCatalogContext(h_cat_admin, active_cat_ctx, 0)
+                            active_cat_ctx = None
+                            break
+                    else:
+                        enumeration_complete = False
                 finally:
-                    wt.CryptCATAdminReleaseCatalogContext(h_cat_admin, h_cat_info, 0)
+                    if active_cat_ctx is not None and cat_admin_acquired:
+                        wt.CryptCATAdminReleaseCatalogContext(h_cat_admin, active_cat_ctx, 0)
+                    if cat_admin_acquired:
+                        wt.CryptCATAdminReleaseContext(h_cat_admin, 0)
 
-            if not catalog_path or not os.path.exists(catalog_path):
-                return {"found_in_catalog": False}
-
-            # Cryptographically verify file membership in the catalog using WinVerifyTrust with WINTRUST_CATALOG_INFO
-            cat_info = WINTRUST_CATALOG_INFO()
-            cat_info.cbStruct = ctypes.sizeof(WINTRUST_CATALOG_INFO)
-            cat_info.dwCatalogVersion = 0
-            cat_info.pcwszCatalogFilePath = catalog_path
-            cat_info.pcwszMemberTag = hash_hex
-            cat_info.pcwszMemberFilePath = file_path
-            cat_info.hMemberFile = h_file
-            cat_info.pbCalculatedMessageDigest = ctypes.cast(hash_buf, ctypes.c_void_p)
-            cat_info.cbCalculatedMessageDigest = hash_size.value
-            cat_info.pcCatalogContext = None
-            cat_info.hCatAdmin = h_cat_admin
-
-            wtd = WINTRUST_DATA()
-            wtd.cbStruct = ctypes.sizeof(WINTRUST_DATA)
-            wtd.dwUIChoice = WTD_UI_NONE
-            wtd.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN if verify_revocation else WTD_REVOKE_NONE
-            wtd.dwUnionChoice = WTD_CHOICE_CATALOG
-            wtd.pFile = ctypes.cast(ctypes.pointer(cat_info), ctypes.c_void_p)
-            wtd.dwStateAction = WTD_STATEACTION_VERIFY
-            wtd.dwProvFlags = WTD_CACHE_ONLY_URL_RETRIEVAL if not verify_revocation else 0
-            if not verify_revocation:
-                wtd.dwProvFlags |= WTD_REVOCATION_CHECK_NONE
-
-            try:
-                cat_status = wt.WinVerifyTrust(None, ctypes.byref(_WINTRUST_ACTION_GENERIC_VERIFY_V2), ctypes.byref(wtd))
-                cat_raw_code = cat_status & 0xFFFFFFFF
-            finally:
-                wtd.dwStateAction = WTD_STATEACTION_CLOSE
-                wt.WinVerifyTrust(None, ctypes.byref(_WINTRUST_ACTION_GENERIC_VERIFY_V2), ctypes.byref(wtd))
+                if selected_raw_code == ERROR_SUCCESS:
+                    break
         finally:
-            if cat_admin_acquired:
-                wt.CryptCATAdminReleaseContext(h_cat_admin, 0)
             k32.CloseHandle(h_file)
 
-        # Extract certificates from the catalog file itself
-        cat_certs = cls._extract_win32_certificates(catalog_path, cr)
-        is_trusted = (cat_raw_code == ERROR_SUCCESS)
-        is_ms = is_trusted and any("microsoft" in str(c.get("subject", "")).lower() for c in cat_certs)
-        is_whql = is_trusted and any("windows hardware" in str(c.get("subject", "")).lower() for c in cat_certs)
+        if not selected_catalog_path:
+            return {
+                "found_in_catalog": False,
+                "catalog_membership_found": False,
+                "catalog_verified": False,
+                "catalog_candidates_checked": len(candidates_checked),
+                "catalog_candidates": candidates_checked,
+                "catalog_enumeration_complete": enumeration_complete,
+                "catalog_enumeration_error": hex(enumeration_error) if enumeration_error else None,
+            }
 
-        trust_status = cls._classify_win32_trust_status(cat_raw_code)
+        # Extract CMS signer & certificate chain from the selected catalog file
+        sig_info = cls._extract_win32_signer_and_certificates(selected_catalog_path, cr)
+        cat_certs = sig_info["certificate_chain"]
+        primary_signer = sig_info["primary_signer"]
+        attribution_method = sig_info["signer_attribution_method"]
+        ts_eval = cls._classify_timestamp_and_expiration(
+            raw_code=selected_raw_code,
+            timestamp_present=sig_info["timestamp_present"],
+            cert_expired=sig_info.get("signer_cert_expired"),
+        )
+
+        is_trusted = (selected_raw_code == ERROR_SUCCESS)
+        signer_subj = str(primary_signer.get("subject", "")).lower()
+        signer_ekus = primary_signer.get("ekus", [])
+        is_ms = is_trusted and (attribution_method == "CMS_SIGNER_INFO_MATCH") and ("microsoft" in signer_subj)
+        is_whql = is_trusted and (attribution_method == "CMS_SIGNER_INFO_MATCH") and (OID_WHQL_CRYPTO in signer_ekus)
+
+        trust_status = cls._classify_win32_trust_status(selected_raw_code)
+        trust_classification = "TRUSTED_CATALOG" if is_trusted else trust_status
 
         return {
             "found_in_catalog": True,
+            "catalog_membership_found": True,
+            "catalog_verified": is_trusted,
+            "catalog_hash_algorithm": selected_algo,
+            "catalog_candidates_checked": len(candidates_checked),
+            "catalog_candidates": candidates_checked,
+            "catalog_enumeration_complete": enumeration_complete,
+            "catalog_enumeration_error": hex(enumeration_error) if enumeration_error else None,
             "signature_present": True,
             "is_signed": True,
             "is_verified": is_trusted,
             "signature_type": "SECURITY_CATALOG",
             "trust_status": trust_status,
-            "win32_status_code": hex(cat_raw_code),
-            "catalog_file": catalog_path,
-            "catalog_member_hash": hash_hex,
+            "trust_classification": trust_classification,
+            "win32_status_code": hex(selected_raw_code),
+            "catalog_file": selected_catalog_path,
+            "catalog_member_hash": selected_hash_hex,
             "is_microsoft_system_binary": is_ms,
             "is_whql_certified": is_whql,
-            "primary_signer": cat_certs[0] if cat_certs else {},
+            "signer_attribution_method": attribution_method,
+            "primary_signer": primary_signer,
             "certificate_chain": cat_certs,
+            "timestamp_present": sig_info["timestamp_present"],
+            "timestamp_status": ts_eval["timestamp_status"],
+            "expiration_status": ts_eval["expiration_status"],
             "notice": (
-                f"File signature and catalog membership cryptographically verified via Windows Security Catalog '{os.path.basename(catalog_path)}'."
-                if is_trusted else cls._explain_win32_trust_error(cat_raw_code)
+                f"File signature and catalog membership cryptographically verified via Windows Security Catalog '{os.path.basename(selected_catalog_path)}'."
+                if is_trusted else cls._explain_win32_trust_error(selected_raw_code)
             )
         }
 
     @classmethod
-    def _extract_win32_certificates(cls, file_path: str, cr) -> List[Dict[str, Any]]:
-        """Extracts X.509 certificate chain from PE or Catalog using Crypt32."""
+    def _extract_cert_ekus(cls, p_cert_context: Any, cr: Any) -> List[str]:
+        """Extracts Enhanced Key Usage (EKU) OIDs from a PCCERT_CONTEXT via CertGetEnhancedKeyUsage."""
+        ekus: List[str] = []
+        if not hasattr(cr, "CertGetEnhancedKeyUsage"):
+            return ekus
+        try:
+            cr.CertGetEnhancedKeyUsage.argtypes = [
+                ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD)
+            ]
+            cr.CertGetEnhancedKeyUsage.restype = wintypes.BOOL
+            cb_usage = wintypes.DWORD(0)
+            if not cr.CertGetEnhancedKeyUsage(p_cert_context, 0, None, ctypes.byref(cb_usage)) or cb_usage.value == 0:
+                return ekus
+            buf = ctypes.create_string_buffer(cb_usage.value)
+            if not cr.CertGetEnhancedKeyUsage(p_cert_context, 0, buf, ctypes.byref(cb_usage)):
+                return ekus
+            usage = CTL_USAGE.from_buffer(buf)
+            for idx in range(min(usage.cUsageIdentifier, 64)):
+                oid_raw = usage.rgpszUsageIdentifier[idx]
+                if oid_raw:
+                    ekus.append(oid_raw.decode("ascii", errors="replace"))
+        except Exception:
+            pass
+        return ekus
+
+    @classmethod
+    def _extract_win32_signer_and_certificates(cls, file_path: str, cr: Any) -> Dict[str, Any]:
+        """
+        Extracts the CMS SignerInfo-attributed signer certificate, certificate store entries,
+        EKU OIDs (including WHQL), and counter-signature timestamp presence via Crypt32.
+        Never selects an arbitrary store certificate as primary_signer.
+        """
         certs: List[Dict[str, Any]] = []
+        primary_signer: Dict[str, Any] = {}
+        signer_attribution_method = "UNRESOLVED_STORE_ONLY"
+        timestamp_present: Optional[bool] = None
+
         try:
             cr.CryptQueryObject.argtypes = [
                 wintypes.DWORD, wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
@@ -589,7 +855,13 @@ class WindowsSignatureIntelligence:
                 cr.CryptMsgClose.argtypes = [ctypes.c_void_p]
                 cr.CryptMsgClose.restype = wintypes.BOOL
         except Exception:
-            return certs
+            return {
+                "primary_signer": primary_signer,
+                "signer_attribution_method": signer_attribution_method,
+                "certificate_chain": certs,
+                "timestamp_present": timestamp_present,
+                "signer_cert_expired": None,
+            }
 
         h_store = ctypes.c_void_p()
         h_msg = ctypes.c_void_p()
@@ -611,37 +883,121 @@ class WindowsSignatureIntelligence:
             None
         )
 
+        def _read_cert_entry(p_ctx: Any, role: str = "STORE_CERT") -> Dict[str, Any]:
+            sub_buf = ctypes.create_unicode_buffer(256)
+            cr.CertGetNameStringW(p_ctx, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, None, sub_buf, 256)
+            subject = sub_buf.value
+
+            iss_buf = ctypes.create_unicode_buffer(256)
+            cr.CertGetNameStringW(p_ctx, CERT_NAME_SIMPLE_DISPLAY_TYPE, CERT_NAME_ISSUER_FLAG, None, iss_buf, 256)
+            issuer = iss_buf.value
+
+            is_self = (subject.strip() == issuer.strip() and len(subject.strip()) > 0)
+            ekus = cls._extract_cert_ekus(p_ctx, cr)
+            return {
+                "subject": subject,
+                "issuer": issuer,
+                "is_self_signed": is_self,
+                "role": "SELF_SIGNED_ROOT" if (role != "SIGNER" and is_self) else role,
+                "ekus": ekus,
+                "has_whql_eku": OID_WHQL_CRYPTO in ekus,
+                "has_code_signing_eku": OID_CODE_SIGNING in ekus,
+            }
+
         try:
             if not success or not h_store.value:
-                return certs
+                return {
+                    "primary_signer": primary_signer,
+                    "signer_attribution_method": signer_attribution_method,
+                    "certificate_chain": certs,
+                    "timestamp_present": timestamp_present,
+                    "signer_cert_expired": None,
+                }
 
+            # 1. Resolve actual CMS SignerInfo certificate and counter-signature attributes
+            if h_msg.value and hasattr(cr, "CryptMsgGetParam"):
+                try:
+                    cr.CryptMsgGetParam.argtypes = [
+                        ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD)
+                    ]
+                    cr.CryptMsgGetParam.restype = wintypes.BOOL
+                    cb_signer = wintypes.DWORD(0)
+                    if cr.CryptMsgGetParam(h_msg, CMSG_SIGNER_INFO_PARAM, 0, None, ctypes.byref(cb_signer)) and cb_signer.value >= ctypes.sizeof(CMSG_SIGNER_INFO):
+                        si_buf = ctypes.create_string_buffer(cb_signer.value)
+                        if cr.CryptMsgGetParam(h_msg, CMSG_SIGNER_INFO_PARAM, 0, si_buf, ctypes.byref(cb_signer)):
+                            signer_info = CMSG_SIGNER_INFO.from_buffer(si_buf)
+
+                            # Inspect UnauthAttrs for PKCS#9 or RFC 3161 timestamp counter-signatures
+                            ts_found = False
+                            unauth_count = min(signer_info.UnauthAttrs.cAttr, 64)
+                            if signer_info.UnauthAttrs.rgAttr:
+                                for a_idx in range(unauth_count):
+                                    attr_oid_raw = signer_info.UnauthAttrs.rgAttr[a_idx].pszObjId
+                                    if attr_oid_raw:
+                                        attr_oid = attr_oid_raw.decode("ascii", errors="replace")
+                                        if attr_oid in (OID_PKCS9_COUNTERSIGN, OID_RFC3161_TIMESTAMP):
+                                            ts_found = True
+                                            break
+                            timestamp_present = ts_found
+
+                            # Match signer certificate in store via Issuer + SerialNumber
+                            if hasattr(cr, "CertFindCertificateInStore"):
+                                cr.CertFindCertificateInStore.argtypes = [
+                                    ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
+                                    ctypes.c_void_p, ctypes.c_void_p
+                                ]
+                                cr.CertFindCertificateInStore.restype = ctypes.c_void_p
+                                target_ci = CERT_INFO_MINIMAL()
+                                target_ci.Issuer = signer_info.Issuer
+                                target_ci.SerialNumber = signer_info.SerialNumber
+                                p_signer_ctx = cr.CertFindCertificateInStore(
+                                    h_store,
+                                    X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
+                                    0,
+                                    CERT_FIND_SUBJECT_CERT,
+                                    ctypes.byref(target_ci),
+                                    None,
+                                )
+                                if p_signer_ctx:
+                                    try:
+                                        primary_signer = _read_cert_entry(p_signer_ctx, role="SIGNER")
+                                        signer_attribution_method = "CMS_SIGNER_INFO_MATCH"
+                                    finally:
+                                        if hasattr(cr, "CertFreeCertificateContext"):
+                                            cr.CertFreeCertificateContext.argtypes = [ctypes.c_void_p]
+                                            cr.CertFreeCertificateContext.restype = wintypes.BOOL
+                                            cr.CertFreeCertificateContext(p_signer_ctx)
+                except Exception:
+                    pass
+
+            # 2. Enumerate all certificates in store for chain visibility
             p_cert_context = None
             while True:
                 p_cert_context = cr.CertEnumCertificatesInStore(h_store, p_cert_context)
                 if not p_cert_context:
                     break
-
-                # Subject Name
-                sub_buf = ctypes.create_unicode_buffer(256)
-                cr.CertGetNameStringW(p_cert_context, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, None, sub_buf, 256)
-                subject = sub_buf.value
-
-                # Issuer Name
-                iss_buf = ctypes.create_unicode_buffer(256)
-                cr.CertGetNameStringW(p_cert_context, CERT_NAME_SIMPLE_DISPLAY_TYPE, CERT_NAME_ISSUER_FLAG, None, iss_buf, 256)
-                issuer = iss_buf.value
-
-                certs.append({
-                    "subject": subject,
-                    "issuer": issuer,
-                    "is_self_signed": (subject.strip() == issuer.strip() and len(subject.strip()) > 0)
-                })
+                entry = _read_cert_entry(p_cert_context, role="INTERMEDIATE_OR_CHAIN")
+                if primary_signer and entry["subject"] == primary_signer.get("subject") and entry["issuer"] == primary_signer.get("issuer"):
+                    entry["role"] = "SIGNER"
+                certs.append(entry)
         finally:
             if h_store.value:
                 cr.CertCloseStore(h_store, 0)
             if h_msg.value and hasattr(cr, "CryptMsgClose"):
                 cr.CryptMsgClose(h_msg)
-        return certs
+
+        return {
+            "primary_signer": primary_signer,
+            "signer_attribution_method": signer_attribution_method,
+            "certificate_chain": certs,
+            "timestamp_present": timestamp_present,
+            "signer_cert_expired": None,
+        }
+
+    @classmethod
+    def _extract_win32_certificates(cls, file_path: str, cr) -> List[Dict[str, Any]]:
+        """Backward-compatible wrapper returning enumerated X.509 certificates from PE or Catalog."""
+        return cls._extract_win32_signer_and_certificates(file_path, cr)["certificate_chain"]
 
     @classmethod
     def _verify_pure_python_fallback(cls, file_path: str) -> Dict[str, Any]:
@@ -821,7 +1177,12 @@ class WindowsSignatureIntelligence:
                     "certificate_revision": hex(w_rev),
                     "certificate_type": hex(w_type),
                     "is_microsoft_system_binary": False,
-                    "primary_signer": {"subject": extracted_strings[0] if extracted_strings else "Unknown"},
+                    "is_whql_certified": False,
+                    "signer_attribution_method": "UNVERIFIED_ASN1_SCAN_ONLY",
+                    "primary_signer": {},
+                    "timestamp_present": None,
+                    "timestamp_status": "UNKNOWN",
+                    "expiration_status": "UNKNOWN",
                     "signers_detected": extracted_strings,
                     "notice": (
                         "Embedded Authenticode certificate table structurally parsed via pure-Python ASN.1 scanner. "
@@ -919,8 +1280,73 @@ class WindowsSignatureIntelligence:
         if raw_code == TRUST_E_BAD_DIGEST:
             return "TAMPERED"
         if raw_code == TRUST_E_TIME_STAMP:
-            return "VERIFICATION_ERROR"
+            return "INVALID_TIMESTAMP"
         return "VERIFICATION_ERROR"
+
+    @staticmethod
+    def _classify_timestamp_and_expiration(
+        raw_code: int,
+        timestamp_present: Optional[bool],
+        cert_expired: Optional[bool] = None,
+    ) -> Dict[str, str]:
+        """
+        Explicitly separates certificate expiration, trusted timestamp validity,
+        missing timestamps, invalid timestamps, and chain trust failures.
+        """
+        if raw_code == ERROR_SUCCESS:
+            if cert_expired is True:
+                return {
+                    "timestamp_status": "VALID_TRUSTED",
+                    "expiration_status": "EXPIRED_WITH_VALID_TIMESTAMP",
+                }
+            if timestamp_present is True:
+                return {
+                    "timestamp_status": "VALID_TRUSTED",
+                    "expiration_status": "VALID_CURRENT",
+                }
+            if timestamp_present is False:
+                return {
+                    "timestamp_status": "MISSING",
+                    "expiration_status": "VALID_CURRENT",
+                }
+            return {
+                "timestamp_status": "UNKNOWN",
+                "expiration_status": "VALID_CURRENT",
+            }
+
+        if raw_code == TRUST_E_TIME_STAMP:
+            return {
+                "timestamp_status": "INVALID",
+                "expiration_status": "EXPIRED_INVALID_TIMESTAMP" if cert_expired else "INVALID_TIMESTAMP",
+            }
+
+        if raw_code == CERT_E_EXPIRED:
+            if timestamp_present is False:
+                return {
+                    "timestamp_status": "MISSING",
+                    "expiration_status": "EXPIRED_NO_TRUSTED_TIMESTAMP",
+                }
+            if timestamp_present is True:
+                return {
+                    "timestamp_status": "UNTRUSTED_OR_INVALID",
+                    "expiration_status": "EXPIRED_INVALID_TIMESTAMP",
+                }
+            return {
+                "timestamp_status": "UNKNOWN",
+                "expiration_status": "EXPIRED_TIMESTAMP_UNKNOWN",
+            }
+
+        if raw_code in (CERT_E_UNTRUSTEDROOT, CERT_E_REVOKED, TRUST_E_EXPLICIT_DISTRUST):
+            ts_stat = "PRESENT_UNVERIFIED" if timestamp_present is True else ("MISSING" if timestamp_present is False else "UNKNOWN")
+            return {
+                "timestamp_status": ts_stat,
+                "expiration_status": "CHAIN_TRUST_FAILURE",
+            }
+
+        return {
+            "timestamp_status": "PRESENT_UNVERIFIED" if timestamp_present is True else ("MISSING" if timestamp_present is False else "UNKNOWN"),
+            "expiration_status": "UNKNOWN",
+        }
 
     @staticmethod
     def _explain_win32_trust_error(code: int) -> str:

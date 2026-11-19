@@ -101,7 +101,7 @@ class TestNeonAuditRegressions(unittest.TestCase):
         self.assertEqual(WindowsSignatureIntelligence._classify_win32_trust_status(CERT_E_REVOCATION_FAILURE), "REVOCATION_UNKNOWN")
         self.assertEqual(WindowsSignatureIntelligence._classify_win32_trust_status(TRUST_E_EXPLICIT_DISTRUST), "EXPLICIT_DISTRUST")
         self.assertEqual(WindowsSignatureIntelligence._classify_win32_trust_status(TRUST_E_BAD_DIGEST), "TAMPERED")
-        self.assertEqual(WindowsSignatureIntelligence._classify_win32_trust_status(TRUST_E_TIME_STAMP), "VERIFICATION_ERROR")
+        self.assertEqual(WindowsSignatureIntelligence._classify_win32_trust_status(TRUST_E_TIME_STAMP), "INVALID_TIMESTAMP")
         self.assertEqual(WindowsSignatureIntelligence._classify_win32_trust_status(0x800B0004), "VERIFICATION_ERROR")
 
     def test_f002_extract_win32_certificates_prototype_and_handle_cleanup(self):
@@ -199,11 +199,18 @@ class TestNeonAuditRegressions(unittest.TestCase):
             def __init__(self):
                 self.CryptCATAdminAcquireContext = FakeFn(self._acq)
                 self.CryptCATAdminCalcHashFromFileHandle = FakeFn(self._calc)
-                self.CryptCATAdminEnumCatalogFromHash = FakeFn(lambda *a: 0xABCD)
+                self._enum_done = False
+                self.CryptCATAdminEnumCatalogFromHash = FakeFn(self._enum_once)
                 self.CryptCATCatalogInfoFromContext = FakeFn(self._cat_info)
                 self.CryptCATAdminReleaseCatalogContext = FakeFn(lambda a, c, f: released_cat_ctx.append(c) or 1)
                 self.CryptCATAdminReleaseContext = FakeFn(lambda a, f: released_admin.append(a.value) or 1)
                 self.WinVerifyTrust = FakeFn(self._wvt)
+
+            def _enum_once(self, *a):
+                if not self._enum_done:
+                    self._enum_done = True
+                    return 0xABCD
+                return None
 
             def _acq(self, ph, sub, fl):
                 ctypes.cast(ph, ctypes.POINTER(ctypes.c_void_p)).contents.value = 0x5555
@@ -240,7 +247,7 @@ class TestNeonAuditRegressions(unittest.TestCase):
         self.assertFalse(res["is_whql_certified"])
         self.assertFalse(res["is_microsoft_system_binary"])
         self.assertEqual(closed_handles, [0x123456789])
-        self.assertEqual(released_cat_ctx, [0xABCD])
+        self.assertEqual(released_cat_ctx, [])  # Released automatically when EnumCatalogFromHash returned NULL
         self.assertEqual(released_admin, [0x5555])
         self.assertEqual(wvt_actions, [1, 2])  # VERIFY then CLOSE
 
@@ -292,10 +299,17 @@ class TestNeonAuditRegressions(unittest.TestCase):
     def test_f003_powershell_executor_passes_execution_guard_policy(self):
         from windows_intelligence.command_engine.powershell_executor import PowerShellExecutor
 
-        fake_proc = mock.Mock(returncode=0, stdout='{"Caption":"Windows 11"}', stderr="")
+        fake_run = {
+            "status": "success",
+            "exit_code": 0,
+            "stdout": '{"Caption":"Windows 11"}',
+            "stderr": "",
+            "stdout_truncated": False,
+            "stderr_truncated": False,
+        }
         with mock.patch("os.name", "nt"), \
              mock.patch("os.path.isfile", return_value=True), \
-             mock.patch("subprocess.run", return_value=fake_proc):
+             mock.patch("security.safe_subprocess.SafeSubprocessBroker.run_bounded_process", return_value=fake_run):
             res = PowerShellExecutor.query("cim_os")
 
         self.assertEqual(res["status"], "success")

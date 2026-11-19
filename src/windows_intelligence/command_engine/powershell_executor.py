@@ -100,29 +100,51 @@ class PowerShellExecutor:
             "-Command", command_str
         ]
 
-        try:
-            res = subprocess.run(
-                cmd_vector,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                shell=False
-            )
+        from security.safe_subprocess import SafeSubprocessBroker
 
-            if res.returncode != 0:
+        MAX_PS_STDOUT_BYTES = 5 * 1024 * 1024  # 5 MB streaming ceiling
+        MAX_PS_STDERR_BYTES = 1 * 1024 * 1024  # 1 MB streaming ceiling
+        try:
+            run_res = SafeSubprocessBroker.run_bounded_process(
+                argv=cmd_vector,
+                timeout=timeout_seconds,
+                max_stdout_bytes=MAX_PS_STDOUT_BYTES,
+                max_stderr_bytes=MAX_PS_STDERR_BYTES,
+                terminate_on_limit=True,
+            )
+            sub_status = run_res.get("status", "error")
+
+            if sub_status == "timeout":
                 return {
                     "status": "error",
+                    "subprocess_status": "timeout",
                     "query_id": query_id,
-                    "exit_code": res.returncode,
-                    "error": res.stderr.strip() or "PowerShell returned non-zero exit code."
+                    "error": f"PowerShell execution timed out after {timeout_seconds} seconds.",
+                }
+            if sub_status == "output_limit_exceeded":
+                return {
+                    "status": "error",
+                    "subprocess_status": "output_limit_exceeded",
+                    "query_id": query_id,
+                    "is_truncated": True,
+                    "error": run_res.get("error", "PowerShell output exceeded streaming safety limit."),
+                }
+            if sub_status != "success":
+                return {
+                    "status": "error",
+                    "subprocess_status": sub_status,
+                    "query_id": query_id,
+                    "exit_code": run_res.get("exit_code"),
+                    "stderr": run_res.get("stderr", ""),
+                    "error": run_res.get("error") or "PowerShell returned non-zero exit code.",
                 }
 
-            raw_json = res.stdout.strip()
+            raw_json = run_res.get("stdout", "").strip()
             if not raw_json:
                 return {
                     "status": "success",
                     "query_id": query_id,
-                    "data": None
+                    "data": None,
                 }
 
             parsed_data = json.loads(raw_json)
@@ -131,18 +153,11 @@ class PowerShellExecutor:
                 "query_id": query_id,
                 "cmdlet": cmdlet,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "data": parsed_data
-            }
-
-        except subprocess.TimeoutExpired:
-            return {
-                "status": "error",
-                "query_id": query_id,
-                "error": f"PowerShell execution timed out after {timeout_seconds} seconds."
+                "data": parsed_data,
             }
         except Exception as e:
             return {
                 "status": "error",
                 "query_id": query_id,
-                "error": f"Failed to execute PowerShell query: {str(e)}"
+                "error": f"Failed to execute PowerShell query: {str(e)}",
             }

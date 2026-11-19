@@ -201,7 +201,7 @@ class PolicyEngine:
                 Capability.DRIVER_QUERY, Capability.EVENT_LOG_READ, Capability.MINIDUMP_READ
             ):
                 # If target is a filesystem path, validate read scope and prevent forbidden credential reads
-                if cap in (Capability.FILE_READ, Capability.FILE_HASH, Capability.MINIDUMP_READ) and target and not target.startswith("\\\\"):
+                if cap in (Capability.FILE_READ, Capability.FILE_HASH, Capability.MINIDUMP_READ) and target:
                     norm_target = str(target).replace("/", "\\").lower()
                     if "\\windows\\system32\\config\\sam" in norm_target or "\\windows\\system32\\config\\security" in norm_target:
                         return AccessDecision(

@@ -87,9 +87,20 @@ class ExecutionGuard:
         meta = metadata or {}
         scope = cls.get_current_scope()
 
-        # Canonicalize target if it is a filesystem path
+        # Canonicalize target for filesystem capabilities (never exempt raw NT/UNC paths)
+        _FS_CAPABILITIES = {
+            Capability.FILE_READ,
+            Capability.FILE_HASH,
+            Capability.MINIDUMP_READ,
+            Capability.WORKSPACE_WRITE,
+            Capability.WORKSPACE_TEMP_CLEAN,
+            Capability.TEMPDIR_MARKER_WRITE,
+        }
         clean_target = str(target)
-        if access_mode in ("READ", "WRITE", "DELETE", "MODIFY") and not target.startswith("\\\\"):
+        if (
+            capability in _FS_CAPABILITIES
+            or (access_mode in ("READ", "WRITE", "DELETE", "MODIFY") and not clean_target.startswith("\\\\"))
+        ):
             try:
                 clean_target = PathIdentity.canonicalize(target)
             except Exception as exc:

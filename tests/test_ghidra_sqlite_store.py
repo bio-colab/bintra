@@ -9,7 +9,10 @@ from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
 
 class TestGhidraExportStore(unittest.TestCase):
     def setUp(self):
+        from security import ExecutionGuard
         self.tmp_dir = tempfile.mkdtemp(prefix="bintra_test_store_")
+        self._scope_ctx = ExecutionGuard.scoped_session(workspace_dir=self.tmp_dir)
+        self._scope_ctx.__enter__()
         self.sample_export = {
             "program_name": "target_service.exe",
             "image_base": "0x140000000",
@@ -55,6 +58,7 @@ class TestGhidraExportStore(unittest.TestCase):
         }
 
     def tearDown(self):
+        self._scope_ctx.__exit__(None, None, None)
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
     def test_in_memory_dict_compatibility(self):

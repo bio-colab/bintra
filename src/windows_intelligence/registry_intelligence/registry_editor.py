@@ -338,7 +338,10 @@ class WindowsRegistryEditor:
                             content = raw_bytes.decode("utf-8")
                         except UnicodeDecodeError:
                             content = raw_bytes.decode("latin1", errors="replace")
-            except Exception:
+            except Exception as exc:
+                from security import SecurityViolationError
+                if isinstance(exc, SecurityViolationError):
+                    raise
                 pass
 
         if not content:

@@ -159,7 +159,9 @@ class TestGhidraAdvancedIntegration(unittest.TestCase):
             db_path = db_f.name
 
         try:
-            GhidraExportStore.ingest_to_sqlite(json_path, db_path)
+            from security import ExecutionGuard
+            with ExecutionGuard.scoped_session(workspace_dir=os.path.dirname(db_path)):
+                GhidraExportStore.ingest_to_sqlite(json_path, db_path)
             with GhidraExportStore.from_path(db_path) as store:
                 res_op = store.search_functions(opcode="INT_XOR")
                 self.assertEqual(res_op["total_matches"], 1)

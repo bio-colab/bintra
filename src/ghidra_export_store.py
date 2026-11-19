@@ -141,14 +141,13 @@ class GhidraExportStore:
                 con.close()
                 return cache_path
             except Exception:
+                from security import SafeFileAccess, SecurityViolationError
                 try:
-                    from security import SafeFileAccess
                     SafeFileAccess.delete_workspace_file(cache_path)
-                except Exception:
-                    try:
-                        os.remove(cache_path)
-                    except Exception:
-                        pass
+                except SecurityViolationError:
+                    raise
+                except OSError:
+                    pass
 
         # Build new cache
         try:
@@ -185,25 +184,27 @@ class GhidraExportStore:
         Mediated by ExecutionGuard for Capability.WORKSPACE_WRITE.
         """
         try:
-            from security import ExecutionGuard, Capability, SafeFileAccess
-            ExecutionGuard.request_access(
-                component="ghidra_export_store",
-                operation="ingest_to_sqlite",
-                target=target_db_path,
-                capability=Capability.WORKSPACE_WRITE,
-                access_mode="WRITE"
-            )
-            scope = ExecutionGuard.get_current_scope()
-            if scope:
-                scope.record_session_file(target_db_path)
-            if os.path.exists(target_db_path):
+            from security import ExecutionGuard, Capability, SafeFileAccess, SecurityViolationError
+        except ImportError as imp_err:
+            raise RuntimeError(
+                f"SECURITY_KERNEL_UNAVAILABLE: Refusing unmediated SQLite ingestion: {imp_err}"
+            ) from imp_err
+
+        ExecutionGuard.request_access(
+            component="ghidra_export_store",
+            operation="ingest_to_sqlite",
+            target=target_db_path,
+            capability=Capability.WORKSPACE_WRITE,
+            access_mode="WRITE"
+        )
+        scope = ExecutionGuard.get_current_scope()
+        if scope:
+            scope.record_session_file(target_db_path)
+        if os.path.exists(target_db_path):
+            try:
                 SafeFileAccess.delete_workspace_file(target_db_path)
-        except Exception:
-            if os.path.exists(target_db_path):
-                try:
-                    os.remove(target_db_path)
-                except Exception:
-                    pass
+            except SecurityViolationError:
+                raise
 
         con = sqlite3.connect(target_db_path)
         try:

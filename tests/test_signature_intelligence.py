@@ -52,10 +52,22 @@ class TestWindowsSignatureIntelligence(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             self.sig_intel.verify_file("C:\\nonexistent_dummy_file_12345.exe")
 
+    @staticmethod
+    def _create_minimal_unsigned_pe() -> bytes:
+        pe = bytearray(1024)
+        pe[0:2] = b"MZ"
+        struct.pack_into("<I", pe, 0x3C, 0x80)
+        pe[0x80:0x84] = b"PE\x00\x00"
+        struct.pack_into("<HHIIIHH", pe, 0x84, 0x8664, 1, 0, 0, 0, 0xF0, 0x22)
+        struct.pack_into("<H", pe, 0x84 + 20, 0x20B)
+        struct.pack_into("<I", pe, 0x84 + 20 + 108, 16)
+        return bytes(pe)
+
     def test_unsigned_file(self):
         """Verify handling of an unsigned binary/file."""
+        pe_bytes = self._create_minimal_unsigned_pe()
         with tempfile.NamedTemporaryFile(suffix=".exe", delete=False) as f:
-            f.write(b"MZ\x90\x00" + b"\x00" * 512)
+            f.write(pe_bytes)
             tmp_path = f.name
 
         try:
@@ -170,13 +182,14 @@ class TestWindowsSignatureIntelligence(unittest.TestCase):
 
     def test_audit_directory_temp(self):
         """Verify audit_directory over a folder of files."""
+        pe_bytes = self._create_minimal_unsigned_pe()
         with tempfile.TemporaryDirectory() as tmp_dir:
             file1 = os.path.join(tmp_dir, "test1.exe")
             file2 = os.path.join(tmp_dir, "test2.dll")
             with open(file1, "wb") as f:
-                f.write(b"MZ\x90\x00" + b"\x00" * 512)
+                f.write(pe_bytes)
             with open(file2, "wb") as f:
-                f.write(b"MZ\x90\x00" + b"\x00" * 512)
+                f.write(pe_bytes)
 
             audit = self.sig_intel.audit_directory(tmp_dir, pattern="*.*", recursive=False)
             self.assertEqual(audit["status"], "ok")

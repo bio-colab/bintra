@@ -166,6 +166,8 @@ class ProcessMitigationInspector:
             }
         finally:
             if opened_handle and handle:
+                kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+                kernel32.CloseHandle.restype = wintypes.BOOL
                 kernel32.CloseHandle(handle)
 
     @classmethod
@@ -175,45 +177,51 @@ class ProcessMitigationInspector:
             advapi32 = ctypes.windll.advapi32
             kernel32 = ctypes.windll.kernel32
 
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
             advapi32.OpenProcessToken.argtypes = [ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
             advapi32.OpenProcessToken.restype = wintypes.BOOL
+            advapi32.GetTokenInformation.argtypes = [
+                wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)
+            ]
+            advapi32.GetTokenInformation.restype = wintypes.BOOL
 
             token_handle = wintypes.HANDLE()
             TOKEN_QUERY = 0x0008
             if not advapi32.OpenProcessToken(process_handle, TOKEN_QUERY, ctypes.byref(token_handle)):
                 return {"integrity_level": "Unknown", "error": "OpenProcessToken failed"}
 
-            TokenIntegrityLevel = 25
-            req_len = wintypes.DWORD()
-            advapi32.GetTokenInformation(token_handle, TokenIntegrityLevel, None, 0, ctypes.byref(req_len))
+            try:
+                TokenIntegrityLevel = 25
+                req_len = wintypes.DWORD()
+                advapi32.GetTokenInformation(token_handle, TokenIntegrityLevel, None, 0, ctypes.byref(req_len))
 
-            if req_len.value <= 0:
+                if req_len.value <= 0:
+                    return {"integrity_level": "Unknown"}
+
+                buf = ctypes.create_string_buffer(req_len.value)
+                if not advapi32.GetTokenInformation(token_handle, TokenIntegrityLevel, buf, req_len.value, ctypes.byref(req_len)):
+                    return {"integrity_level": "Unknown"}
+
+                tml = TOKEN_MANDATORY_LABEL.from_buffer_copy(buf)
+                sid_ptr = tml.Label_Sid
+                if not sid_ptr:
+                    return {"integrity_level": "Unknown"}
+
+                advapi32.GetSidSubAuthorityCount.argtypes = [ctypes.c_void_p]
+                advapi32.GetSidSubAuthorityCount.restype = ctypes.POINTER(ctypes.c_ubyte)
+                advapi32.GetSidSubAuthority.argtypes = [ctypes.c_void_p, wintypes.DWORD]
+                advapi32.GetSidSubAuthority.restype = ctypes.POINTER(wintypes.DWORD)
+
+                count_ptr = advapi32.GetSidSubAuthorityCount(sid_ptr)
+                if not count_ptr or count_ptr.contents.value <= 0:
+                    return {"integrity_level": "Unknown"}
+
+                sub_auth_idx = count_ptr.contents.value - 1
+                rid_ptr = advapi32.GetSidSubAuthority(sid_ptr, sub_auth_idx)
+                rid = rid_ptr.contents.value if rid_ptr else 0
+            finally:
                 kernel32.CloseHandle(token_handle)
-                return {"integrity_level": "Unknown"}
-
-            buf = ctypes.create_string_buffer(req_len.value)
-            if not advapi32.GetTokenInformation(token_handle, TokenIntegrityLevel, buf, req_len.value, ctypes.byref(req_len)):
-                kernel32.CloseHandle(token_handle)
-                return {"integrity_level": "Unknown"}
-
-            tml = TOKEN_MANDATORY_LABEL.from_buffer_copy(buf)
-            sid_ptr = tml.Label_Sid
-
-            advapi32.GetSidSubAuthorityCount.argtypes = [ctypes.c_void_p]
-            advapi32.GetSidSubAuthorityCount.restype = ctypes.POINTER(ctypes.c_ubyte)
-            advapi32.GetSidSubAuthority.argtypes = [ctypes.c_void_p, wintypes.DWORD]
-            advapi32.GetSidSubAuthority.restype = ctypes.POINTER(wintypes.DWORD)
-
-            count_ptr = advapi32.GetSidSubAuthorityCount(sid_ptr)
-            if not count_ptr or count_ptr.contents.value <= 0:
-                kernel32.CloseHandle(token_handle)
-                return {"integrity_level": "Unknown"}
-
-            sub_auth_idx = count_ptr.contents.value - 1
-            rid_ptr = advapi32.GetSidSubAuthority(sid_ptr, sub_auth_idx)
-            rid = rid_ptr.contents.value if rid_ptr else 0
-
-            kernel32.CloseHandle(token_handle)
             name = cls.INTEGRITY_LEVEL_MAP.get(rid, f"Custom_RID_{hex(rid)}")
             return {
                 "integrity_level": name,

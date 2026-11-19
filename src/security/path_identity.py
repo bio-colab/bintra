@@ -50,8 +50,9 @@ class PathIdentity:
     @classmethod
     def _validate_no_ads(cls, path: str) -> None:
         """Ensures the path does not target an Alternate Data Stream (:stream)."""
-        # Drive letter colon (e.g. C:) is permitted at index 1
-        tail = path[2:] if (len(path) >= 2 and path[1] == ":") else path
+        # Only an ASCII drive letter colon (e.g. C:) is permitted at index 1
+        has_drive_prefix = len(path) >= 2 and path[0].isascii() and path[0].isalpha() and path[1] == ":"
+        tail = path[2:] if has_drive_prefix else path
         if ":" in tail:
             raise ValueError(f"Alternate Data Streams (:stream) are prohibited: '{path}'.")
 
@@ -59,14 +60,30 @@ class PathIdentity:
     def _get_final_path_win32(cls, file_path: str) -> Optional[str]:
         """Queries kernel for the true final volume path via GetFinalPathNameByHandleW."""
         try:
+            from ctypes import wintypes
+
+            k32 = ctypes.windll.kernel32
+            k32.CreateFileW.argtypes = [
+                wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE
+            ]
+            k32.CreateFileW.restype = wintypes.HANDLE
+            k32.GetFinalPathNameByHandleW.argtypes = [
+                wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD
+            ]
+            k32.GetFinalPathNameByHandleW.restype = wintypes.DWORD
+            k32.CloseHandle.argtypes = [wintypes.HANDLE]
+            k32.CloseHandle.restype = wintypes.BOOL
+
             FILE_READ_ATTRIBUTES = 0x0080
             FILE_SHARE_READ = 0x0001
             FILE_SHARE_WRITE = 0x0002
             FILE_SHARE_DELETE = 0x0004
             OPEN_EXISTING = 3
             FILE_FLAG_BACKUP_SEMANTICS = 0x02000000  # Allows opening directories as well as files
+            INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
 
-            handle = ctypes.windll.kernel32.CreateFileW(
+            handle = k32.CreateFileW(
                 file_path,
                 FILE_READ_ATTRIBUTES,
                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -75,14 +92,19 @@ class PathIdentity:
                 FILE_FLAG_BACKUP_SEMANTICS,
                 None
             )
-            if handle == -1 or handle == 0:
+            if not handle or handle == INVALID_HANDLE_VALUE or handle == -1:
                 return None
 
             try:
-                buf = ctypes.create_unicode_buffer(1024)
+                buf_len = 1024
+                buf = ctypes.create_unicode_buffer(buf_len)
                 # VOLUME_NAME_DOS = 0x0
-                res = ctypes.windll.kernel32.GetFinalPathNameByHandleW(handle, buf, 1024, 0)
-                if res > 0:
+                res = k32.GetFinalPathNameByHandleW(handle, buf, buf_len, 0)
+                if res >= buf_len and res <= 32768:
+                    buf_len = res + 1
+                    buf = ctypes.create_unicode_buffer(buf_len)
+                    res = k32.GetFinalPathNameByHandleW(handle, buf, buf_len, 0)
+                if 0 < res < buf_len:
                     clean = buf.value
                     # Strip \\?\ prefix returned by Win32
                     if clean.startswith("\\\\?\\UNC\\"):
@@ -91,7 +113,7 @@ class PathIdentity:
                         clean = clean[4:]
                     return os.path.normpath(clean)
             finally:
-                ctypes.windll.kernel32.CloseHandle(handle)
+                k32.CloseHandle(handle)
         except Exception:
             pass
         return None
@@ -100,13 +122,14 @@ class PathIdentity:
     def is_within_directory(cls, candidate_path: str, parent_directory: str) -> bool:
         """
         Determines if candidate_path is strictly contained within parent_directory.
-        Protects against path traversal (../) and escaping symlinks.
+        Protects against path traversal (../) and escaping symlinks without rejecting
+        legitimate filenames that begin with '..' (e.g. '..hidden').
         """
         try:
             can_cand = cls.canonicalize(candidate_path)
             can_parent = cls.canonicalize(parent_directory)
             rel = os.path.relpath(can_cand, can_parent)
-            return not rel.startswith("..") and not os.path.isabs(rel) and rel != ".."
+            return rel != ".." and not rel.startswith(".." + os.sep) and not os.path.isabs(rel)
         except Exception:
             return False
 

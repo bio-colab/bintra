@@ -11,6 +11,7 @@ and Capability.TEMPDIR_MARKER_WRITE (when publishing discovery marker to temp).
 
 import os
 import sys
+import hmac
 import json
 import time
 import uuid
@@ -94,10 +95,10 @@ class GhidraBridgeRequestHandler(BaseHTTPRequestHandler):
 
         server: GhidraLiveBridgeServer = self.server.bridge_server  # type: ignore
 
-        # Authenticate request token (except handshake ping)
+        # Authenticate request token (except handshake ping) using constant-time comparison
         if method != "ping" and server.auth_token:
             auth = params.get("auth_token") or self.headers.get("X-Bintra-Auth-Token")
-            if auth != server.auth_token:
+            if not isinstance(auth, str) or not hmac.compare_digest(auth, server.auth_token):
                 self._send_json_error(req_id, -32001, "Authentication failed: Invalid or missing bridge token")
                 return
 

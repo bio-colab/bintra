@@ -56,8 +56,14 @@ class PowerShellExecutor:
                 operation="query_cim",
                 target=f"cim:{query_id}",
                 capability=Capability.SUBPROCESS_CATALOG_EXEC,
-                access_mode="EXEC",
-                metadata={"query_id": query_id, "cmdlet": cmdlet, "timeout": timeout_seconds}
+                access_mode="EXECUTE",
+                metadata={
+                    "query_id": query_id,
+                    "cmdlet": cmdlet,
+                    "timeout": timeout_seconds,
+                    "shell": False,
+                    "is_catalog_command": True,
+                }
             )
         except Exception as guard_err:
             return {

@@ -252,19 +252,30 @@ class TaskManagerInspector:
             if not ntdll or not hasattr(ntdll, "NtQueryInformationProcess"):
                 return None
 
+            ntdll.NtQueryInformationProcess.argtypes = [
+                wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.ULONG, ctypes.POINTER(wintypes.ULONG)
+            ]
+            ntdll.NtQueryInformationProcess.restype = ctypes.c_long
+
+            class _UNICODE_STRING(ctypes.Structure):
+                _fields_ = [
+                    ("Length", wintypes.USHORT),
+                    ("MaximumLength", wintypes.USHORT),
+                    ("Buffer", ctypes.c_void_p),
+                ]
+
             buf = ctypes.create_string_buffer(4096)
             ret_len = wintypes.ULONG()
             # ProcessCommandLineInformation = 60
             status = ntdll.NtQueryInformationProcess(h_proc, 60, buf, 4096, ctypes.byref(ret_len))
-            if status == -1073741820:  # 0xC0000004: STATUS_INFO_LENGTH_MISMATCH
+            if status == -1073741820 and ret_len.value > 0:  # 0xC0000004: STATUS_INFO_LENGTH_MISMATCH
                 buf = ctypes.create_string_buffer(ret_len.value)
                 status = ntdll.NtQueryInformationProcess(h_proc, 60, buf, ret_len.value, ctypes.byref(ret_len))
 
-            if status == 0 and len(buf.raw) >= 16:
-                length = int.from_bytes(buf.raw[0:2], "little")
-                ptr = int.from_bytes(buf.raw[8:16], "little")
-                if length > 0 and ptr:
-                    return ctypes.wstring_at(ptr, length // 2).strip()
+            if status == 0 and len(buf.raw) >= ctypes.sizeof(_UNICODE_STRING):
+                ustr = _UNICODE_STRING.from_buffer_copy(buf)
+                if ustr.Length > 0 and ustr.Buffer:
+                    return ctypes.wstring_at(ustr.Buffer, ustr.Length // 2).strip()
         except Exception:
             pass
         return None
@@ -285,6 +296,13 @@ class TaskManagerInspector:
             k32 = cls._get_k32()
             if not k32:
                 return res
+
+            advapi32.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+            advapi32.OpenProcessToken.restype = wintypes.BOOL
+            advapi32.GetTokenInformation.argtypes = [
+                wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)
+            ]
+            advapi32.GetTokenInformation.restype = wintypes.BOOL
 
             token = wintypes.HANDLE()
             if not advapi32.OpenProcessToken(h_proc, cls.TOKEN_QUERY, ctypes.byref(token)):
@@ -336,6 +354,7 @@ class TaskManagerInspector:
                             ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_wchar_p, ctypes.POINTER(wintypes.DWORD),
                             ctypes.c_wchar_p, ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD)
                         ]
+                        advapi32.LookupAccountSidW.restype = wintypes.BOOL
                         if advapi32.LookupAccountSidW(None, user_info.Sid, name_buf, ctypes.byref(name_len), dom_buf, ctypes.byref(dom_len), ctypes.byref(sid_type)):
                             res["user"] = f"{dom_buf.value}\\{name_buf.value}"
             finally:
@@ -352,10 +371,13 @@ class TaskManagerInspector:
             if not k32:
                 return "Unknown"
             is_wow64 = wintypes.BOOL()
-            if hasattr(k32, "IsWow64Process") and k32.IsWow64Process(h_proc, ctypes.byref(is_wow64)):
-                if is_wow64.value:
-                    return "x86 (WoW64)"
-                return "x64 (Native)"
+            if hasattr(k32, "IsWow64Process"):
+                k32.IsWow64Process.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
+                k32.IsWow64Process.restype = wintypes.BOOL
+                if k32.IsWow64Process(h_proc, ctypes.byref(is_wow64)):
+                    if is_wow64.value:
+                        return "x86 (WoW64)"
+                    return "x64 (Native)"
         except Exception:
             pass
         return "Unknown"

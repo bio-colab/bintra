@@ -287,6 +287,11 @@ class EtwController:
 
         try:
             advapi32 = ctypes.WinDLL("advapi32.dll")
+            advapi32.EnumerateTraceGuidsEx.argtypes = [
+                wintypes.ULONG, ctypes.c_void_p, wintypes.ULONG,
+                ctypes.c_void_p, wintypes.ULONG, ctypes.POINTER(wintypes.ULONG)
+            ]
+            advapi32.EnumerateTraceGuidsEx.restype = wintypes.ULONG
             ret_len = wintypes.ULONG(0)
             res = advapi32.EnumerateTraceGuidsEx(0, None, 0, None, 0, ctypes.byref(ret_len))
             if ret_len.value == 0:
@@ -327,6 +332,13 @@ class EtwController:
         try:
             ole32 = ctypes.WinDLL("ole32.dll")
             advapi32 = ctypes.WinDLL("advapi32.dll")
+            ole32.CLSIDFromString.argtypes = [wintypes.LPCWSTR, ctypes.c_void_p]
+            ole32.CLSIDFromString.restype = ctypes.c_long
+            advapi32.EnumerateTraceGuidsEx.argtypes = [
+                wintypes.ULONG, ctypes.c_void_p, wintypes.ULONG,
+                ctypes.c_void_p, wintypes.ULONG, ctypes.POINTER(wintypes.ULONG)
+            ]
+            advapi32.EnumerateTraceGuidsEx.restype = wintypes.ULONG
 
             class GUID_STRUCT(ctypes.Structure):
                 _fields_ = [

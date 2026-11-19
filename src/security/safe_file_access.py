@@ -94,7 +94,9 @@ class SafeFileAccess:
             f.write(content)
 
         # Track created file in current session scope for clean isolation
-        ExecutionGuard.get_current_scope().record_session_file(can_path)
+        active_scope = ExecutionGuard.get_current_scope()
+        if active_scope:
+            active_scope.record_session_file(can_path)
         return can_path
 
     @classmethod

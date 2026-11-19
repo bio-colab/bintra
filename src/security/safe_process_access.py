@@ -54,13 +54,18 @@ class SafeProcessAccess:
             return {"status": "unsupported", "error": "Process handle inspection requires Windows"}
 
         try:
-            h_proc = ctypes.windll.kernel32.OpenProcess(
+            from ctypes import wintypes
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            k32.OpenProcess.restype = wintypes.HANDLE
+
+            h_proc = k32.OpenProcess(
                 cls.PROCESS_QUERY_LIMITED_INFORMATION,
                 False,
                 pid
             )
             if not h_proc:
-                err = ctypes.GetLastError()
+                err = ctypes.get_last_error()
                 return {
                     "status": "access_denied" if err == 5 else "error",
                     "error_code": err,
@@ -84,15 +89,24 @@ class SafeProcessAccess:
         if res.get("status") != "success" or not res.get("handle"):
             return None
 
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.QueryFullProcessImageNameW.argtypes = [
+            wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)
+        ]
+        k32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        k32.CloseHandle.restype = wintypes.BOOL
+
         h_proc = res["handle"]
         try:
             buf = ctypes.create_unicode_buffer(1024)
-            size = ctypes.c_ulong(1024)
+            size = wintypes.DWORD(1024)
             # QueryFullProcessImageNameW (flag 0 = Win32 path format)
-            success = ctypes.windll.kernel32.QueryFullProcessImageNameW(h_proc, 0, buf, ctypes.byref(size))
+            success = k32.QueryFullProcessImageNameW(h_proc, 0, buf, ctypes.byref(size))
             if success:
                 return buf.value
         finally:
-            ctypes.windll.kernel32.CloseHandle(h_proc)
+            k32.CloseHandle(h_proc)
 
         return None

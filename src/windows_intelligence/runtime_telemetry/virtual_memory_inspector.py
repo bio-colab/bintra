@@ -402,7 +402,17 @@ class VirtualMemoryInspector:
         proc_name = modules[0]["name"] if modules else f"pid_{pid}.exe"
 
         # Open process for query and read information (Read-Only)
-        k32 = ctypes.windll.kernel32
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        k32.OpenProcess.restype = wintypes.HANDLE
+        k32.VirtualQueryEx.argtypes = [wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+        k32.VirtualQueryEx.restype = ctypes.c_size_t
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        k32.CloseHandle.restype = wintypes.BOOL
+        if hasattr(k32, "IsWow64Process"):
+            k32.IsWow64Process.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
+            k32.IsWow64Process.restype = wintypes.BOOL
+
         h_proc = k32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
         if not h_proc:
             h_proc = k32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)
@@ -411,7 +421,7 @@ class VirtualMemoryInspector:
             h_proc = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
 
         if not h_proc:
-            err = ctypes.GetLastError()
+            err = ctypes.get_last_error()
             if err == 5:
                 # Access denied: PPL, Anticheat kernel handle stripping, or missing elevation
                 raise PermissionError(
@@ -728,7 +738,15 @@ class VirtualMemoryInspector:
         if not cls._is_windows():
             return None
         try:
-            k32 = ctypes.windll.kernel32
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            k32.OpenProcess.restype = wintypes.HANDLE
+            k32.GetProcessTimes.argtypes = [
+                wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
+            ]
+            k32.GetProcessTimes.restype = wintypes.BOOL
+            k32.CloseHandle.argtypes = [wintypes.HANDLE]
+            k32.CloseHandle.restype = wintypes.BOOL
             h_proc = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
             if not h_proc:
                 h_proc = k32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)

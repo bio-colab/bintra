@@ -124,11 +124,23 @@ class SafeSubprocessBroker:
         spec = cls.CATALOG[command_id]
         flags = extra_flags or []
 
-        # Validate that extra flags are explicitly whitelisted
+        # Validate that extra flags are explicitly whitelisted (prefix match only for value-taking flags ending with '=' or ':')
         allowed = spec.get("allowed_flags", [])
         for f in flags:
-            f_clean = f.split("=")[0].strip()
-            if not any(f.startswith(a) or f_clean == a for a in allowed):
+            if not isinstance(f, str) or not f:
+                raise SecurityViolationError(
+                    f"Flag '{f}' is not permitted for command '{command_id}'. Allowed: {allowed}"
+                )
+            permitted = False
+            for a in allowed:
+                if a.endswith(("=", ":")):
+                    if f.startswith(a) and len(f) > len(a):
+                        permitted = True
+                        break
+                elif f == a:
+                    permitted = True
+                    break
+            if not permitted:
                 raise SecurityViolationError(
                     f"Flag '{f}' is not permitted for command '{command_id}'. Allowed: {allowed}"
                 )

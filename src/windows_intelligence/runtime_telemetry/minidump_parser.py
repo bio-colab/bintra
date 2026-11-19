@@ -70,16 +70,21 @@ class MiniDumpParser:
         19: "TokenStream"
     }
 
+    MAX_MINIDUMP_STRING_BYTES = 65536
+
     @classmethod
     def _read_minidump_string(cls, f, rva: int) -> str:
-        """Reads a UTF-16 LE MINIDUMP_STRING structure at the specified RVA."""
+        """Reads a bounded UTF-16 LE MINIDUMP_STRING structure at the specified RVA."""
         try:
+            if rva < 0:
+                return ""
             f.seek(rva)
             raw_len = f.read(4)
             if len(raw_len) < 4:
                 return ""
             (length,) = struct.unpack("<I", raw_len)
-            raw_str = f.read(length)
+            bounded_len = min(length, cls.MAX_MINIDUMP_STRING_BYTES)
+            raw_str = f.read(bounded_len)
             return raw_str.decode("utf-16-le", errors="replace").rstrip("\x00")
         except Exception:
             return ""
@@ -91,6 +96,15 @@ class MiniDumpParser:
         Stream 6 (Exception), Stream 4 (Modules), Stream 7 (SystemInfo),
         Stream 3 (Threads), and Stream 10 (MiscInfo).
         """
+        from security import ExecutionGuard, Capability, SecurityViolationError
+        ExecutionGuard.request_access(
+            component="minidump_parser",
+            operation="parse_minidump",
+            target=dmp_path,
+            capability=Capability.MINIDUMP_READ,
+            access_mode="READ",
+        )
+
         if not os.path.isfile(dmp_path):
             return {"status": "error", "error": f"Dump file not found: {dmp_path}"}
 

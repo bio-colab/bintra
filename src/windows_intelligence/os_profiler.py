@@ -89,6 +89,8 @@ class WindowsOSProfiler:
 
         try:
             ntdll = ctypes.windll.ntdll
+            ntdll.RtlGetVersion.argtypes = [ctypes.c_void_p]
+            ntdll.RtlGetVersion.restype = ctypes.c_long
             status = ntdll.RtlGetVersion(ctypes.byref(osvi))
             if status != 0:
                 raise OSError(f"RtlGetVersion failed with NTSTATUS: {status}")
@@ -139,7 +141,10 @@ class WindowsOSProfiler:
 
         sys_info = SYSTEM_INFO()
         try:
-            ctypes.windll.kernel32.GetNativeSystemInfo(ctypes.byref(sys_info))
+            k32 = ctypes.windll.kernel32
+            k32.GetNativeSystemInfo.argtypes = [ctypes.c_void_p]
+            k32.GetNativeSystemInfo.restype = None
+            k32.GetNativeSystemInfo(ctypes.byref(sys_info))
             arch_code = sys_info.wProcessorArchitecture
             arch_str = cls.ARCH_MAP.get(arch_code, f"Unknown_Arch_{arch_code}")
             return {
@@ -161,10 +166,16 @@ class WindowsOSProfiler:
             return {"is_wow64": False, "reason": "non_windows"}
 
         try:
-            is_wow64 = ctypes.c_int(0)
-            cur_proc = ctypes.windll.kernel32.GetCurrentProcess()
-            if hasattr(ctypes.windll.kernel32, "IsWow64Process"):
-                if ctypes.windll.kernel32.IsWow64Process(cur_proc, ctypes.byref(is_wow64)):
+            from ctypes import wintypes
+            k32 = ctypes.windll.kernel32
+            k32.GetCurrentProcess.argtypes = []
+            k32.GetCurrentProcess.restype = wintypes.HANDLE
+            is_wow64 = wintypes.BOOL(0)
+            cur_proc = k32.GetCurrentProcess()
+            if hasattr(k32, "IsWow64Process"):
+                k32.IsWow64Process.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)]
+                k32.IsWow64Process.restype = wintypes.BOOL
+                if k32.IsWow64Process(cur_proc, ctypes.byref(is_wow64)):
                     return {
                         "is_wow64": bool(is_wow64.value),
                         "emulation_mode": "WOW64 (32-bit process on 64-bit OS)" if is_wow64.value else "Native"

@@ -50,35 +50,57 @@ class WindowsSecurityInspector:
         TOKEN_QUERY = 0x0008
         TokenIntegrityLevel = 25  # TOKEN_INFORMATION_CLASS enum
 
+        from ctypes import wintypes
+
         advapi32 = ctypes.windll.advapi32
         kernel32 = ctypes.windll.kernel32
 
-        token_handle = ctypes.c_void_p()
+        kernel32.GetCurrentProcess.argtypes = []
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+
+        advapi32.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+        advapi32.OpenProcessToken.restype = wintypes.BOOL
+        advapi32.GetTokenInformation.argtypes = [
+            wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)
+        ]
+        advapi32.GetTokenInformation.restype = wintypes.BOOL
+        advapi32.GetSidSubAuthorityCount.argtypes = [ctypes.c_void_p]
+        advapi32.GetSidSubAuthorityCount.restype = ctypes.POINTER(ctypes.c_ubyte)
+        advapi32.GetSidSubAuthority.argtypes = [ctypes.c_void_p, wintypes.DWORD]
+        advapi32.GetSidSubAuthority.restype = ctypes.POINTER(wintypes.DWORD)
+
+        token_handle = wintypes.HANDLE()
         proc_handle = kernel32.GetCurrentProcess()
 
         if not advapi32.OpenProcessToken(proc_handle, TOKEN_QUERY, ctypes.byref(token_handle)):
             return {"error": "Failed to open process token"}
 
         try:
-            length = ctypes.c_ulong()
+            length = wintypes.DWORD(0)
             advapi32.GetTokenInformation(token_handle, TokenIntegrityLevel, None, 0, ctypes.byref(length))
             if length.value == 0:
                 return {"error": "Failed to determine token buffer size"}
 
             buf = ctypes.create_string_buffer(length.value)
-            if not advapi32.GetTokenInformation(token_handle, TokenIntegrityLevel, buf, length, ctypes.byref(length)):
+            if not advapi32.GetTokenInformation(token_handle, TokenIntegrityLevel, buf, length.value, ctypes.byref(length)):
                 return {"error": "Failed to retrieve token information"}
 
             # Cast buffer to TOKEN_MANDATORY_LABEL (SID_AND_ATTRIBUTES)
             p_sid = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))[0]
-            get_sub_authority_count = advapi32.GetSidSubAuthorityCount
-            get_sub_authority_count.restype = ctypes.POINTER(ctypes.c_ubyte)
-            sub_auth_count_ptr = get_sub_authority_count(p_sid)
+            if not p_sid:
+                return {"error": "Null SID pointer in token mandatory label"}
+
+            sub_auth_count_ptr = advapi32.GetSidSubAuthorityCount(p_sid)
+            if not sub_auth_count_ptr or sub_auth_count_ptr[0] == 0:
+                return {"error": "Invalid SID sub-authority count"}
             count = sub_auth_count_ptr[0]
 
-            get_sub_authority = advapi32.GetSidSubAuthority
-            get_sub_authority.restype = ctypes.POINTER(ctypes.c_ulong)
-            rid = get_sub_authority(p_sid, count - 1)[0]
+            rid_ptr = advapi32.GetSidSubAuthority(p_sid, count - 1)
+            if not rid_ptr:
+                return {"error": "Failed to read SID sub-authority RID"}
+            rid = rid_ptr[0]
 
             level_str = cls.INTEGRITY_LEVEL_MAP.get(rid, f"Custom_RID_0x{rid:04X}")
             return {

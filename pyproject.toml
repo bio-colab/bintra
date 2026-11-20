@@ -30,7 +30,7 @@ bintra-mcp = "mcp_server:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = ["cli", "binary_neural_engine", "bintra_engine", "sensory_cortex", "ghidra_export_store", "ghidra_pcode_vectorizer", "ghidra_live_bridge", "mcp_server", "pe_deep_forensics", "python_intelligence", "python_package_intelligence", "token_telemetry"]
+py-modules = ["analysis_orchestrator", "cli", "binary_neural_engine", "bintra_engine", "sensory_cortex", "ghidra_export_store", "ghidra_pcode_vectorizer", "ghidra_live_bridge", "mcp_server", "pe_deep_forensics", "python_intelligence", "python_package_intelligence", "token_telemetry"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

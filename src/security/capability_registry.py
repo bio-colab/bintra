@@ -96,6 +96,7 @@ class CapabilityRegistry:
         "weight_patcher": {Capability.WORKSPACE_WRITE},
 
         # Intelligence Engines
+        "analysis_orchestrator": {Capability.FILE_READ, Capability.FILE_HASH, Capability.MINIDUMP_READ},
         "evidence_engine": {Capability.FILE_READ, Capability.WORKSPACE_WRITE},
         "dossier_generator": {Capability.WORKSPACE_WRITE},
         "causality_synthesizer": {Capability.FILE_READ, Capability.WORKSPACE_WRITE},

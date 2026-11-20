@@ -172,26 +172,78 @@ def fuse_static_dynamic_ghidra(
     crash_rca: Optional[Dict[str, Any]] = None,
     ghidra_call_graph: Optional[Dict[str, Any]] = None,
     ghidra_data_flow: Optional[Dict[str, Any]] = None,
+    binary_inspection: Optional[Dict[str, Any]] = None,
+    signature_intel: Optional[Dict[str, Any]] = None,
+    deobfuscation: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Fuses static PE deep forensics (.pdata, RTTI, PDB), MiniDump/Crash RCA,
-    and Ghidra Call-Graph / Data-Flow slices into a unified EvidenceGraph.
+    Fuses static PE inspection, PE deep forensics (.pdata, RTTI, PDB),
+    digital signature trust intelligence, deobfuscation telemetry,
+    MiniDump/Crash RCA, and Ghidra Call-Graph / Data-Flow slices into a
+    unified EvidenceGraph.
     """
     graph = EvidenceGraph()
+    bin_props: Dict[str, Any] = {}
+    bin_label = "target.exe"
+    bin_id = "pe:unknown"
+
     if pe_forensics and pe_forensics.get("status") == "ok":
         bin_id = f"pe:{pe_forensics.get('sha256', 'unknown')[:12]}"
+        bin_label = pe_forensics.get("file", bin_label)
+        bin_props.update({
+            "pdata_functions": pe_forensics.get("pdata_functions", {}).get("total_runtime_functions", 0),
+            "rtti_vftables": pe_forensics.get("msvc_rtti", {}).get("vftables_count", 0),
+            "pdb_matched": pe_forensics.get("pdb_correlation", {}).get("pdb_verification", {}).get("guid_match", False),
+        })
+
+    if binary_inspection and isinstance(binary_inspection, dict):
+        if bin_id == "pe:unknown":
+            sha = str(binary_inspection.get("sha256") or binary_inspection.get("file_hash") or "inspected")
+            bin_id = f"pe:{sha[:12]}"
+            bin_label = binary_inspection.get("file_name") or binary_inspection.get("file_path") or bin_label
+        bin_props["format"] = binary_inspection.get("format")
+        bin_props["entropy"] = binary_inspection.get("overall_entropy") or binary_inspection.get("shannon_entropy")
+
+    if bin_id != "pe:unknown":
+        graph.add_node(bin_id, "PE_BINARY", bin_label, properties=bin_props)
+
+    if signature_intel and isinstance(signature_intel, dict):
+        trust_stat = signature_intel.get("trust_status", "UNKNOWN")
+        sig_id = f"sig:{trust_stat}"
         graph.add_node(
-            bin_id,
-            "PE_BINARY",
-            pe_forensics.get("file", "target.exe"),
+            sig_id,
+            "SIGNATURE_TRUST",
+            f"Signature: {trust_stat}",
             properties={
-                "pdata_functions": pe_forensics.get("pdata_functions", {}).get("total_runtime_functions", 0),
-                "rtti_vftables": pe_forensics.get("msvc_rtti", {}).get("vftables_count", 0),
-                "pdb_matched": pe_forensics.get("pdb_correlation", {}).get("pdb_verification", {}).get("guid_match", False),
+                "signature_present": bool(signature_intel.get("signature_present", False)),
+                "is_verified": bool(signature_intel.get("is_verified", False)),
+                "signature_type": signature_intel.get("signature_type", "NONE"),
+                "is_whql_certified": bool(signature_intel.get("is_whql_certified", False)),
+                "timestamp_status": signature_intel.get("timestamp_status", "UNKNOWN"),
+                "expiration_status": signature_intel.get("expiration_status", "UNKNOWN"),
             },
         )
-    else:
-        bin_id = "pe:unknown"
+        if bin_id in graph.nodes:
+            graph.add_edge(bin_id, sig_id, "HAS_TRUST_POSTURE", metadata={"weight": 0.95})
+
+    if deobfuscation and isinstance(deobfuscation, dict):
+        cff = deobfuscation.get("control_flow_flattening") or {}
+        has_cff = bool(cff.get("has_control_flow_flattening", False))
+        op_cnt = int(deobfuscation.get("opaque_predicates_detected", 0) or 0)
+        if has_cff or op_cnt > 0:
+            obf_id = "obf:signals"
+            graph.add_node(
+                obf_id,
+                "OBFUSCATION_SIGNAL",
+                f"Obfuscation (CFF={has_cff}, OpaquePreds={op_cnt})",
+                properties={
+                    "has_control_flow_flattening": has_cff,
+                    "opaque_predicates_detected": op_cnt,
+                    "dead_instruction_bytes": deobfuscation.get("dead_instruction_bytes", 0),
+                },
+            )
+            if bin_id in graph.nodes:
+                graph.add_edge(bin_id, obf_id, "EXHIBITS_OBFUSCATION", metadata={"weight": 0.85})
 
     if crash_rca:
         exc_code = crash_rca.get("exception_code", "UNKNOWN_EXCEPTION")

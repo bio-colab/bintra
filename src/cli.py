@@ -2789,6 +2789,27 @@ def _dispatch_cli():
         }})
         print(resp["content"][0]["text"])
 
+    elif cmd == "triage":
+        ap = argparse.ArgumentParser(
+            prog="bintra triage",
+            description="Unified read-only binary triage (PE inspection, deep forensics, signature trust, obfuscation, optional crash RCA & Ghidra fusion)",
+        )
+        ap.add_argument("--file", required=True, help="Target binary file (.exe, .dll, .sys)")
+        ap.add_argument("--dmp", default=None, help="Optional MiniDump (.dmp) file for crash RCA correlation")
+        ap.add_argument("--ghidra", default=None, help="Optional Ghidra export (.json, .jsonl, .db)")
+        ap.add_argument("--function", default=None, help="Optional target function name for Ghidra slicing")
+        ap.add_argument("--skip-deobf", action="store_true", help="Skip entry-point obfuscation analysis")
+        ns = ap.parse_args(sys.argv[2:])
+        from analysis_orchestrator import BinaryTriageOrchestrator
+        res = BinaryTriageOrchestrator.triage_binary(
+            file_path=ns.file,
+            dmp_path=ns.dmp,
+            ghidra_export_path=ns.ghidra,
+            function_name=ns.function,
+            include_deobfuscation=not ns.skip_deobf,
+        )
+        print(json.dumps(res, indent=2, ensure_ascii=False))
+
     elif cmd == "capabilities":
         ap = argparse.ArgumentParser(prog="bintra capabilities")
         ap.add_argument("--platform", choices=["all", "cross_platform", "windows_native", "ghidra_required"], default="all")

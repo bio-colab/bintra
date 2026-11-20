@@ -133,7 +133,7 @@ class TestAuditRemediations(unittest.TestCase):
 
         srv = BintraMcpServer()
         tools = srv.handle_tools_list({})["tools"]
-        self.assertEqual(len(tools), 47)
+        self.assertEqual(len(tools), 48)
         for t in tools:
             self.assertIn(t["name"], srv.TOOL_SECURITY_METADATA)
             self.assertIn("inputSchema", t)
@@ -637,7 +637,7 @@ class TestAuditRemediations(unittest.TestCase):
         import numpy as np
         import mcp_server as mcp_mod
 
-        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 47)
+        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 48)
         dispatch_src = inspect.getsource(mcp_mod.BintraMcpServer.dispatch_tool)
 
         with tempfile.TemporaryDirectory() as td:
@@ -838,7 +838,7 @@ class TestAuditRemediations(unittest.TestCase):
         import mcp_server as mcp_mod
 
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 47)
+        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 48)
 
         discovered_count = unittest.defaultTestLoader.discover(
             os.path.join(repo_root, "tests"), pattern="test_*.py"
@@ -911,7 +911,7 @@ class TestAuditRemediations(unittest.TestCase):
             "skills/bintra/SKILL.md",
             "docs/RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md",
         ):
-            self.assertTrue(any(c in texts[rel] for c in ("47", "46", "44", "42", "40", "34")), f"Expected '47' (or '46'/'44'/'42'/'40'/'34') tool count in {rel}")
+            self.assertTrue(any(c in texts[rel] for c in ("48", "47", "46", "44", "42", "40", "34")), f"Expected '47' (or '46'/'44'/'42'/'40'/'34') tool count in {rel}")
             self.assertNotIn("31 أداة", texts[rel])
             self.assertNotIn("31 MCP", texts[rel])
 

@@ -1161,6 +1161,44 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
+        "name": "bintra_triage_binary",
+        "description": "End-to-end read-only binary triage orchestrator combining PE inspection (mitigations/entropy), PE deep forensics (.pdata/RTTI/PDB), Authenticode/Catalog signature intelligence, obfuscation triage, optional MiniDump crash RCA, optional Ghidra call-graph/data-flow, and unified EvidenceGraph synthesis.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Absolute filesystem path to the target binary (.exe, .dll, or .sys)"
+                },
+                "dmp_path": {
+                    "type": "string",
+                    "description": "Optional MiniDump (.dmp) file path for crash RCA correlation"
+                },
+                "ghidra_export_path": {
+                    "type": "string",
+                    "description": "Optional Ghidra export (.json, .jsonl, or .db) for call-graph and data-flow fusion"
+                },
+                "function_name": {
+                    "type": "string",
+                    "description": "Optional target function name or address for focused Ghidra call-graph and data-flow slicing"
+                },
+                "include_deobfuscation": {
+                    "type": "boolean",
+                    "description": "Run entry-point obfuscation/CFF triage (default true)"
+                },
+                "max_exports": {
+                    "type": "integer",
+                    "description": "Maximum PE exports to include (default 32)"
+                },
+                "forensics_limit": {
+                    "type": "integer",
+                    "description": "Maximum .pdata/RTTI entries to extract (default 200)"
+                }
+            },
+            "required": ["file_path"]
+        }
+    },
+    {
         "name": "bintra_list_capabilities",
         "description": "Self-describing capability manifest for AI agents: returns all registered Bintra MCP tools, environment requirements (cross_platform vs windows_native vs ghidra_required), security modes, and recommended decision workflows.",
         "inputSchema": {
@@ -1186,6 +1224,10 @@ class BintraMcpServer:
             "notifications/initialized": self.handle_initialized_notification,
             "tools/list": self.handle_tools_list,
             "tools/call": self.handle_tools_call,
+            "resources/list": self.handle_resources_list,
+            "resources/read": self.handle_resources_read,
+            "prompts/list": self.handle_prompts_list,
+            "prompts/get": self.handle_prompts_get,
             "ping": self.handle_ping,
         }
         self._tool_schemas = {
@@ -1325,6 +1367,13 @@ class BintraMcpServer:
             "capabilities": {
                 "tools": {
                     "listChanged": False
+                },
+                "resources": {
+                    "subscribe": False,
+                    "listChanged": False
+                },
+                "prompts": {
+                    "listChanged": False
                 }
             },
             "serverInfo": {
@@ -1341,14 +1390,15 @@ class BintraMcpServer:
 
     MCP_TOOL_PROFILES = {
         "core": {
-            "bintra_inspect_binary", "bintra_pe_deep_forensics", "bintra_sensory_audit",
-            "bintra_deobfuscate_binary", "bintra_binary_diff", "bintra_list_capabilities",
+            "bintra_triage_binary", "bintra_inspect_binary", "bintra_pe_deep_forensics",
+            "bintra_sensory_audit", "bintra_deobfuscate_binary", "bintra_binary_diff",
+            "bintra_list_capabilities",
         },
         "static": {
-            "bintra_inspect_binary", "bintra_pe_deep_forensics", "bintra_deobfuscate_binary",
-            "bintra_dump_bytes", "bintra_match_functions", "bintra_scan_hybrid",
-            "bintra_sensory_audit", "bintra_binary_diff", "bintra_patch_binary",
-            "bintra_list_capabilities",
+            "bintra_triage_binary", "bintra_inspect_binary", "bintra_pe_deep_forensics",
+            "bintra_deobfuscate_binary", "bintra_dump_bytes", "bintra_match_functions",
+            "bintra_scan_hybrid", "bintra_sensory_audit", "bintra_binary_diff",
+            "bintra_patch_binary", "bintra_list_capabilities",
         },
         "ghidra": {
             "bintra_ghidra_analyze", "bintra_ghidra_headless", "bintra_ghidra_live_bridge",
@@ -1375,14 +1425,209 @@ class BintraMcpServer:
             tools = [t for t in TOOLS_REGISTRY if t["name"] in allowed]
         elif profile == "windows":
             tools = [t for t in TOOLS_REGISTRY if t["name"] not in self.MCP_TOOL_PROFILES["neural"] or t["name"] == "bintra_list_capabilities"]
-        if compact:
-            tools = [compact_tool_schema(t) for t in tools]
+        enriched_tools = []
+        for t in tools:
+            item = compact_tool_schema(t) if compact else dict(t)
+            item["annotations"] = self._derive_tool_annotations(item["name"])
+            enriched_tools.append(item)
 
         base_tok = estimate_tokens(TOOLS_REGISTRY)
-        act_tok = estimate_tokens(tools)
+        act_tok = estimate_tokens(enriched_tools)
         self.token_tracker.record_schema_footprint(act_tok, base_tok)
         return {
-            "tools": tools
+            "tools": enriched_tools
+        }
+
+    @classmethod
+    def _derive_tool_annotations(cls, tool_name: str) -> Dict[str, Any]:
+        """Derives authoritative MCP Tool Annotations from TOOL_SECURITY_METADATA."""
+        sec = cls.TOOL_SECURITY_METADATA.get(tool_name, ("cap.file.read", "READ", None))
+        cap_val, mode, _ = sec
+        is_read_only = mode in ("READ", "QUERY") and cap_val not in (
+            "cap.workspace.write", "cap.ghidra.headless_exec", "cap.ghidra.project_mutate"
+        )
+        return {
+            "readOnlyHint": is_read_only,
+            "destructiveHint": False,  # Target binaries are strictly immutable across all Bintra tools
+            "idempotentHint": is_read_only,
+            "openWorldHint": False,
+        }
+
+    MCP_RESOURCES: List[Dict[str, Any]] = [
+        {
+            "uri": "bintra://capabilities",
+            "name": "Bintra Capability Catalog",
+            "description": "Live platform-aware manifest of all registered Bintra MCP tools, capabilities, and workflows.",
+            "mimeType": "application/json",
+        },
+        {
+            "uri": "bintra://security/policy",
+            "name": "Bintra Security Kernel Policy",
+            "description": "Active workspace boundary, prohibited hazard capabilities, and component capability grants.",
+            "mimeType": "application/json",
+        },
+        {
+            "uri": "bintra://telemetry/session",
+            "name": "Bintra Token Efficiency Telemetry",
+            "description": "Current MCP session token footprint, call count, and token savings summary.",
+            "mimeType": "application/json",
+        },
+        {
+            "uri": "bintra://workflows/playbooks",
+            "name": "Bintra Reverse Engineering Playbooks",
+            "description": "Structured multi-tool workflows for PE triage, crash RCA, Ghidra analysis, and Windows auditing.",
+            "mimeType": "application/json",
+        },
+    ]
+
+    MCP_PROMPTS: List[Dict[str, Any]] = [
+        {
+            "name": "triage_pe_binary",
+            "description": "Run a complete read-only triage of a Windows PE binary combining headers, .pdata/RTTI/PDB, digital signature trust, obfuscation, and optional crash/Ghidra correlation.",
+            "arguments": [
+                {"name": "file_path", "description": "Absolute path to the target binary (.exe, .dll, .sys)", "required": True},
+                {"name": "dmp_path", "description": "Optional MiniDump (.dmp) file path", "required": False},
+                {"name": "ghidra_export_path", "description": "Optional Ghidra export (.json/.jsonl/.db) path", "required": False},
+            ],
+        },
+        {
+            "name": "root_cause_crash",
+            "description": "Correlate a Windows MiniDump (.dmp) crash with static PE forensics and Ghidra call-graph/data-flow evidence.",
+            "arguments": [
+                {"name": "dmp_path", "description": "Path to MiniDump (.dmp) file", "required": True},
+                {"name": "binary_path", "description": "Optional faulting binary path", "required": False},
+                {"name": "ghidra_export_path", "description": "Optional Ghidra export path", "required": False},
+            ],
+        },
+        {
+            "name": "audit_windows_host",
+            "description": "Perform a read-only Windows host security, driver, service, and telemetry audit.",
+            "arguments": [
+                {"name": "focus", "description": "Audit domain: all, drivers, network, processes, or registry", "required": False},
+            ],
+        },
+        {
+            "name": "diff_binary_versions",
+            "description": "Compare two versions of a binary semantically using WL-CFG hashing, P-Code behavior vectors, and API anchors.",
+            "arguments": [
+                {"name": "baseline_path", "description": "Path to baseline binary or Ghidra export", "required": True},
+                {"name": "target_path", "description": "Path to target binary or Ghidra export", "required": True},
+            ],
+        },
+    ]
+
+    def handle_resources_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        return {"resources": list(self.MCP_RESOURCES)}
+
+    def handle_resources_read(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        uri = (params or {}).get("uri")
+        if not uri or not isinstance(uri, str):
+            raise ValueError("Missing required parameter 'uri' for resources/read.")
+
+        if uri == "bintra://capabilities":
+            payload = self.dispatch_tool("bintra_list_capabilities", {"platform_filter": "all"})
+        elif uri == "bintra://security/policy":
+            from security.capability_registry import PROHIBITED_HAZARDS, CapabilityRegistry
+            payload = {
+                "host_workspace": self._host_workspace,
+                "allowed_workspace_roots": list(self._allowed_workspace_roots),
+                "prohibited_hazards": sorted(h.value for h in PROHIBITED_HAZARDS),
+                "registered_components_count": len(CapabilityRegistry.COMPONENT_CAPABILITIES),
+                "target_immutability": True,
+            }
+        elif uri == "bintra://telemetry/session":
+            payload = self.token_tracker.summary()
+        elif uri == "bintra://workflows/playbooks":
+            payload = {
+                "playbooks": {
+                    "unified_binary_triage": ["bintra_triage_binary"],
+                    "static_pe_deep_audit": ["bintra_inspect_binary", "bintra_pe_deep_forensics", "bintra_deobfuscate_binary", "bintra_scan_hybrid"],
+                    "ghidra_deep_re": ["bintra_ghidra_analyze", "bintra_ghidra_call_graph", "bintra_ghidra_data_flow"],
+                    "crash_root_cause_fusion": ["bintra_dmp_inspect", "bintra_crash_rca", "bintra_pe_deep_forensics", "bintra_fuse_evidence"],
+                    "differential_binary_audit": ["bintra_binary_diff", "bintra_match_functions", "bintra_match_pcode"],
+                    "windows_host_audit": ["bintra_windows_env_audit", "bintra_driver_audit", "bintra_service_audit", "bintra_network_connections"],
+                }
+            }
+        else:
+            raise ValueError(f"Unknown Bintra MCP resource URI: '{uri}'.")
+
+        return {
+            "contents": [
+                {
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": json.dumps(payload, indent=2, ensure_ascii=False),
+                }
+            ]
+        }
+
+    def handle_prompts_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        return {"prompts": list(self.MCP_PROMPTS)}
+
+    def handle_prompts_get(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        params = params or {}
+        name = params.get("name")
+        p_args = params.get("arguments") or {}
+        if not name or not isinstance(name, str):
+            raise ValueError("Missing required parameter 'name' for prompts/get.")
+
+        if name == "triage_pe_binary":
+            fp = p_args.get("file_path")
+            if not fp:
+                raise ValueError("Prompt 'triage_pe_binary' requires argument 'file_path'.")
+            extra = []
+            if p_args.get("dmp_path"):
+                extra.append(f"dmp_path='{p_args['dmp_path']}'")
+            if p_args.get("ghidra_export_path"):
+                extra.append(f"ghidra_export_path='{p_args['ghidra_export_path']}'")
+            extra_str = (", " + ", ".join(extra)) if extra else ""
+            text = (
+                f"Perform a read-only Bintra binary triage on '{fp}'. "
+                f"Start by calling bintra_triage_binary(file_path='{fp}'{extra_str}). "
+                f"Report observed facts separately from heuristic indicators, include digital signature trust status, "
+                f"and recommend concrete next tools if obfuscation or missing symbols are detected."
+            )
+        elif name == "root_cause_crash":
+            dp = p_args.get("dmp_path")
+            if not dp:
+                raise ValueError("Prompt 'root_cause_crash' requires argument 'dmp_path'.")
+            bp = p_args.get("binary_path", "")
+            gp = p_args.get("ghidra_export_path", "")
+            text = (
+                f"Investigate the Windows crash dump at '{dp}'. "
+                f"Run bintra_dmp_inspect and bintra_crash_rca on '{dp}', then fuse evidence with "
+                f"bintra_fuse_evidence(dmp_path='{dp}', binary_path='{bp}', ghidra_export_path='{gp}'). "
+                f"Distinguish confirmed faulting module/RVA facts from root-cause hypotheses."
+            )
+        elif name == "audit_windows_host":
+            focus = p_args.get("focus", "all")
+            text = (
+                f"Run a read-only Windows host audit focused on '{focus}'. "
+                f"Use bintra_windows_env_audit alongside relevant introspection tools "
+                f"(bintra_driver_audit, bintra_service_audit, bintra_network_connections, bintra_registry_audit). "
+                f"Flag any non-Windows degradation explicitly instead of guessing host state."
+            )
+        elif name == "diff_binary_versions":
+            b_path = p_args.get("baseline_path")
+            t_path = p_args.get("target_path")
+            if not b_path or not t_path:
+                raise ValueError("Prompt 'diff_binary_versions' requires 'baseline_path' and 'target_path'.")
+            text = (
+                f"Perform a semantic binary differential analysis between baseline '{b_path}' and target '{t_path}'. "
+                f"Call bintra_binary_diff(baseline_path='{b_path}', target_path='{t_path}') and summarize added, "
+                f"removed, and behaviorally modified routines."
+            )
+        else:
+            raise ValueError(f"Unknown Bintra MCP prompt: '{name}'.")
+
+        return {
+            "description": next((p["description"] for p in self.MCP_PROMPTS if p["name"] == name), ""),
+            "messages": [
+                {
+                    "role": "user",
+                    "content": {"type": "text", "text": text},
+                }
+            ],
         }
 
     TOOL_SECURITY_METADATA = {
@@ -1432,6 +1677,7 @@ class BintraMcpServer:
         "bintra_ghidra_call_graph": ("cap.file.read", "READ", "export_path"),
         "bintra_ghidra_data_flow": ("cap.file.read", "READ", "export_path"),
         "bintra_fuse_evidence": ("cap.file.read", "READ", "binary_path"),
+        "bintra_triage_binary": ("cap.file.read", "READ", "file_path"),
         "bintra_list_capabilities": ("cap.file.read", "READ", None)
     }
 
@@ -1555,6 +1801,13 @@ class BintraMcpServer:
                         if pretty_print
                         else json.dumps(result_data, separators=(",", ":"), ensure_ascii=False)
                     )
+                is_structured_error = (
+                    isinstance(raw_result_data, dict)
+                    and (
+                        raw_result_data.get("status") == "error"
+                        or raw_result_data.get("decision") == "DENY"
+                    )
+                )
                 return {
                     "content": [
                         {
@@ -1562,7 +1815,7 @@ class BintraMcpServer:
                             "text": serialized_text
                         }
                     ],
-                    "isError": False
+                    "isError": is_structured_error
                 }
         except Exception as exc:
             tb = traceback.format_exc()
@@ -2583,12 +2836,18 @@ class BintraMcpServer:
         elif name == "bintra_fuse_evidence":
             from windows_intelligence.evidence_engine.graph_model import fuse_static_dynamic_ghidra
             pe_res = None
+            sig_res = None
             rca_res = None
             cg_res = None
             df_res = None
             if args.get("binary_path"):
                 from pe_deep_forensics import PeDeepForensicsInspector
+                from windows_intelligence.signature_intelligence import WindowsSignatureIntelligence
                 pe_res = PeDeepForensicsInspector().inspect(args["binary_path"], limit=200)
+                try:
+                    sig_res = WindowsSignatureIntelligence.verify_file(args["binary_path"], check_catalog=True)
+                except Exception:
+                    sig_res = None
             if args.get("dmp_path"):
                 from windows_intelligence import CrashRootCauseAnalyzer
                 rca_res = CrashRootCauseAnalyzer.analyze_crash(dump_target=args["dmp_path"], binary_path=args.get("binary_path"))
@@ -2603,7 +2862,25 @@ class BintraMcpServer:
                         fn_match = store.get_function(args["function_name"])
                         if fn_match:
                             df_res = analyzer.slice_data_flow(fn_match)
-            return fuse_static_dynamic_ghidra(pe_forensics=pe_res, crash_rca=rca_res, ghidra_call_graph=cg_res, ghidra_data_flow=df_res)
+            return fuse_static_dynamic_ghidra(
+                pe_forensics=pe_res,
+                crash_rca=rca_res,
+                ghidra_call_graph=cg_res,
+                ghidra_data_flow=df_res,
+                signature_intel=sig_res,
+            )
+
+        elif name == "bintra_triage_binary":
+            from analysis_orchestrator import BinaryTriageOrchestrator
+            return BinaryTriageOrchestrator.triage_binary(
+                file_path=args["file_path"],
+                dmp_path=args.get("dmp_path"),
+                ghidra_export_path=args.get("ghidra_export_path"),
+                function_name=args.get("function_name"),
+                include_deobfuscation=bool(args.get("include_deobfuscation", True)),
+                max_exports=int(args.get("max_exports", 32)),
+                forensics_limit=int(args.get("forensics_limit", 200)),
+            )
 
         elif name == "bintra_list_capabilities":
             import platform as _plat

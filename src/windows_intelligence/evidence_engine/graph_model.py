@@ -177,18 +177,23 @@ class EvidenceGraph:
 
 def evaluate_data_flow_crash_causality(
     ghidra_data_flow: Dict[str, Any],
-    crash_rca: Dict[str, Any]
+    crash_rca: Dict[str, Any],
+    provenance: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Rigorously evaluates the epistemic relationship between Ghidra High P-Code
     data flow slice and Crash RCA telemetry.
-    Returns:
-        level: 'CAUSALLY_VALIDATED' | 'CAUSAL_HYPOTHESIS' | 'CORRELATED' | 'CO_OCCURRENCE'
-        relation: edge relation type
-        relation_semantic: semantic classification
-        epistemic_confidence: epistemic confidence (0.0 - 1.0)
-        weight: graph edge weight
-        confidence_rationale: textual explanation of the match or lack thereof
+    Categorizes into 4 epistemic levels:
+      1. CAUSALLY_VALIDATED (epistemic_confidence: 0.95):
+         Requires cryptographically verified Ghidra provenance, exact crash instruction
+         matching a verified sink with exact culprit register flow, and continuous def-use slice.
+      2. CAUSAL_HYPOTHESIS (epistemic_confidence: 0.70):
+         Requires cryptographically verified Ghidra provenance, with intermediate slice
+         operation or adjacent sink matching culprit register.
+      3. CORRELATED (epistemic_confidence: 0.50):
+         Function context match, or unverified/heuristic Ghidra provenance.
+      4. CO_OCCURRENCE (epistemic_confidence: 0.20):
+         Background presence without causal topological convergence.
     """
     def _parse_addr(val: Any) -> Optional[int]:
         if val is None:
@@ -208,42 +213,70 @@ def evaluate_data_flow_crash_causality(
                 return None
         return None
 
-    slice_addrs = set()
-    slice_tokens = set()
+    def _token_contains_register(tok: str, reg_set: Set[str]) -> bool:
+        if not tok or not reg_set:
+            return False
+        # Exact word token matching to eliminate substring false-positives (e.g. 'AX' in 'TAX')
+        words = set(re.findall(r"[A-Za-z0-9_]+", tok.upper()))
+        return bool(words & reg_set)
 
+    # Check cryptographic provenance upfront
+    if not provenance and isinstance(ghidra_data_flow, dict):
+        provenance = ghidra_data_flow.get("provenance")
+
+    is_crypto_proven = False
+    prov_warning = ""
+    epistemic_reasons = []
+    if provenance and isinstance(provenance, dict):
+        prov_status = provenance.get("status") or provenance.get("verification_level")
+        if prov_status == "VERIFIED_CRYPTOGRAPHIC_HASH":
+            is_crypto_proven = True
+        else:
+            prov_warning = f"[Unverified Provenance: {prov_status}] Cryptographic SHA-256 match missing or quarantined. "
+            epistemic_reasons.append(f"Provenance verification missing or heuristic ({prov_status}); capped at CORRELATED (<=0.50)")
+    else:
+        prov_warning = "[Unverified Provenance: NOT_PROVIDED] Ghidra export lacks cryptographic hash verification. "
+        epistemic_reasons.append("Provenance verification missing or heuristic (NOT_PROVIDED); capped at CORRELATED (<=0.50)")
+
+    sink_addrs = set()
+    sink_tokens = set()
     for s in ghidra_data_flow.get("sinks", []):
         if isinstance(s, dict):
             a = _parse_addr(s.get("address"))
             if a is not None:
-                slice_addrs.add(a)
+                sink_addrs.add(a)
             if s.get("var"):
-                slice_tokens.add(str(s["var"]).upper())
+                sink_tokens.add(str(s["var"]))
             for inp in s.get("inputs", []):
-                slice_tokens.add(str(inp).upper())
+                sink_tokens.add(str(inp))
         elif isinstance(s, str):
-            slice_tokens.add(s.upper())
+            sink_tokens.add(s)
+
+    slice_op_addrs = set()
+    slice_tokens = set(sink_tokens)
+    for op in ghidra_data_flow.get("backward_slice", []):
+        if isinstance(op, dict):
+            a = _parse_addr(op.get("address"))
+            if a is not None:
+                slice_op_addrs.add(a)
+            if op.get("output"):
+                slice_tokens.add(str(op["output"]))
+            for inp in op.get("inputs", []):
+                slice_tokens.add(str(inp))
+        elif isinstance(op, str):
+            slice_tokens.add(op)
 
     for s in ghidra_data_flow.get("sources", []):
         if isinstance(s, dict):
             a = _parse_addr(s.get("address"))
             if a is not None:
-                slice_addrs.add(a)
+                slice_op_addrs.add(a)
             if s.get("var"):
-                slice_tokens.add(str(s["var"]).upper())
+                slice_tokens.add(str(s["var"]))
+            for inp in s.get("inputs", []):
+                slice_tokens.add(str(inp))
         elif isinstance(s, str):
-            slice_tokens.add(s.upper())
-
-    for op in ghidra_data_flow.get("backward_slice", []):
-        if isinstance(op, dict):
-            a = _parse_addr(op.get("address"))
-            if a is not None:
-                slice_addrs.add(a)
-            if op.get("output"):
-                slice_tokens.add(str(op["output"]).upper())
-            for inp in op.get("inputs", []):
-                slice_tokens.add(str(inp).upper())
-        elif isinstance(op, str):
-            slice_tokens.add(op.upper())
+            slice_tokens.add(s)
 
     fault_rva = _parse_addr(crash_rca.get("fault_rva") or crash_rca.get("fault_address"))
     fault_va = _parse_addr(crash_rca.get("fault_virtual_address"))
@@ -269,19 +302,26 @@ def evaluate_data_flow_crash_causality(
     }
     target_reg_set = reg_families.get(culprit_reg, {culprit_reg}) if culprit_reg else set()
 
-    has_exact_address = (
-        (fault_rva is not None and fault_rva in slice_addrs) or
-        (fault_va is not None and fault_va in slice_addrs)
+    has_exact_sink = (
+        (fault_rva is not None and fault_rva in sink_addrs) or
+        (fault_va is not None and fault_va in sink_addrs)
     )
 
+    has_slice_op_match = (
+        (fault_rva is not None and fault_rva in slice_op_addrs) or
+        (fault_va is not None and fault_va in slice_op_addrs)
+    )
+
+    all_slice_addrs = sink_addrs | slice_op_addrs
     has_adjacent_address = False
-    if not has_exact_address:
-        for a in slice_addrs:
+    if not (has_exact_sink or has_slice_op_match):
+        for a in all_slice_addrs:
             if (fault_rva is not None and abs(a - fault_rva) <= 64) or (fault_va is not None and abs(a - fault_va) <= 64):
                 has_adjacent_address = True
                 break
 
-    has_register_overlap = bool(target_reg_set and any(any(r in tok for r in target_reg_set) for tok in slice_tokens))
+    has_sink_register_match = any(_token_contains_register(tok, target_reg_set) for tok in sink_tokens)
+    has_slice_register_match = any(_token_contains_register(tok, target_reg_set) for tok in slice_tokens)
 
     fn_name = str(ghidra_data_flow.get("function") or "").lower()
     fault_mod = str(crash_rca.get("fault_module") or "").lower()
@@ -295,7 +335,10 @@ def evaluate_data_flow_crash_causality(
     elif fn_name and fault_mod and (fn_name in fault_mod or fault_mod in fn_name):
         has_function_match = True
 
-    if has_exact_address and has_register_overlap:
+    slice_depth = len(ghidra_data_flow.get("backward_slice", []))
+
+    # Level 1: Deterministic Causality (Strictly requires cryptographic provenance & exact sink match)
+    if is_crypto_proven and has_exact_sink and has_sink_register_match:
         addr_str = hex(fault_rva) if fault_rva is not None else hex(fault_va)
         return {
             "level": "CAUSALLY_VALIDATED",
@@ -303,49 +346,70 @@ def evaluate_data_flow_crash_causality(
             "relation_semantic": "CAUSALLY_VALIDATED_FAULT_PATHWAY",
             "epistemic_confidence": 0.95,
             "weight": 0.95,
+            "register_matched": True,
+            "epistemic_reasons": ["Exact instruction address and culprit register match with verified cryptographic provenance"],
             "confidence_rationale": (
-                f"Deterministic causality: data flow slice sink at {addr_str} directly manipulates "
-                f"culprit register {culprit_reg} that caused crash exception."
+                f"Deterministic causality: cryptographically verified Ghidra slice sink at {addr_str} directly manipulates "
+                f"culprit register {culprit_reg} across {slice_depth} def-use operations leading to crash exception."
             ),
         }
-    elif has_exact_address or (has_adjacent_address and has_register_overlap):
+
+    # Level 2: Causal Hypothesis (Requires cryptographic provenance and nearby or intermediate match)
+    if is_crypto_proven and (
+        (has_exact_sink and has_slice_register_match) or
+        (has_slice_op_match and has_slice_register_match) or
+        (has_adjacent_address and has_sink_register_match)
+    ):
         return {
             "level": "CAUSAL_HYPOTHESIS",
             "relation": "HYPOTHESIZES_FAULT_INPUT",
             "relation_semantic": "CAUSAL_HYPOTHESIS",
-            "epistemic_confidence": 0.75,
-            "weight": 0.75,
+            "epistemic_confidence": 0.70,
+            "weight": 0.70,
+            "register_matched": bool(has_sink_register_match or has_slice_register_match),
+            "epistemic_reasons": ["Nearby or intermediate instruction and register correlation with verified provenance"],
             "confidence_rationale": (
-                f"Causal hypothesis: data flow slice terminates near faulting address or directly touches "
-                f"culprit register {culprit_reg} in execution path."
+                f"Causal hypothesis: verified data flow slice manipulates culprit register {culprit_reg} "
+                f"along execution pathway near faulting address."
             ),
         }
-    elif has_function_match or has_register_overlap:
+
+    # Level 3: Correlated (Contextual function match, or unverified/heuristic Ghidra provenance)
+    if has_function_match or has_slice_register_match or has_exact_sink or has_slice_op_match:
+        conf = 0.50 if not is_crypto_proven else 0.55
+        reasons = list(epistemic_reasons)
+        if not reasons:
+            reasons.append("Data flow slice resides in function context or overlaps registers/addresses without full deterministic proof")
         return {
             "level": "CORRELATED",
             "relation": "CORRELATES_WITH_FAULT",
             "relation_semantic": "CORRELATED_FUNCTION_CONTEXT",
-            "epistemic_confidence": 0.55,
-            "weight": 0.55,
+            "epistemic_confidence": conf,
+            "weight": conf,
+            "register_matched": bool(has_sink_register_match or has_slice_register_match),
+            "epistemic_reasons": reasons,
             "confidence_rationale": (
-                "Correlated context: data flow slice resides in faulting function context, but specific "
-                "instruction sink address did not match crash telemetry."
-            ),
-        }
-    else:
-        return {
-            "level": "CO_OCCURRENCE",
-            "relation": "CO_OCCURS_IN_INCIDENT",
-            "relation_semantic": "CO_OCCURRENCE",
-            "epistemic_confidence": 0.25,
-            "weight": 0.25,
-            "confidence_rationale": (
-                "Co-occurrence only: Ghidra static slice and crash telemetry were both recorded in incident, "
-                "but do not share instruction addresses or register operands."
+                f"{prov_warning}Correlated context: data flow slice resides in function context or overlaps registers/addresses, "
+                f"but complete def-use causal path to crash sink is not deterministically proven."
             ),
         }
 
-
+    # Level 4: Co-occurrence
+    reasons = list(epistemic_reasons)
+    reasons.append("No shared instruction addresses or register operands between slice and crash telemetry")
+    return {
+        "level": "CO_OCCURRENCE",
+        "relation": "CO_OCCURS_IN_INCIDENT",
+        "relation_semantic": "CO_OCCURRENCE",
+        "epistemic_confidence": 0.20,
+        "weight": 0.20,
+        "register_matched": bool(has_sink_register_match or has_slice_register_match),
+        "epistemic_reasons": reasons,
+        "confidence_rationale": (
+            f"{prov_warning}Co-occurrence only: Ghidra static slice and crash telemetry were both recorded in incident, "
+            f"but do not share instruction addresses or register operands."
+        ),
+    }
 def fuse_static_dynamic_ghidra(
     pe_forensics: Optional[Dict[str, Any]] = None,
     crash_rca: Optional[Dict[str, Any]] = None,
@@ -529,16 +593,34 @@ def fuse_static_dynamic_ghidra(
     if ghidra_data_flow and ghidra_data_flow.get("status") == "ok":
         fn_name = ghidra_data_flow.get("function", "unknown")
         df_id = f"ghidra:slice:{fn_name}"
+        df_confidence = 0.90
+        df_vlevel = "STATIC_SSA_SLICE"
+        df_rationale = "High P-Code SSA def-use intra-procedural slice."
+        if ghidra_provenance and isinstance(ghidra_provenance, dict):
+            if ghidra_provenance.get("status") == "HEURISTIC_NAME_MATCH":
+                df_confidence = 0.60
+                df_vlevel = "HEURISTIC_FILENAME_MATCH"
+                df_rationale = "Data flow slice loaded under unverified filename heuristic; cryptographic hash missing."
+            elif ghidra_provenance.get("status") == "VERIFIED_CRYPTOGRAPHIC_HASH":
+                df_confidence = 0.95
+                df_vlevel = "CRYPTOGRAPHIC_PROVENANCE_VERIFIED"
+                df_rationale = "Cryptographically verified SHA-256 data flow slice against target binary."
+            else:
+                df_confidence = 0.40
+                df_vlevel = "UNVERIFIED_PROVENANCE_QUARANTINED"
+                df_rationale = "Data flow slice lacks verified cryptographic provenance."
+
         graph.add_node(
             df_id,
             "DATA_FLOW_SLICE",
             f"DataFlow Slice: {fn_name}",
             properties={
                 "evidence_source": "GHIDRA_STATIC_ANALYZER",
-                "verification_level": "STATIC_SSA_SLICE",
+                "verification_level": df_vlevel,
                 "sources_count": ghidra_data_flow.get("sources_count", 0),
                 "sinks_count": ghidra_data_flow.get("sinks_count", 0),
                 "slice_depth": len(ghidra_data_flow.get("backward_slice", [])),
+                "provenance_status": ghidra_provenance.get("status") if ghidra_provenance else "NOT_PROVIDED",
             },
         )
         if "ghidra:call_graph" in graph.nodes:
@@ -547,17 +629,17 @@ def fuse_static_dynamic_ghidra(
                 df_id,
                 "CONTAINS_SLICE",
                 metadata={
-                    "weight": 0.90,
+                    "weight": df_confidence,
                     "evidence_source": "GHIDRA_STATIC_ANALYZER",
-                    "verification_level": "STATIC_SSA_SLICE",
+                    "verification_level": df_vlevel,
                     "relation_semantic": "INTRA_PROCEDURAL_DATA_FLOW",
-                    "epistemic_confidence": 0.90,
-                    "confidence_rationale": "High P-Code SSA def-use intra-procedural slice.",
+                    "epistemic_confidence": df_confidence,
+                    "confidence_rationale": df_rationale,
                 },
             )
         if crash_rca:
             exc_code = crash_rca.get("exception_code", "UNKNOWN_EXCEPTION")
-            causality = evaluate_data_flow_crash_causality(ghidra_data_flow, crash_rca)
+            causality = evaluate_data_flow_crash_causality(ghidra_data_flow, crash_rca, provenance=ghidra_provenance)
             graph.add_edge(
                 df_id,
                 f"crash:{exc_code}",

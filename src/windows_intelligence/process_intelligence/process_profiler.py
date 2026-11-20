@@ -33,6 +33,50 @@ PROCESS_VM_READ = 0x0010
 GR_GDIOBJECTS = 0
 GR_USEROBJECTS = 1
 
+_WIN32_INITIALIZED = False
+
+
+def _init_win32_prototypes():
+    """Explicitly configures Win32 foreign function prototypes with 64-bit safe ctypes."""
+    global _WIN32_INITIALIZED
+    if _WIN32_INITIALIZED or os.name != "nt":
+        return
+    windll = getattr(ctypes, "windll", None)
+    if not windll:
+        return
+
+    k32 = getattr(windll, "kernel32", None)
+    if k32:
+        if hasattr(k32, "OpenProcess"):
+            k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            k32.OpenProcess.restype = wintypes.HANDLE
+        if hasattr(k32, "CloseHandle"):
+            k32.CloseHandle.argtypes = [wintypes.HANDLE]
+            k32.CloseHandle.restype = wintypes.BOOL
+        if hasattr(k32, "GetProcessHandleCount"):
+            k32.GetProcessHandleCount.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+            k32.GetProcessHandleCount.restype = wintypes.BOOL
+        if hasattr(k32, "GetLastError"):
+            k32.GetLastError.argtypes = []
+            k32.GetLastError.restype = wintypes.DWORD
+
+    ps = getattr(windll, "psapi", getattr(windll, "kernel32", None))
+    if ps and hasattr(ps, "GetProcessMemoryInfo"):
+        ps.GetProcessMemoryInfo.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(PROCESS_MEMORY_COUNTERS_EX),
+            wintypes.DWORD
+        ]
+        ps.GetProcessMemoryInfo.restype = wintypes.BOOL
+
+    u32 = getattr(windll, "user32", None)
+    if u32 and hasattr(u32, "GetGuiResources"):
+        u32.GetGuiResources.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        u32.GetGuiResources.restype = wintypes.DWORD
+
+    _WIN32_INITIALIZED = True
+
+
 
 class PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
     _fields_ = [
@@ -118,6 +162,7 @@ class ProcessLongitudinalProfiler:
         if os.name != "nt":
             return None
 
+        _init_win32_prototypes()
         k32 = cls._get_kernel32()
         u32 = cls._get_user32()
         ps = cls._get_psapi()
@@ -139,8 +184,12 @@ class ProcessLongitudinalProfiler:
                 return None
 
             h_cnt = wintypes.DWORD(0)
+            handles_val = 0
             if hasattr(k32, "GetProcessHandleCount"):
-                k32.GetProcessHandleCount(h_proc, ctypes.byref(h_cnt))
+                if k32.GetProcessHandleCount(h_proc, ctypes.byref(h_cnt)):
+                    handles_val = h_cnt.value
+                else:
+                    handles_val = -1
 
             gdi_cnt = 0
             usr_cnt = 0
@@ -155,7 +204,7 @@ class ProcessLongitudinalProfiler:
                 private_bytes=pmc.PagefileUsage,
                 peak_working_set_bytes=pmc.PeakWorkingSetSize,
                 peak_private_bytes=pmc.PeakPagefileUsage,
-                kernel_handles=h_cnt.value,
+                kernel_handles=handles_val,
                 gdi_handles=gdi_cnt,
                 user_handles=usr_cnt,
             )
@@ -173,6 +222,9 @@ class ProcessLongitudinalProfiler:
         """
         Profiles a target process over multiple consecutive time intervals,
         computing linear regression slopes and classifying resource behavior.
+        Enforces defensive bounds:
+          - samples_count: bounded to [2, 120]
+          - interval_seconds: bounded to [0.01, 10.0]
         """
         if os.name != "nt":
             return {
@@ -180,6 +232,10 @@ class ProcessLongitudinalProfiler:
                 "platform": sys.platform,
                 "reason": "Process longitudinal profiling requires Windows NT."
             }
+
+        _init_win32_prototypes()
+        samples_count = max(2, min(int(samples_count), 120))
+        interval_seconds = max(0.01, min(float(interval_seconds), 10.0))
 
         k32 = cls._get_kernel32()
         u32 = cls._get_user32()
@@ -191,7 +247,8 @@ class ProcessLongitudinalProfiler:
         if not h_proc:
             h_proc = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
             if not h_proc:
-                return {"status": "error", "error": f"Failed to open process PID {pid}."}
+                err = k32.GetLastError() if hasattr(k32, "GetLastError") else 0
+                return {"status": "error", "error": f"Failed to open process PID {pid} (Win32 error: {err})."}
 
         samples: List[ProcessResourceSample] = []
         try:
@@ -202,8 +259,12 @@ class ProcessLongitudinalProfiler:
                     break
 
                 h_cnt = wintypes.DWORD(0)
+                handles_val = 0
                 if hasattr(k32, "GetProcessHandleCount"):
-                    k32.GetProcessHandleCount(h_proc, ctypes.byref(h_cnt))
+                    if k32.GetProcessHandleCount(h_proc, ctypes.byref(h_cnt)):
+                        handles_val = h_cnt.value
+                    else:
+                        handles_val = -1
 
                 gdi_cnt = 0
                 usr_cnt = 0
@@ -218,7 +279,7 @@ class ProcessLongitudinalProfiler:
                     private_bytes=pmc.PagefileUsage,
                     peak_working_set_bytes=pmc.PeakWorkingSetSize,
                     peak_private_bytes=pmc.PeakPagefileUsage,
-                    kernel_handles=h_cnt.value,
+                    kernel_handles=handles_val,
                     gdi_handles=gdi_cnt,
                     user_handles=usr_cnt,
                 )
@@ -230,7 +291,7 @@ class ProcessLongitudinalProfiler:
             k32.CloseHandle(h_proc)
 
         if not samples:
-            return {"status": "error", "error": "No samples could be collected."}
+            return {"status": "error", "error": f"Failed to acquire memory telemetry for PID {pid}."}
 
         return cls.analyze_telemetry_series(pid, [s.to_dict() for s in samples])
 
@@ -242,7 +303,8 @@ class ProcessLongitudinalProfiler:
     ) -> Dict[str, Any]:
         """
         Analyzes an existing series of process samples (from live profiling or recorded logs),
-        computing regression slopes, handle deltas, and behavioral diagnostics.
+        computing regression slopes, handle deltas, and behavioral diagnostics across
+        Private Bytes, Working Set, Kernel Handles, GDI Objects, and USER Objects.
         """
         n = len(telemetry_samples)
         if n == 0:
@@ -251,8 +313,9 @@ class ProcessLongitudinalProfiler:
         x = [s.get("sample_index", i + 1) for i, s in enumerate(telemetry_samples)]
         y_priv = [s["private_bytes_mb"] for s in telemetry_samples]
         y_ws = [s["working_set_mb"] for s in telemetry_samples]
-        y_hnd = [s["kernel_handles"] for s in telemetry_samples]
-        y_gdi = [s["gdi_handles"] for s in telemetry_samples]
+        y_hnd = [s.get("kernel_handles", 0) for s in telemetry_samples]
+        y_gdi = [s.get("gdi_handles", 0) for s in telemetry_samples]
+        y_usr = [s.get("user_handles", 0) for s in telemetry_samples]
 
         def calc_linear_regression(x_vals: List[float], y_vals: List[float]) -> Tuple[float, float]:
             """Returns (slope, r_squared)"""
@@ -276,17 +339,22 @@ class ProcessLongitudinalProfiler:
         slope_priv, r2_priv = calc_linear_regression(x, y_priv)
         slope_ws, r2_ws = calc_linear_regression(x, y_ws)
         slope_hnd, _ = calc_linear_regression(x, [float(v) for v in y_hnd])
-        slope_gdi, _ = calc_linear_regression(x, [float(v) for v in y_gdi])
+        slope_gdi, r2_gdi = calc_linear_regression(x, [float(v) for v in y_gdi])
+        slope_usr, r2_usr = calc_linear_regression(x, [float(v) for v in y_usr])
 
         delta_priv = round(y_priv[-1] - y_priv[0], 3)
         delta_ws = round(y_ws[-1] - y_ws[0], 3)
         delta_hnd = y_hnd[-1] - y_hnd[0]
         delta_gdi = y_gdi[-1] - y_gdi[0]
+        delta_usr = y_usr[-1] - y_usr[0]
 
         # Plateau detection: examine variance and slope in second half of samples
         half_idx = max(1, n // 2)
         second_half_priv = y_priv[half_idx:]
         second_half_slope, _ = calc_linear_regression(x[half_idx:], second_half_priv)
+        second_half_gdi_slope, _ = calc_linear_regression(x[half_idx:], [float(v) for v in y_gdi[half_idx:]])
+        second_half_usr_slope, _ = calc_linear_regression(x[half_idx:], [float(v) for v in y_usr[half_idx:]])
+        second_half_hnd_slope, _ = calc_linear_regression(x[half_idx:], [float(v) for v in y_hnd[half_idx:]])
         is_plateau = False
 
         if n >= 6 and delta_priv > 0:
@@ -294,25 +362,46 @@ class ProcessLongitudinalProfiler:
             if abs(second_half_slope) <= 0.02 and (max(second_half_priv) - min(second_half_priv)) <= 0.25:
                 is_plateau = True
 
-        # Behavioral Classification
-        if slope_priv <= 0.01 and delta_priv <= 0.1 and delta_hnd <= 2:
-            classification = "STABLE_EQUILIBRIUM"
-            explanation = "Process demonstrates strict bounded memory and zero handle accumulation."
-        elif is_plateau:
-            classification = "SATURATION_PLATEAU"
+        # Active leaks require ongoing unconstrained accumulation into the second half of the series
+        is_gdi_leak = delta_gdi > 10 and slope_gdi > 0.5 and second_half_gdi_slope > 0.1
+        is_usr_leak = delta_usr > 10 and slope_usr > 0.5 and second_half_usr_slope > 0.1
+        is_hnd_leak = delta_hnd > 20 and slope_hnd > 0.5 and second_half_hnd_slope > 0.1
+        is_mem_leak = slope_priv > 0.05 and r2_priv > 0.6 and not is_plateau
+
+        # Behavioral Classification (Strictly considers memory, kernel handles, GDI, and USER objects)
+        if is_gdi_leak:
+            classification = "ACTIVE_GDI_LEAK_SUSPECTED"
             explanation = (
-                "Initial memory growth leveled off into a flat plateau; characteristic of "
-                "internal queue limits (e.g., undo history buffer, font cache saturation)."
+                f"Continuous unconstrained GDI object accumulation (+{delta_gdi} objects, slope: +{slope_gdi}/sample); "
+                f"risk of reaching 10,000 Win32 GDI quota."
             )
-        elif slope_priv > 0.05 and r2_priv > 0.6:
+        elif is_usr_leak:
+            classification = "ACTIVE_USER_OBJECT_LEAK_SUSPECTED"
+            explanation = (
+                f"Continuous unconstrained USER object accumulation (+{delta_usr} objects, slope: +{slope_usr}/sample); "
+                f"potential window/hook handle leak."
+            )
+        elif is_hnd_leak:
+            classification = "ACTIVE_HANDLE_LEAK_SUSPECTED"
+            explanation = f"Monotonic kernel handle growth (+{delta_hnd} handles) without release."
+        elif is_mem_leak:
             classification = "ACTIVE_MEMORY_LEAK_SUSPECTED"
             explanation = (
                 f"Continuous monotonic private bytes growth (+{delta_priv} MB, slope: +{slope_priv} MB/sample) "
                 f"without stabilization."
             )
-        elif delta_hnd > 20 and slope_hnd > 0.5:
-            classification = "ACTIVE_HANDLE_LEAK_SUSPECTED"
-            explanation = f"Monotonic kernel handle growth (+{delta_hnd} handles) without release."
+        elif is_plateau:
+            classification = "SATURATION_PLATEAU"
+            explanation = (
+                "Initial memory/resource growth leveled off into a flat plateau; characteristic of "
+                "internal queue limits (e.g., undo history buffer, font cache saturation)."
+            )
+        elif (
+            slope_priv <= 0.01 and delta_priv <= 0.1 and
+            delta_hnd <= 2 and delta_gdi <= 2 and delta_usr <= 2
+        ):
+            classification = "STABLE_EQUILIBRIUM"
+            explanation = "Process demonstrates strict bounded memory, zero handle accumulation, and stable GDI/USER resources."
         else:
             classification = "MONITORED_NORMAL_VARIATION"
             explanation = "Normal workload-driven memory fluctuations within expected runtime bounds."
@@ -341,7 +430,14 @@ class ProcessLongitudinalProfiler:
                 "final_gdi_handles": y_gdi[-1],
                 "delta_gdi_handles": delta_gdi,
                 "slope_gdi_handles_per_sample": slope_gdi,
+                "initial_user_handles": y_usr[0],
+                "final_user_handles": y_usr[-1],
+                "delta_user_handles": delta_usr,
+                "slope_user_handles_per_sample": slope_usr,
                 "is_saturation_plateau": is_plateau,
             },
             "samples": telemetry_samples,
         }
+
+    # Alias for API backwards compatibility
+    classify_dynamics = analyze_telemetry_series

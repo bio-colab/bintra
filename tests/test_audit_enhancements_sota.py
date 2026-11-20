@@ -193,6 +193,7 @@ class TestSotaAuditEnhancements(unittest.TestCase):
             "sinks": [{"address": "0x245f40", "var": "ECX", "inputs": ["EAX", "0x474"]}],
             "sources": [{"address": "0x245f37", "var": "EAX"}],
             "backward_slice": [],
+            "provenance": {"verification_level": "VERIFIED_CRYPTOGRAPHIC_HASH", "source": "ghidra_bridge"},
         }
         crash_telemetry = {
             "fault_module": "game.exe",
@@ -300,7 +301,7 @@ class TestSotaAuditEnhancements(unittest.TestCase):
             server.handle_initialize(init_req_future)
         self.assertIn("Unsupported protocol version", str(ctx.exception))
 
-        # Check rejection via JSON-RPC request interface returns error code -32602
+        # Check rejection via JSON-RPC request interface returns error code -32022
         rpc_req = {
             "jsonrpc": "2.0",
             "id": 1,
@@ -308,8 +309,10 @@ class TestSotaAuditEnhancements(unittest.TestCase):
             "params": {"protocolVersion": "2029-01-01"}
         }
         rpc_err = server._handle_single_request(rpc_req)
-        self.assertEqual(rpc_err["error"]["code"], -32602)
+        self.assertEqual(rpc_err["error"]["code"], -32022)
         self.assertIn("supportedProtocolVersions", rpc_err["error"]["data"])
+        self.assertEqual(rpc_err["error"]["data"]["requested"], "2029-01-01")
+        self.assertIn("2026-07-28", rpc_err["error"]["data"]["supported"])
 
         # 4. Request without version defaults to standard
         resp_empty = server.handle_initialize({})
@@ -466,6 +469,112 @@ class TestSotaAuditEnhancements(unittest.TestCase):
             )
             self.assertEqual(res_rd_flag.returncode, 0)
             self.assertIn("STATIC_HEURISTIC_AUDIT", res_rd_flag.stdout)
+
+    def test_unverified_provenance_caps_causality_at_correlated(self):
+        """Verify that Ghidra export with heuristic/unverified provenance cannot claim CAUSALLY_VALIDATED."""
+        from windows_intelligence.evidence_engine.graph_model import evaluate_data_flow_crash_causality
+
+        matching_df = {
+            "function": "ParseBuffer",
+            "entry_point": "0x140001000",
+            "sinks": [{"address": "0x140001050", "var": "RCX", "inputs": ["RAX", "0x8"]}],
+            "sources": [{"address": "0x140001020", "var": "RAX"}],
+            "backward_slice": [],
+            "provenance": {"verification_level": "HEURISTIC_NAME_MATCH", "source": "ghidra_bridge"},
+        }
+        crash_telemetry = {
+            "fault_module": "target.exe",
+            "fault_rva": "0x1050",
+            "fault_virtual_address": "0x140001050",
+            "culprit_register": "RAX",
+            "exception_code": "0xC0000005",
+        }
+        res = evaluate_data_flow_crash_causality(matching_df, crash_telemetry)
+        self.assertEqual(res["level"], "CORRELATED")
+        self.assertLessEqual(res["epistemic_confidence"], 0.50)
+        self.assertTrue(any("capped at CORRELATED" in r for r in res.get("epistemic_reasons", [])))
+
+    def test_exact_register_token_matching_prevents_substring_false_positive(self):
+        """Verify that register token matching requires exact word boundaries (e.g. AX must not match TAX)."""
+        from windows_intelligence.evidence_engine.graph_model import evaluate_data_flow_crash_causality
+
+        # Sink has variable TAX, crash telemetry has culprit AX
+        slice_tax = {
+            "function": "CalculateRate",
+            "entry_point": "0x1000",
+            "sinks": [{"address": "0x1050", "var": "TAX", "inputs": ["RATE", "0x10"]}],
+            "sources": [{"address": "0x1010", "var": "RATE"}],
+            "backward_slice": [],
+            "provenance": {"verification_level": "VERIFIED_CRYPTOGRAPHIC_HASH", "source": "ghidra_bridge"},
+        }
+        crash_ax = {
+            "fault_module": "target.exe",
+            "fault_rva": "0x1050",
+            "fault_virtual_address": "0x1050",
+            "culprit_register": "AX",
+            "exception_code": "0xC0000005",
+        }
+        res = evaluate_data_flow_crash_causality(slice_tax, crash_ax)
+        # Should NOT match register, so it falls back to INFERRED_PARTIAL or CORRELATED without register match
+        self.assertFalse(res.get("register_matched", False))
+        self.assertNotEqual(res["level"], "CAUSALLY_VALIDATED")
+
+    def test_mcp_per_request_meta_version_rejection_code_32022(self):
+        """Verify MCP 2026-07-28 per-request _meta protocol version check and code -32022."""
+        from mcp_server import BintraMcpServer
+        server = BintraMcpServer()
+
+        # Valid initialize first
+        server.handle_initialize({"protocolVersion": "2026-07-28"})
+
+        # Per-request call with invalid protocolVersion in _meta
+        bad_req = {
+            "jsonrpc": "2.0",
+            "id": 99,
+            "method": "tools/call",
+            "params": {
+                "name": "bintra_inspect_binary",
+                "arguments": {"file_path": self.pe_path},
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2099-01-01",
+                    "io.modelcontextprotocol/clientCapabilities": {"experimental": True}
+                }
+            }
+        }
+        resp = server._handle_single_request(bad_req)
+        self.assertIn("error", resp)
+        self.assertEqual(resp["error"]["code"], -32022)
+        self.assertEqual(resp["error"]["data"]["requested"], "2099-01-01")
+        self.assertIn("2026-07-28", resp["error"]["data"]["supported"])
+        self.assertTrue(server.current_client_capabilities.get("experimental"))
+
+    def test_cli_mediation_proc_profile_and_slack_audit(self):
+        """Verify that CLI proc-profile and slack-audit invoke ExecutionGuard mediation."""
+        from security import ExecutionGuard, Capability
+
+        access_log = []
+        orig_req = ExecutionGuard.request_access
+
+        def mock_request(component, operation, target, capability, access_mode="READ", metadata=None, raise_on_deny=True):
+            access_log.append((component, operation, target, capability, access_mode, metadata))
+            return orig_req(component, operation, target, capability, access_mode=access_mode, metadata=metadata, raise_on_deny=raise_on_deny)
+
+        with mock.patch.object(ExecutionGuard, "request_access", side_effect=mock_request):
+            # Test slack-audit CLI mediation
+            test_file = os.path.join(self.ws_dir, "test.txt")
+            with open(test_file, "w") as f:
+                f.write("test content")
+
+            with mock.patch("sys.argv", ["cli.py", "slack-audit", test_file]):
+                from cli import _dispatch_cli
+                try:
+                    _dispatch_cli()
+                except SystemExit:
+                    pass
+
+            slack_calls = [c for c in access_log if c[3] == Capability.FILE_READ and c[4] == "READ"]
+            self.assertGreaterEqual(len(slack_calls), 1)
+            self.assertEqual(slack_calls[0][2], test_file)
 
 
 if __name__ == "__main__":

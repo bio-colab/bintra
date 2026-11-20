@@ -1398,7 +1398,9 @@ class BintraMcpServer:
                 )
 
     def handle_initialize(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        req_ver = params.get("protocolVersion") if isinstance(params, dict) else None
+        req_ver = None
+        if isinstance(params, dict):
+            req_ver = params.get("io.modelcontextprotocol/protocolVersion") or params.get("protocolVersion")
         if req_ver is not None:
             if req_ver in SUPPORTED_PROTOCOL_VERSIONS:
                 negotiated_version = req_ver
@@ -3047,16 +3049,21 @@ class BintraMcpServer:
         if not meta and isinstance(msg, dict):
             meta = msg.get("_meta")
         if meta and isinstance(meta, dict):
-            meta_ver = meta.get("protocolVersion")
+            meta_ver = meta.get("io.modelcontextprotocol/protocolVersion") or meta.get("protocolVersion")
+            client_caps = meta.get("io.modelcontextprotocol/clientCapabilities") or meta.get("clientCapabilities")
+            if client_caps and isinstance(client_caps, dict):
+                self.current_client_capabilities = client_caps
             if meta_ver is not None and meta_ver not in SUPPORTED_PROTOCOL_VERSIONS:
                 if not is_notification:
                     return {
                         "jsonrpc": "2.0",
                         "id": msg_id,
                         "error": {
-                            "code": -32602,
-                            "message": f"Unsupported protocol version: '{meta_ver}'. Supported versions: {SUPPORTED_PROTOCOL_VERSIONS}",
+                            "code": -32022,
+                            "message": f"Unsupported protocol version: '{meta_ver}'. Supported versions: {list(SUPPORTED_PROTOCOL_VERSIONS)}",
                             "data": {
+                                "supported": list(SUPPORTED_PROTOCOL_VERSIONS),
+                                "requested": meta_ver,
                                 "supportedProtocolVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
                                 "latestProtocolVersion": LATEST_PROTOCOL_VERSION,
                             }
@@ -3087,13 +3094,16 @@ class BintraMcpServer:
                 }
         except ValueError as ve:
             if not is_notification:
+                is_ver_err = "Unsupported protocol version" in str(ve)
                 return {
                     "jsonrpc": "2.0",
                     "id": msg_id,
                     "error": {
-                        "code": -32602,
+                        "code": -32022 if is_ver_err else -32602,
                         "message": str(ve),
                         "data": {
+                            "supported": list(SUPPORTED_PROTOCOL_VERSIONS),
+                            "requested": params.get("io.modelcontextprotocol/protocolVersion") or params.get("protocolVersion") if isinstance(params, dict) else None,
                             "supportedProtocolVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
                             "latestProtocolVersion": LATEST_PROTOCOL_VERSION,
                         }

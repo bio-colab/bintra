@@ -177,12 +177,15 @@ def main():
         target_arg = None
         workspace_arg = None
         if cmd_lower != "ghidra-analyze":
-            for flag in ("--file", "--binary", "--source", "--input", "--model", "--target", "--dmp"):
+            for flag in ("--file", "-f", "--binary", "-b", "--source", "--input", "--model", "--target", "--dmp"):
                 if flag in sys.argv:
                     idx = sys.argv.index(flag)
                     if idx + 1 < len(sys.argv):
                         target_arg = sys.argv[idx + 1]
                         break
+            if not target_arg and len(sys.argv) >= 3 and not sys.argv[2].startswith("-"):
+                if cmd_lower in ("slack-audit", "overlay-inspect", "inspect-slack", "inspect", "triage", "deobfuscate", "dump"):
+                    target_arg = sys.argv[2]
 
         for flag in ("--workspace", "--workspace-dir"):
             while flag in sys.argv:
@@ -2147,6 +2150,16 @@ def _dispatch_cli():
             if target_pid is None:
                 parser.error("Target process PID is required (positional or via -p / --pid)")
 
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation=cmd,
+                target=f"pid:{target_pid}",
+                capability=Capability.PROCESS_QUERY,
+                access_mode="READ",
+                metadata={"command": cmd, "pid": target_pid}
+            )
+
             from windows_intelligence.process_intelligence import ProcessLongitudinalProfiler
             report = ProcessLongitudinalProfiler.profile_pid_longitudinal(
                 pid=target_pid,
@@ -2181,6 +2194,16 @@ def _dispatch_cli():
             target_f = args.flag_file or args.pos_file
             if not target_f:
                 parser.error("Target file path is required (positional or via -f / --file)")
+
+            from security import ExecutionGuard, Capability
+            ExecutionGuard.request_access(
+                component="cli",
+                operation=cmd,
+                target=target_f,
+                capability=Capability.FILE_READ,
+                access_mode="READ",
+                metadata={"command": cmd, "file_path": target_f}
+            )
 
             from windows_intelligence.evidence_engine.binary_slack_inspector import BinarySlackInspector
             report = BinarySlackInspector.inspect_file(target_f)

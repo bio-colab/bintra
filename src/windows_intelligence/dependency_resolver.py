@@ -38,8 +38,18 @@ class WindowsDependencyResolver:
         "api-ms-win-security-": "kernelbase.dll",
         "api-ms-win-service-": "sechost.dll",
         "api-ms-win-eventing-": "kernelbase.dll",
+        "api-ms-win-power-": "powrprof.dll",
+        "api-ms-win-shcore-": "shcore.dll",
+        "api-ms-win-shell-": "shell32.dll",
+        "api-ms-win-devices-": "cfgmgr32.dll",
+        "api-ms-win-dx-": "d3d11.dll",
         "ext-ms-win-gdi-": "gdi32.dll",
-        "ext-ms-win-ntuser-": "user32.dll"
+        "ext-ms-win-ntuser-": "user32.dll",
+        "ext-ms-win-rtcore-": "user32.dll",
+        "ext-ms-win-kernel32-": "kernel32.dll",
+        "ext-ms-win-advapi32-": "advapi32.dll",
+        "ext-ms-win-ole32-": "ole32.dll",
+        "ext-ms-win-com-": "combase.dll",
     }
 
     SXS_ASSEMBLY_MAP = {
@@ -160,13 +170,42 @@ class WindowsDependencyResolver:
         return lower.startswith("api-ms-win-") or lower.startswith("ext-ms-win-")
 
     @classmethod
-    def resolve_api_set_target(cls, dll_name: str) -> str:
-        """Maps virtual API-Set prefix to the canonical implementing Windows system library."""
+    def resolve_api_set(cls, dll_name: str) -> Dict[str, Any]:
+        """
+        Maps virtual API-Set contract to the implementing system library, returning
+        explicit epistemic provenance metadata distinguishing verified prefix matches
+        from default fallbacks.
+        """
         lower = dll_name.lower()
         for prefix, target in cls.KNOWN_API_SET_FORWARDERS.items():
             if lower.startswith(prefix):
-                return target
-        return "kernelbase.dll"
+                return {
+                    "api_set": dll_name,
+                    "target_dll": target,
+                    "is_heuristic": True,
+                    "resolution_method": "CANONICAL_FORWARDER_PREFIX_MAP",
+                    "matched_prefix": prefix,
+                    "disclaimer": (
+                        "Approximated via canonical API-Set forwarder schema table; "
+                        "not dynamically parsed from live Windows PEB ApiSetMap schema."
+                    ),
+                }
+        return {
+            "api_set": dll_name,
+            "target_dll": "kernelbase.dll",
+            "is_heuristic": True,
+            "resolution_method": "DEFAULT_FALLBACK",
+            "matched_prefix": None,
+            "disclaimer": (
+                "Unrecognized API-Set contract; defaulted to kernelbase.dll. "
+                "Empirical approximation."
+            ),
+        }
+
+    @classmethod
+    def resolve_api_set_target(cls, dll_name: str) -> str:
+        """Backwards-compatible string target resolver."""
+        return cls.resolve_api_set(dll_name)["target_dll"]
 
     @classmethod
     def locate_dll(cls, dll_name: str, search_dirs: List[str]) -> Optional[str]:
@@ -227,9 +266,10 @@ class WindowsDependencyResolver:
         is_64bit: bool = True,
         manifest_text: Optional[str] = None
     ) -> Optional[str]:
-        """
-        Resolves a Side-by-Side (SxS) assembly DLL from C:\\Windows\\WinSxS based on
-        application manifest declarations and architecture.
+        r"""
+        Resolves a Side-by-Side (SxS) assembly DLL from C:\Windows\WinSxS based on
+        application manifest declarations, exact assemblyIdentity attributes
+        (name, version, publicKeyToken, processorArchitecture), and architecture.
         """
         dll_lower = dll_name.lower()
         assembly_name = cls.SXS_ASSEMBLY_MAP.get(dll_lower)
@@ -247,6 +287,30 @@ class WindowsDependencyResolver:
             if manifest_text and "microsoft.windows.common-controls" not in lower_manifest:
                 return None
 
+        # Extract precise assembly identity attributes from manifest
+        req_token = None
+        req_ver_major = None
+        if manifest_text:
+            m = re.search(
+                rf'<assemblyIdentity\b[^>]*\bname=["\'](?:[^"\']*\.)?{re.escape(assembly_name.split(".")[-1])}["\'][^>]*>',
+                manifest_text,
+                re.IGNORECASE
+            )
+            if not m:
+                m = re.search(
+                    rf'<assemblyIdentity\b[^>]*\bname=["\']{re.escape(assembly_name)}["\'][^>]*>',
+                    manifest_text,
+                    re.IGNORECASE
+                )
+            if m:
+                tag = m.group(0)
+                tok_m = re.search(r'publicKeyToken=["\']([a-fA-F0-9]+)["\']', tag)
+                if tok_m:
+                    req_token = tok_m.group(1).lower()
+                ver_m = re.search(r'version=["\']([0-9]+(?:\.[0-9]+)*)["\']', tag)
+                if ver_m:
+                    req_ver_major = ver_m.group(1).split(".")[0]
+
         arch_prefix = "amd64" if is_64bit else "x86"
         winsxs_dir = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "WinSxS")
         if not os.path.isdir(winsxs_dir):
@@ -255,14 +319,23 @@ class WindowsDependencyResolver:
         pattern = os.path.join(winsxs_dir, f"{arch_prefix}_{assembly_name}_*")
         candidates = glob.glob(pattern)
         if not candidates and not is_64bit:
-            # Fallback for WOW64
             candidates = glob.glob(os.path.join(winsxs_dir, f"wow64_{assembly_name}_*"))
 
         if not candidates:
             return None
 
-        # Filter version if manifest specifically requests 6.0
-        if assembly_name == "microsoft.windows.common-controls" and ("6.0" in lower_manifest):
+        # Filter by publicKeyToken from manifest if present
+        if req_token:
+            token_cands = [c for c in candidates if req_token in os.path.basename(c).lower()]
+            if token_cands:
+                candidates = token_cands
+
+        # Filter by requested major version (e.g. 6.0)
+        if req_ver_major:
+            ver_cands = [c for c in candidates if f"_{req_ver_major}." in os.path.basename(c)]
+            if ver_cands:
+                candidates = ver_cands
+        elif assembly_name == "microsoft.windows.common-controls" and ("6.0" in lower_manifest):
             v6_cands = [c for c in candidates if "_6.0." in os.path.basename(c)]
             if v6_cands:
                 candidates = v6_cands

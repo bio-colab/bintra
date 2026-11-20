@@ -240,8 +240,8 @@ class SafeSubprocessBroker:
                             limit_exceeded_event.set()
                             if terminate_on_limit:
                                 break
-            except Exception:
-                pass
+            except Exception as exc:
+                state["read_error"] = str(exc)
             finally:
                 try:
                     pipe.close()
@@ -334,6 +334,7 @@ class SafeSubprocessBroker:
                 "output_limit_exceeded": True,
                 "error": f"Command output exceeded safety limit (stdout_cap={stdout_cap}, stderr_cap={stderr_cap}).",
             }
+        pipe_err = stdout_state.get("read_error") or stderr_state.get("read_error")
         if exit_code != 0:
             return {
                 "status": "nonzero_exit",
@@ -344,11 +345,12 @@ class SafeSubprocessBroker:
                 "stderr_truncated": False,
                 "timed_out": False,
                 "output_limit_exceeded": False,
+                "pipe_read_error": pipe_err,
                 "error": stderr_text.strip() or f"Command exited with nonzero status {exit_code}.",
             }
 
         return {
-            "status": "success",
+            "status": "success" if not pipe_err else "pipe_error",
             "exit_code": exit_code,
             "stdout": stdout_text,
             "stderr": stderr_text,
@@ -356,4 +358,5 @@ class SafeSubprocessBroker:
             "stderr_truncated": False,
             "timed_out": False,
             "output_limit_exceeded": False,
+            "pipe_read_error": pipe_err,
         }

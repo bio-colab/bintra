@@ -60,6 +60,15 @@ except ImportError as err:
 SERVER_NAME = "bintra"
 SERVER_VERSION = "1.1.0"
 PROTOCOL_VERSION = "2024-11-05"
+SUPPORTED_PROTOCOL_VERSIONS = [
+    "2024-11-05",
+    "2025-03-26",
+    "2025-06-18",
+    "2025-11-25",
+    "2026-07-28",
+]
+LATEST_PROTOCOL_VERSION = "2026-07-28"
+DEFAULT_PROTOCOL_VERSION = "2024-11-05"
 
 
 TOOLS_REGISTRY: List[Dict[str, Any]] = [
@@ -1362,8 +1371,17 @@ class BintraMcpServer:
                 )
 
     def handle_initialize(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        req_ver = params.get("protocolVersion") if isinstance(params, dict) else None
+        if req_ver in SUPPORTED_PROTOCOL_VERSIONS:
+            negotiated_version = req_ver
+        elif req_ver and isinstance(req_ver, str) and req_ver > LATEST_PROTOCOL_VERSION:
+            negotiated_version = LATEST_PROTOCOL_VERSION
+        else:
+            negotiated_version = DEFAULT_PROTOCOL_VERSION
+
         return {
-            "protocolVersion": PROTOCOL_VERSION,
+            "protocolVersion": negotiated_version,
+            "supportedProtocolVersions": SUPPORTED_PROTOCOL_VERSIONS,
             "capabilities": {
                 "tools": {
                     "listChanged": False
@@ -1808,7 +1826,7 @@ class BintraMcpServer:
                         or raw_result_data.get("decision") == "DENY"
                     )
                 )
-                return {
+                ret_obj = {
                     "content": [
                         {
                             "type": "text",
@@ -1817,6 +1835,9 @@ class BintraMcpServer:
                     ],
                     "isError": is_structured_error
                 }
+                if isinstance(result_data, dict):
+                    ret_obj["structuredContent"] = result_data
+                return ret_obj
         except Exception as exc:
             tb = traceback.format_exc()
             err_msg = f"Missing required parameter: {exc}" if isinstance(exc, KeyError) else str(exc)
@@ -1839,6 +1860,7 @@ class BintraMcpServer:
                         "text": err_text
                     }
                 ],
+                "structuredContent": err_payload,
                 "isError": True
             }
 

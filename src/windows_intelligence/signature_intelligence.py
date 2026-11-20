@@ -189,6 +189,17 @@ class CERT_INFO_MINIMAL(ctypes.Structure):
     ]
 
 
+class CERT_CONTEXT_MINIMAL(ctypes.Structure):
+    """Minimal CERT_CONTEXT header matching WinCrypt.h for time validity check."""
+    _fields_ = [
+        ("dwCertEncodingType", wintypes.DWORD),
+        ("pbCertEncoded", ctypes.c_void_p),
+        ("cbCertEncoded", wintypes.DWORD),
+        ("pCertInfo", ctypes.c_void_p),
+        ("hCertStore", ctypes.c_void_p),
+    ]
+
+
 class CTL_USAGE(ctypes.Structure):
     _fields_ = [
         ("cUsageIdentifier", wintypes.DWORD),
@@ -830,6 +841,7 @@ class WindowsSignatureIntelligence:
         primary_signer: Dict[str, Any] = {}
         signer_attribution_method = "UNRESOLVED_STORE_ONLY"
         timestamp_present: Optional[bool] = None
+        signer_cert_expired: Optional[bool] = None
 
         try:
             cr.CryptQueryObject.argtypes = [
@@ -962,6 +974,14 @@ class WindowsSignatureIntelligence:
                                     try:
                                         primary_signer = _read_cert_entry(p_signer_ctx, role="SIGNER")
                                         signer_attribution_method = "CMS_SIGNER_INFO_MATCH"
+                                        if hasattr(cr, "CertVerifyTimeValidity"):
+                                            cr.CertVerifyTimeValidity.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+                                            cr.CertVerifyTimeValidity.restype = wintypes.LONG
+                                            ctx_struct = CERT_CONTEXT_MINIMAL.from_address(p_signer_ctx)
+                                            if ctx_struct.pCertInfo:
+                                                time_res = cr.CertVerifyTimeValidity(None, ctx_struct.pCertInfo)
+                                                signer_cert_expired = bool(time_res == 1)
+                                                primary_signer["is_expired"] = signer_cert_expired
                                     finally:
                                         if hasattr(cr, "CertFreeCertificateContext"):
                                             cr.CertFreeCertificateContext.argtypes = [ctypes.c_void_p]
@@ -991,7 +1011,7 @@ class WindowsSignatureIntelligence:
             "signer_attribution_method": signer_attribution_method,
             "certificate_chain": certs,
             "timestamp_present": timestamp_present,
-            "signer_cert_expired": None,
+            "signer_cert_expired": signer_cert_expired,
         }
 
     @classmethod

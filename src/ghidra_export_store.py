@@ -173,6 +173,7 @@ class GhidraExportStore:
         cache_path = cls._compute_cache_path(source_path)
         if os.path.exists(cache_path):
             try:
+                cls._authorize_source_read(cache_path)
                 # Quick health check
                 con = sqlite3.connect(cache_path)
                 cur = con.cursor()

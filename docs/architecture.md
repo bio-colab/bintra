@@ -126,6 +126,15 @@ graph TD
   2. **فك التعمية التمهيدي الموجه لـ Decompiler (`PcodeDeobfuscator`):** كشف المسندات الصماء الجبرية على مستوى لغة P-code واختزال القفزات الميتة قبل بناء شجرة الـ AST.
   3. **جسر Ghidra المحلي الموثق (`GhidraLiveBridgeServer` و `BintraLiveBridgeService.py`):** خادم HTTP JSON-RPC 2.0 متعدد الخيوط (`ThreadingMixIn`) على `127.0.0.1:41718` يعمل بنمط الطابور والاستطلاع (`1.0s` polling) مع توثيق إلزامي (`AUTH_REQUIRED`) وصلاحية `cap.tempdir.marker.write` لحقن ملاحظات VAD وهياكل C وعلامات Crash RCA داخل قاعدة بيانات Ghidra بأمان.
 
+### أداة 8: `bintra_triage_binary` و `BinaryTriageOrchestrator` (محرك الفرز الموحد ورسم الأدلة البياني السببي)
+* **المشكلة:** معاناة المحلل أو الوكيل الذكي من التشتت التحليلي واستهلاك استدعاءات متكررة غير مترابطة لفحص ملف تنفيذي واحد (فحص PE، استخراج RTTI، فحص التوقيعات، فحص التعتيم، تحليل الانهيار، ثم تشريح Ghidra).
+* **آلية العمل المعمارية الموحدة (`src/analysis_orchestrator.py`):**
+  1. **مسار عمل موحد عابر للواجهات:** يجمع 7 محركات تحليل في خط أنابيب واحد تحت حراسة `ExecutionGuard` الصارمة، متاح بالتساوي عبر سطر الأوامر (`bintra triage`) وخادم MCP (`bintra_triage_binary`).
+  2. **التحقق المشفر من مصدر الأدلة (Provenance Verification):** فحص هوية ملفات تصدير Ghidra ومطابقة تجزئة SHA-256 أو اسم البرنامج مع الملف التنفيذي المستهدف لضمان عدم ربط أدلة من ملفات غريبة في رسم العلاقات.
+  3. **الفصل الإبستمولوجي الصارم في المخرجات:** تصنيف النتائج إلى "حقائق قطعية مشاهدة" (Observed Facts)، و"مؤشرات استدلالية ظنية" (Heuristic Indicators)، و"خطوات تحقيقية موصى بها" (Recommended Next Steps).
+  4. **رسم الأدلة البياني السببي (Evidence Graph):** ربط أبعاد التحليل (PE Forensics, Authenticode Trust, Obfuscation Signals, Crash Events, Ghidra Topologies) بعلاقات سببية واضحة مع تحديد مصدر الدليل (`evidence_source`)، ومستوى التحقق (`verification_level`)، والدلالة المعنوية للعلاقة (`relation_semantic`)، ودرجة الثقة المعايرة (`epistemic_confidence`).
+  5. **اكتمال ثالوث MCP الحديث (SOTA MCP Triad):** تقديم 48 أداة موسومة بـ `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentHint`)، مع 4 موارد حية (`resources/list`, `resources/read`)، و4 قوالب توجيه لسير العمل (`prompts/list`, `prompts/get`)، ودعم التفاوض على إصدارات البروتوكول وإرجاع `structuredContent`.
+
 > للاطلاع على منظومة القياس الحي وفحص الذاكرة (`bintra_vad_inspect`, `bintra_memory_scan`, `bintra_pointer_scan`, `bintra_struct_dissect`, `bintra_crash_rca`, `bintra_etw_capture`) وأدوات استخبارات ويندوز الـ 34 كاملةً، راجع [`RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md`](RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md).
 
 ---

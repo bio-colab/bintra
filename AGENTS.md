@@ -180,7 +180,7 @@ Bintra provides **7 specialized sub-skills** (plus the [`bintra`](skills/bintra/
 
 ## 6. Deep Reverse Engineering & AI Discoverability Additions (v1.1 Upgrade)
 
-All 6 new tools below are **strictly read-only** (`cap.file.read`) and work **cross-platform** on static PE binaries and Ghidra JSON exports:
+All 7 new tools below are **strictly read-only** (`cap.file.read`) and work **cross-platform** on static PE binaries and Ghidra JSON exports:
 
 | MCP Tool | CLI Command | Purpose |
 |:---|:---|:---|

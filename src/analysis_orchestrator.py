@@ -15,7 +15,9 @@ Design invariants:
 
 from __future__ import annotations
 
+import hashlib
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from security import Capability, ExecutionGuard, PathIdentity, SecurityViolationError
@@ -55,6 +57,14 @@ class BinaryTriageOrchestrator:
         if not os.path.isfile(can_path):
             raise FileNotFoundError(f"Target binary not found: {file_path}")
 
+        # Compute target binary hash and metadata for provenance verification
+        sha256_hasher = hashlib.sha256()
+        with open(can_path, "rb") as bf:
+            while chunk := bf.read(65536):
+                sha256_hasher.update(chunk)
+        target_sha256 = sha256_hasher.hexdigest().lower()
+        target_filename = os.path.basename(can_path)
+
         stages: Dict[str, Dict[str, Any]] = {}
         pe_inspect_res: Optional[Dict[str, Any]] = None
         pe_forensics_res: Optional[Dict[str, Any]] = None
@@ -63,6 +73,7 @@ class BinaryTriageOrchestrator:
         crash_rca_res: Optional[Dict[str, Any]] = None
         ghidra_cg_res: Optional[Dict[str, Any]] = None
         ghidra_df_res: Optional[Dict[str, Any]] = None
+        ghidra_provenance: Dict[str, Any] = {"status": "NOT_PROVIDED", "verified": False}
 
         # Stage 1: PE Structure, Mitigations (ASLR/DEP/CFG), Imports/Exports, Entropy
         try:
@@ -70,11 +81,22 @@ class BinaryTriageOrchestrator:
             pe_inspect_res = BinaryFormatInspector.inspect(can_path)
             if isinstance(pe_inspect_res, dict) and max_exports > 0:
                 exports = pe_inspect_res.get("exports")
-                if isinstance(exports, list) and len(exports) > max_exports:
+                if isinstance(exports, dict):
+                    funcs = exports.get("functions")
+                    if isinstance(funcs, list) and len(funcs) > max_exports:
+                        exports_copy = dict(exports)
+                        exports_copy["functions"] = funcs[:max_exports]
+                        exports_copy["functions_truncated"] = True
+                        exports_copy["truncated_from"] = len(funcs)
+                        pe_inspect_res = dict(pe_inspect_res)
+                        pe_inspect_res["exports"] = exports_copy
+                        pe_inspect_res["exports_truncated"] = True
+                elif isinstance(exports, list) and len(exports) > max_exports:
                     pe_inspect_res = dict(pe_inspect_res)
                     pe_inspect_res["exports"] = exports[:max_exports]
                     pe_inspect_res["exports_truncated"] = True
-            stages["binary_inspection"] = {"status": "ok"}
+            st_inspect = pe_inspect_res.get("status", "ok") if isinstance(pe_inspect_res, dict) else "ok"
+            stages["binary_inspection"] = {"status": st_inspect}
         except SecurityViolationError:
             raise
         except Exception as exc:
@@ -84,7 +106,8 @@ class BinaryTriageOrchestrator:
         try:
             from pe_deep_forensics import PeDeepForensicsInspector
             pe_forensics_res = PeDeepForensicsInspector().inspect(can_path, limit=forensics_limit)
-            stages["pe_deep_forensics"] = {"status": pe_forensics_res.get("status", "ok")}
+            st_forensics = pe_forensics_res.get("status", "ok") if isinstance(pe_forensics_res, dict) else "ok"
+            stages["pe_deep_forensics"] = {"status": st_forensics}
         except SecurityViolationError:
             raise
         except Exception as exc:
@@ -94,9 +117,17 @@ class BinaryTriageOrchestrator:
         try:
             from windows_intelligence.signature_intelligence import WindowsSignatureIntelligence
             sig_res = WindowsSignatureIntelligence.verify_file(can_path, check_catalog=True)
+            trust_stat = sig_res.get("trust_status", "UNKNOWN")
+            st_sig = "ok"
+            if trust_stat == "VERIFICATION_ERROR":
+                st_sig = "verification_error"
+            elif trust_stat == "REVOKED":
+                st_sig = "untrusted_revoked"
+            elif trust_stat in ("EXPIRED", "UNTRUSTED_ROOT"):
+                st_sig = "untrusted"
             stages["signature_intelligence"] = {
-                "status": "ok",
-                "trust_status": sig_res.get("trust_status"),
+                "status": st_sig,
+                "trust_status": trust_stat,
                 "is_verified": bool(sig_res.get("is_verified", False)),
             }
         except SecurityViolationError:
@@ -109,7 +140,8 @@ class BinaryTriageOrchestrator:
             try:
                 from binary_neural_engine import ContinuousDeobfuscator
                 deobf_res = ContinuousDeobfuscator.analyze_file(can_path, length=4096)
-                stages["deobfuscation"] = {"status": "ok"}
+                st_deobf = deobf_res.get("status", "ok") if isinstance(deobf_res, dict) else "ok"
+                stages["deobfuscation"] = {"status": st_deobf}
             except SecurityViolationError:
                 raise
             except Exception as exc:
@@ -124,7 +156,7 @@ class BinaryTriageOrchestrator:
                 crash_rca_res = CrashRootCauseAnalyzer.analyze_crash(
                     dump_target=dmp_path, binary_path=can_path
                 )
-                stages["crash_rca"] = {"status": crash_rca_res.get("status", "ok")}
+                stages["crash_rca"] = {"status": crash_rca_res.get("status", "ok") if isinstance(crash_rca_res, dict) else "ok"}
             except SecurityViolationError:
                 raise
             except Exception as exc:
@@ -132,12 +164,57 @@ class BinaryTriageOrchestrator:
         else:
             stages["crash_rca"] = {"status": "skipped", "reason": "no_dmp_path_provided"}
 
-        # Stage 6: Optional Ghidra Export Call-Graph & Data-Flow Slicing
+        # Stage 6: Optional Ghidra Export Call-Graph & Data-Flow Slicing with Provenance Check
         if ghidra_export_path:
             try:
                 from ghidra_export_store import GhidraExportStore
                 from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
                 with GhidraExportStore.from_path(ghidra_export_path) as store:
+                    # Provenance verification against target binary
+                    gh_prog_name = str(store.get("program_name") or "")
+                    gh_sha256 = str(store.get("sha256") or "").lower()
+                    gh_md5 = str(store.get("md5") or "").lower()
+
+                    if gh_sha256:
+                        if gh_sha256 == target_sha256:
+                            ghidra_provenance = {
+                                "status": "VERIFIED_CRYPTOGRAPHIC_HASH",
+                                "verified": True,
+                                "matched_sha256": gh_sha256,
+                                "program_name": gh_prog_name,
+                            }
+                        else:
+                            ghidra_provenance = {
+                                "status": "PROVENANCE_HASH_MISMATCH",
+                                "verified": False,
+                                "export_sha256": gh_sha256,
+                                "target_sha256": target_sha256,
+                                "warning": f"Ghidra export SHA-256 ({gh_sha256}) does not match target ({target_sha256})."
+                            }
+                    elif gh_prog_name:
+                        target_stem = Path(target_filename).stem.lower()
+                        gh_stem = Path(gh_prog_name).stem.lower()
+                        if target_stem in gh_stem or gh_stem in target_stem:
+                            ghidra_provenance = {
+                                "status": "VERIFIED_PROGRAM_NAME_MATCH",
+                                "verified": True,
+                                "program_name": gh_prog_name,
+                            }
+                        else:
+                            ghidra_provenance = {
+                                "status": "PROVENANCE_NAME_MISMATCH",
+                                "verified": False,
+                                "export_program_name": gh_prog_name,
+                                "target_filename": target_filename,
+                                "warning": f"Ghidra export program '{gh_prog_name}' does not match target filename '{target_filename}'."
+                            }
+                    else:
+                        ghidra_provenance = {
+                            "status": "UNVERIFIED_NO_METADATA",
+                            "verified": False,
+                            "warning": "Ghidra export lacks program_name or sha256 metadata."
+                        }
+
                     analyzer = GhidraDeepAnalyzer()
                     ghidra_cg_res = analyzer.build_call_graph_and_xrefs(
                         store, target_function=function_name
@@ -146,7 +223,12 @@ class BinaryTriageOrchestrator:
                         fn_match = store.get_function(function_name)
                         if fn_match:
                             ghidra_df_res = analyzer.slice_data_flow(fn_match)
-                stages["ghidra_analysis"] = {"status": "ok"}
+
+                cg_stat = ghidra_cg_res.get("status", "ok") if isinstance(ghidra_cg_res, dict) else "ok"
+                stages["ghidra_analysis"] = {
+                    "status": cg_stat,
+                    "provenance": ghidra_provenance,
+                }
             except SecurityViolationError:
                 raise
             except Exception as exc:
@@ -175,18 +257,29 @@ class BinaryTriageOrchestrator:
             deobf=deobf_res,
             crash_rca=crash_rca_res,
             ghidra_cg=ghidra_cg_res,
+            ghidra_prov=ghidra_provenance,
         )
 
-        failed_stages = [name for name, st in stages.items() if st.get("status") == "error"]
-        overall_status = "ok" if not failed_stages else "partial_success"
+        failed_stages = [name for name, st in stages.items() if st.get("status") in ("error", "failed")]
+        partial_stages = [name for name, st in stages.items() if st.get("status") in ("partial", "partial_success", "verification_error", "untrusted", "untrusted_revoked")]
+        active_stages = [name for name, st in stages.items() if st.get("status") != "skipped"]
+
+        if failed_stages and len(failed_stages) == len(active_stages):
+            overall_status = "error"
+        elif failed_stages or partial_stages:
+            overall_status = "partial_success"
+        else:
+            overall_status = "ok"
 
         return {
             "status": overall_status,
             "epistemic_classification": "UNIFIED_BINARY_TRIAGE",
             "target_file": can_path,
             "file_name": os.path.basename(can_path),
+            "target_sha256": target_sha256,
             "stage_statuses": stages,
             "failed_stages": failed_stages,
+            "partial_stages": partial_stages,
             "summary": synthesis,
             "evidence_graph": fused.get("fused_graph", {}),
             "artifacts": {
@@ -209,6 +302,7 @@ class BinaryTriageOrchestrator:
         deobf: Optional[Dict[str, Any]],
         crash_rca: Optional[Dict[str, Any]],
         ghidra_cg: Optional[Dict[str, Any]],
+        ghidra_prov: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Separates observed facts from heuristic indicators and proposes next steps."""
         observed_facts: List[str] = []
@@ -262,6 +356,12 @@ class BinaryTriageOrchestrator:
         if ghidra_cg and ghidra_cg.get("status") == "ok":
             fn_cnt = ghidra_cg.get("functions_indexed", 0)
             observed_facts.append(f"Ghidra call graph indexed {fn_cnt} functions")
+            if ghidra_prov and isinstance(ghidra_prov, dict):
+                p_stat = ghidra_prov.get("status", "UNVERIFIED")
+                if ghidra_prov.get("verified"):
+                    observed_facts.append(f"Ghidra export provenance verified: {p_stat}")
+                else:
+                    heuristic_indicators.append(f"GHIDRA_PROVENANCE_ALERT:{p_stat}")
         else:
             recommended_next_tools.append("bintra_ghidra_analyze")
 

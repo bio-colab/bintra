@@ -60,7 +60,11 @@ class EvidenceGraph:
 
     def add_node(self, node_id: str, node_type: str, label: str, **properties) -> EvidenceNode:
         """Adds or updates a node in the graph."""
-        node = EvidenceNode(id=node_id, node_type=node_type, label=label, properties=properties)
+        props = properties.copy()
+        if "properties" in props and isinstance(props["properties"], dict):
+            inner_props = props.pop("properties")
+            props.update(inner_props)
+        node = EvidenceNode(id=node_id, node_type=node_type, label=label, properties=props)
         self.nodes[node_id] = node
         if node_id not in self._adj:
             self._adj[node_id] = []
@@ -72,7 +76,11 @@ class EvidenceGraph:
         """Creates a directed causal relationship edge."""
         if source_id not in self.nodes or target_id not in self.nodes:
             return None
-        edge = EvidenceEdge(source=source_id, target=target_id, relation=relation, metadata=metadata)
+        meta = metadata.copy()
+        if "metadata" in meta and isinstance(meta["metadata"], dict):
+            inner_meta = meta.pop("metadata")
+            meta.update(inner_meta)
+        edge = EvidenceEdge(source=source_id, target=target_id, relation=relation, metadata=meta)
         self.edges.append(edge)
         self._adj[source_id].append(edge)
         self._rev_adj[target_id].append(edge)
@@ -210,13 +218,16 @@ def fuse_static_dynamic_ghidra(
     if signature_intel and isinstance(signature_intel, dict):
         trust_stat = signature_intel.get("trust_status", "UNKNOWN")
         sig_id = f"sig:{trust_stat}"
+        is_ver = bool(signature_intel.get("is_verified", False))
         graph.add_node(
             sig_id,
             "SIGNATURE_TRUST",
             f"Signature: {trust_stat}",
             properties={
+                "evidence_source": "WINDOWS_SIGNATURE_INTELLIGENCE",
+                "verification_level": "CRYPTOGRAPHIC_VALIDATION" if is_ver else "CRYPTOGRAPHIC_STRUCTURE_PARSE",
                 "signature_present": bool(signature_intel.get("signature_present", False)),
-                "is_verified": bool(signature_intel.get("is_verified", False)),
+                "is_verified": is_ver,
                 "signature_type": signature_intel.get("signature_type", "NONE"),
                 "is_whql_certified": bool(signature_intel.get("is_whql_certified", False)),
                 "timestamp_status": signature_intel.get("timestamp_status", "UNKNOWN"),
@@ -224,7 +235,19 @@ def fuse_static_dynamic_ghidra(
             },
         )
         if bin_id in graph.nodes:
-            graph.add_edge(bin_id, sig_id, "HAS_TRUST_POSTURE", metadata={"weight": 0.95})
+            graph.add_edge(
+                bin_id,
+                sig_id,
+                "HAS_TRUST_POSTURE",
+                metadata={
+                    "weight": 0.95 if is_ver else 0.80,
+                    "evidence_source": "WINDOWS_SIGNATURE_INTELLIGENCE",
+                    "verification_level": "CRYPTOGRAPHIC_VALIDATION" if is_ver else "CRYPTOGRAPHIC_STRUCTURE_PARSE",
+                    "relation_semantic": "AUTHENTICODE_TRUST_POSTURE",
+                    "epistemic_confidence": 0.95 if is_ver else 0.80,
+                    "confidence_rationale": "Direct WinVerifyTrust or ASN.1 structural certificate chain validation.",
+                },
+            )
 
     if deobfuscation and isinstance(deobfuscation, dict):
         cff = deobfuscation.get("control_flow_flattening") or {}
@@ -237,13 +260,27 @@ def fuse_static_dynamic_ghidra(
                 "OBFUSCATION_SIGNAL",
                 f"Obfuscation (CFF={has_cff}, OpaquePreds={op_cnt})",
                 properties={
+                    "evidence_source": "CONTINUOUS_DEOBFUSCATOR",
+                    "verification_level": "HEURISTIC_DISASSEMBLY_PATTERN",
                     "has_control_flow_flattening": has_cff,
                     "opaque_predicates_detected": op_cnt,
                     "dead_instruction_bytes": deobfuscation.get("dead_instruction_bytes", 0),
                 },
             )
             if bin_id in graph.nodes:
-                graph.add_edge(bin_id, obf_id, "EXHIBITS_OBFUSCATION", metadata={"weight": 0.85})
+                graph.add_edge(
+                    bin_id,
+                    obf_id,
+                    "EXHIBITS_OBFUSCATION",
+                    metadata={
+                        "weight": 0.85,
+                        "evidence_source": "CONTINUOUS_DEOBFUSCATOR",
+                        "verification_level": "HEURISTIC_DISASSEMBLY_PATTERN",
+                        "relation_semantic": "DETECTED_ANTI_ANALYSIS_STRUCTURES",
+                        "epistemic_confidence": 0.85,
+                        "confidence_rationale": "Algebraic invariant elimination and control-flow flattening dispatcher detection.",
+                    },
+                )
 
     if crash_rca:
         exc_code = crash_rca.get("exception_code", "UNKNOWN_EXCEPTION")
@@ -253,13 +290,27 @@ def fuse_static_dynamic_ghidra(
             "CRASH_EVENT",
             f"{exc_code} ({crash_rca.get('root_cause_classification', 'UNKNOWN')})",
             properties={
+                "evidence_source": "CRASH_ROOT_CAUSE_ANALYZER",
+                "verification_level": "OBSERVED_CRASH_TELEMETRY",
                 "culprit_register": crash_rca.get("culprit_register"),
                 "fault_address": crash_rca.get("fault_address"),
                 "confidence": crash_rca.get("confidence"),
             },
         )
         if bin_id in graph.nodes:
-            graph.add_edge(bin_id, crash_id, "EXHIBITED_FAULT", metadata={"weight": 0.95})
+            graph.add_edge(
+                bin_id,
+                crash_id,
+                "EXHIBITED_FAULT",
+                metadata={
+                    "weight": 0.95,
+                    "evidence_source": "CRASH_ROOT_CAUSE_ANALYZER",
+                    "verification_level": "OBSERVED_CRASH_TELEMETRY",
+                    "relation_semantic": "MINIDUMP_EXCEPTION_FAULT",
+                    "epistemic_confidence": 0.95,
+                    "confidence_rationale": "Hardware exception record and process memory layout at crash instant.",
+                },
+            )
 
     if ghidra_call_graph and ghidra_call_graph.get("status") == "ok":
         cg_id = "ghidra:call_graph"
@@ -268,13 +319,27 @@ def fuse_static_dynamic_ghidra(
             "GHIDRA_CALL_GRAPH",
             f"CallGraph ({ghidra_call_graph.get('functions_indexed', 0)} funcs)",
             properties={
+                "evidence_source": "GHIDRA_STATIC_ANALYZER",
+                "verification_level": "STATIC_TOPOLOGY_EXTRACTION",
                 "call_edges": ghidra_call_graph.get("call_edges_count", 0),
                 "indirect_calls": ghidra_call_graph.get("indirect_calls_count", 0),
                 "sensitive_apis": len(ghidra_call_graph.get("sensitive_api_reachability", [])),
             },
         )
         if bin_id in graph.nodes:
-            graph.add_edge(bin_id, cg_id, "DECOMPILED_TOPOLOGY", metadata={"weight": 0.9})
+            graph.add_edge(
+                bin_id,
+                cg_id,
+                "DECOMPILED_TOPOLOGY",
+                metadata={
+                    "weight": 0.90,
+                    "evidence_source": "GHIDRA_STATIC_ANALYZER",
+                    "verification_level": "STATIC_TOPOLOGY_EXTRACTION",
+                    "relation_semantic": "DISASSEMBLED_CALL_TOPOLOGY",
+                    "epistemic_confidence": 0.90,
+                    "confidence_rationale": "High P-Code call graph and sensitive Win32 API reachability paths.",
+                },
+            )
 
     if ghidra_data_flow and ghidra_data_flow.get("status") == "ok":
         fn_name = ghidra_data_flow.get("function", "unknown")
@@ -284,16 +349,42 @@ def fuse_static_dynamic_ghidra(
             "DATA_FLOW_SLICE",
             f"DataFlow Slice: {fn_name}",
             properties={
+                "evidence_source": "GHIDRA_STATIC_ANALYZER",
+                "verification_level": "STATIC_SSA_SLICE",
                 "sources_count": ghidra_data_flow.get("sources_count", 0),
                 "sinks_count": ghidra_data_flow.get("sinks_count", 0),
                 "slice_depth": len(ghidra_data_flow.get("backward_slice", [])),
             },
         )
         if "ghidra:call_graph" in graph.nodes:
-            graph.add_edge("ghidra:call_graph", df_id, "CONTAINS_SLICE", metadata={"weight": 0.9})
+            graph.add_edge(
+                "ghidra:call_graph",
+                df_id,
+                "CONTAINS_SLICE",
+                metadata={
+                    "weight": 0.90,
+                    "evidence_source": "GHIDRA_STATIC_ANALYZER",
+                    "verification_level": "STATIC_SSA_SLICE",
+                    "relation_semantic": "INTRA_PROCEDURAL_DATA_FLOW",
+                    "epistemic_confidence": 0.90,
+                    "confidence_rationale": "High P-Code SSA def-use intra-procedural slice.",
+                },
+            )
         if crash_rca:
             exc_code = crash_rca.get("exception_code", "UNKNOWN_EXCEPTION")
-            graph.add_edge(df_id, f"crash:{exc_code}", "EXPLAINS_DATA_PROVENANCE", metadata={"weight": 0.85})
+            graph.add_edge(
+                df_id,
+                f"crash:{exc_code}",
+                "EXPLAINS_DATA_PROVENANCE",
+                metadata={
+                    "weight": 0.85,
+                    "evidence_source": "EVIDENCE_FUSION_ENGINE",
+                    "verification_level": "CROSS_DOMAIN_CORRELATION",
+                    "relation_semantic": "HYPOTHESIZED_FAULT_PATHWAY",
+                    "epistemic_confidence": 0.85,
+                    "confidence_rationale": "Data flow slice sinks terminate at fault address or register referenced in dump.",
+                },
+            )
 
     return {
         "status": "ok",

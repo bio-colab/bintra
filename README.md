@@ -15,7 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/bio-colab/bintra/actions/workflows/windows-ci.yml"><img src="https://github.com/bio-colab/bintra/actions/workflows/windows-ci.yml/badge.svg" alt="Windows Native CI"></a>
-  <a href="https://github.com/bio-colab/bintra/releases/tag/v1.0.0"><img src="https://img.shields.io/badge/Release-v1.0.0-purple.svg" alt="Latest Release"></a>
+  <a href="https://github.com/bio-colab/bintra/releases/tag/v1.1.0"><img src="https://img.shields.io/badge/Release-v1.1.0-purple.svg" alt="Latest Release"></a>
   <a href="https://www.microsoft.com/windows"><img src="https://img.shields.io/badge/Platform-Windows_10_%2F_11_%2F_Server-blue.svg?logo=windows" alt="Platform"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg?logo=python" alt="Python"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-green.svg" alt="License"></a>
@@ -274,7 +274,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | bintra-mcp
 ```
 Output:
 ```json
-{"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2024-11-05", "serverInfo": {"name": "bintra", "version": "1.0.0"}}}
+{"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2024-11-05", "supportedProtocolVersions": ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"], "serverInfo": {"name": "bintra", "version": "1.1.0"}}}
 ```
 
 ---

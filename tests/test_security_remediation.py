@@ -43,7 +43,7 @@ class TestSecurityRemediation(unittest.TestCase):
         server = BintraMcpServer()
         tools_list = server.handle_tools_list({})["tools"]
         tool_names = [t["name"] for t in tools_list]
-        self.assertEqual(len(tool_names), 48, f"Expected exactly 48 tools, found {len(tool_names)}")
+        self.assertEqual(len(tool_names), 50, f"Expected exactly 50 tools, found {len(tool_names)}")
 
         for t_name in tool_names:
             self.assertIn(t_name, server.TOOL_SECURITY_METADATA, f"Tool '{t_name}' missing from TOOL_SECURITY_METADATA")

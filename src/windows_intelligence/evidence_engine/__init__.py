@@ -9,10 +9,12 @@ G = (V, E)
 
 from .graph_model import EvidenceGraph, EvidenceNode, EvidenceEdge
 from .causality_synthesizer import CausalitySynthesizer
+from .binary_slack_inspector import BinarySlackInspector
 
 __all__ = [
     "EvidenceGraph",
     "EvidenceNode",
     "EvidenceEdge",
     "CausalitySynthesizer",
+    "BinarySlackInspector",
 ]

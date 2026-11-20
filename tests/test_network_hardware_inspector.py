@@ -353,7 +353,7 @@ class TestNetworkHardwareInspector(unittest.TestCase):
     def test_mcp_registration_and_dispatch(self):
         from mcp_server import TOOLS_REGISTRY, BintraMcpServer
         tool_names = [t["name"] for t in TOOLS_REGISTRY]
-        self.assertEqual(len(tool_names), 48)
+        self.assertEqual(len(tool_names), 50)
         self.assertIn("bintra_network_audit", tool_names)
         self.assertIn("bintra_network_hardware_dissect", tool_names)
         self.assertIn("bintra_network_connections", tool_names)

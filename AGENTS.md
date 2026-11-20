@@ -21,10 +21,11 @@ Launch the native zero-dependency MCP server via stdio:
   }
 }
 ```
-Exposes **48 type-safe tools** (with MCP `annotations`), **4 MCP resources** (`resources/list`, `resources/read`), and **4 MCP workflow prompts** (`prompts/list`, `prompts/get`):
-- **Core Binary & Decompilation (13 Tools):** `bintra_inspect_binary`, `bintra_dump_bytes`, `bintra_deobfuscate_binary`, `bintra_match_functions`, `bintra_patch_binary`, `bintra_scan_hybrid`, `bintra_sensory_audit`, `bintra_match_pcode`, `bintra_deobfuscate_pcode`, `bintra_ghidra_analyze`, `bintra_ghidra_headless`, `bintra_wsp_audit`, `bintra_patch_weights`.
-- **Windows System Intelligence & Forensics (16 Tools):** `bintra_windows_env_audit`, `bintra_resolve_dependencies`, `bintra_inspect_crash_reports`, `bintra_correlate_failure_evidence`, `bintra_win_catalog_cmd`, `bintra_registry_audit`, `bintra_hardware_audit`, `bintra_port_audit`, `bintra_hardware_topology`, `bintra_driver_audit`, `bintra_service_audit`, `bintra_dmp_inspect`, `bintra_etw_audit`, `bintra_evidence_graph`, `bintra_device_driver_intelligence`, `bintra_process_resource_audit`.
+Exposes **50 type-safe tools** (with MCP `annotations`), **4 MCP resources** (`resources/list`, `resources/read`), and **4 MCP workflow prompts** (`prompts/list`, `prompts/get`):
+- **Core Binary, Decompilation & Neural Weights (13 Tools):** `bintra_inspect_binary`, `bintra_dump_bytes`, `bintra_deobfuscate_binary`, `bintra_match_functions`, `bintra_patch_binary`, `bintra_scan_hybrid`, `bintra_sensory_audit`, `bintra_match_pcode`, `bintra_deobfuscate_pcode`, `bintra_ghidra_analyze`, `bintra_ghidra_headless`, `bintra_wsp_audit`, `bintra_patch_weights`.
+- **Windows System Intelligence, Forensics & Profiling (21 Tools):** `bintra_windows_env_audit`, `bintra_resolve_dependencies`, `bintra_inspect_crash_reports`, `bintra_correlate_failure_evidence`, `bintra_win_catalog_cmd`, `bintra_registry_audit`, `bintra_hardware_audit`, `bintra_port_audit`, `bintra_hardware_topology`, `bintra_network_audit`, `bintra_network_hardware_dissect`, `bintra_network_connections`, `bintra_driver_audit`, `bintra_service_audit`, `bintra_dmp_inspect`, `bintra_etw_audit`, `bintra_evidence_graph`, `bintra_device_driver_intelligence`, `bintra_process_resource_audit`, `bintra_profile_process`, `bintra_inspect_slack_space`.
 - **Runtime Telemetry, Crash RCA & Live Ghidra Bridge (7 Tools):** `bintra_vad_inspect`, `bintra_memory_scan`, `bintra_pointer_scan`, `bintra_struct_dissect`, `bintra_crash_rca`, `bintra_etw_capture`, `bintra_ghidra_live_bridge`.
+- **Deep Forensics, Difference & Triaged Evidence Fusion (9 Tools):** `bintra_python_bytecode`, `bintra_cpython_memory_forensics`, `bintra_pe_deep_forensics`, `bintra_binary_diff`, `bintra_ghidra_call_graph`, `bintra_ghidra_data_flow`, `bintra_fuse_evidence`, `bintra_triage_binary`, `bintra_list_capabilities`.
 
 ### Modality 2: Unified CLI (`bintra`) -- Recommended for Terminal / Bash / PowerShell
 ```powershell
@@ -135,6 +136,9 @@ Bintra provides **7 specialized sub-skills** (plus the [`bintra`](skills/bintra/
 | `dissect-struct`| 4-byte-granularity struct field inference | `--pid <pid> --address 0x... [--size 64]` | `status`, `heuristic`, `fields_count`, `fields`, `c_struct_definition` |
 | `crash-rca` | MiniDump + disassembly root-cause blame | `--dmp <file.dmp> [--binary <exe>]` | `exception_code`, `access_type`, `root_cause_classification`, `confidence`, `culprit_register` |
 | `etw-capture` | Hybrid ETW / Event Log timeline capture | `--session-name <s> [--pid <pid>] [--duration 2.0]` | `session_info`, `events_count`, `event_sources`, `temporal_verdict` |
+| `proc-profile` | Longitudinal process profiler & leak diagnoser | `-p <pid> [-n 10] [-i 0.2] [--format json\|md]` | `status`, `verdict`, `private_bytes_slope`, `working_set_slope`, `handles_slope` |
+| `slack-audit` | Binary slack space & overlay forensic auditor | `-f <path> [--format json\|md]` | `status`, `file_type`, `has_overlay`, `has_slack`, `verdict` |
+| `triage` | Unified binary triage dossier | `-f <path> [--format json\|md] [--skip-deobf]` | `status`, `file_name`, `stages`, `verdict` |
 | `ghidra-bridge` | Authenticated localhost Ghidra JSON-RPC | `--start\|--daemon\|--status\|--stop\|--annotate-* [--no-temp-marker]` | `is_running`, `port`, `ghidra_client_connected`, `queued_commands` |
 
 > **Audit Integrity & Failure Disclosures:** Mutation commands (`patch`, `patch-binary`, `patch-weights`, confirmed `update --yes`) fail closed (`AUDIT_INIT_FAILED`) if the hash-chained audit log cannot be recovered or written. Read-only commands surface persistent log degradation via `"audit_degraded": true` and `audit_degraded_reason`.

@@ -41,7 +41,7 @@ WEIGHT_COMMANDS = {
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
 GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless", "ghidra-bridge"}
-WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "port-audit", "hw-tree", "hw-net", "hw-dissect", "net-conns", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations", "proc-list", "proc-search", "proc-info", "sys-perf", "dev-classes", "dev-list", "dev-search", "dev-info", "reg-read", "reg-search", "reg-export", "reg-import", "sig-verify", "sig-audit"}
+WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "port-audit", "hw-tree", "hw-net", "hw-dissect", "net-conns", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations", "proc-list", "proc-search", "proc-info", "sys-perf", "dev-classes", "dev-list", "dev-search", "dev-info", "reg-read", "reg-search", "reg-export", "reg-import", "sig-verify", "sig-audit", "proc-profile", "process-profile", "leak-audit", "slack-audit", "overlay-inspect", "inspect-slack"}
 
 
 def print_help():
@@ -120,6 +120,9 @@ Windows System Intelligence & Failure Diagnostic Commands:
   etw-capture       Establish real-time ETW capture session and stream diagnostic timeline events
   sig-verify        Verify Authenticode and Security Catalog (.cat) signatures with full certificate chain
   sig-audit         Audit executable and driver signatures across directories with WHQL/OEM classification
+  proc-profile      Longitudinal resource profiler & leak diagnosis (Private Bytes, Handles, GDI/USER, Plateau)
+  slack-audit       Audit binary slack space, PE overlays, and document EOF padding (MFC NUL, installer overlays)
+  triage            Multi-stage unified binary triage with deterministic markdown report generation (--format md)
 
 Python Ecosystem & Runtime Forensics Commands:
   py-bytecode       Disassemble and inspect Python bytecode (.pyc / .py) with opcode and constant analysis
@@ -2131,6 +2134,72 @@ def _dispatch_cli():
                 print(json.dumps(report, indent=2, ensure_ascii=False))
             return
 
+        elif cmd in ("proc-profile", "process-profile", "leak-audit"):
+            parser = argparse.ArgumentParser(prog=f"bintra {cmd}", description="Process longitudinal resource profiler and leak diagnosis engine (Private Bytes, Working Set, Handles, GDI/USER)")
+            parser.add_argument("command", help="Command name or positional argument")
+            parser.add_argument("pos_pid", nargs="?", type=int, default=None, help="Target process ID (PID)")
+            parser.add_argument("--pid", "-p", dest="flag_pid", type=int, default=None, help="Target process ID (PID)")
+            parser.add_argument("--samples", "-n", type=int, default=10, help="Number of consecutive samples to record (default: 10)")
+            parser.add_argument("--interval", "-i", type=float, default=0.2, help="Sampling interval in seconds (default: 0.2)")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format (json or md)")
+            args = parser.parse_args(sys.argv[1:])
+            target_pid = args.flag_pid or args.pos_pid
+            if target_pid is None:
+                parser.error("Target process PID is required (positional or via -p / --pid)")
+
+            from windows_intelligence.process_intelligence import ProcessLongitudinalProfiler
+            report = ProcessLongitudinalProfiler.profile_pid_longitudinal(
+                pid=target_pid,
+                samples_count=args.samples,
+                interval_seconds=args.interval
+            )
+            if args.format == "md":
+                m = report.get("metrics_summary", {})
+                lines = [
+                    f"# Process Longitudinal Profiling Report: PID `{target_pid}`",
+                    f"- **Classification:** `{report.get('behavior_classification')}`",
+                    f"- **Diagnosis:** {report.get('diagnostic_explanation')}",
+                    f"- **Total Samples:** {report.get('total_samples')}",
+                    f"- **Private Bytes (MB):** Initial={m.get('initial_private_bytes_mb')} -> Final={m.get('final_private_bytes_mb')} (Delta={m.get('delta_private_bytes_mb')}, Slope={m.get('slope_private_bytes_mb_per_sample')} MB/sample)",
+                    f"- **Working Set (MB):** Initial={m.get('initial_working_set_mb')} -> Final={m.get('final_working_set_mb')} (Delta={m.get('delta_working_set_mb')})",
+                    f"- **Kernel Handles:** Initial={m.get('initial_kernel_handles')} -> Final={m.get('final_kernel_handles')} (Delta={m.get('delta_kernel_handles')})",
+                    f"- **GDI Handles:** Initial={m.get('initial_gdi_handles')} -> Final={m.get('final_gdi_handles')} (Delta={m.get('delta_gdi_handles')})",
+                    f"- **Saturation Plateau:** {m.get('is_saturation_plateau', False)}"
+                ]
+                print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
+        elif cmd in ("slack-audit", "overlay-inspect", "inspect-slack"):
+            parser = argparse.ArgumentParser(prog=f"bintra {cmd}", description="Audit binary slack space, PE overlays, and document EOF padding")
+            parser.add_argument("command", help="Command name or positional argument")
+            parser.add_argument("pos_file", nargs="?", default=None, help="Target file path (.exe, .dll, .rtf, .xml, etc.)")
+            parser.add_argument("--file", "-f", "--binary", "-b", dest="flag_file", default=None, help="Target file path")
+            parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format (json or md)")
+            args = parser.parse_args(sys.argv[1:])
+            target_f = args.flag_file or args.pos_file
+            if not target_f:
+                parser.error("Target file path is required (positional or via -f / --file)")
+
+            from windows_intelligence.evidence_engine.binary_slack_inspector import BinarySlackInspector
+            report = BinarySlackInspector.inspect_file(target_f)
+            if args.format == "md":
+                lines = [
+                    f"# Slack Space & Overlay Audit: `{target_f}`",
+                    f"- **Format:** `{report.get('format')}`",
+                    f"- **File Size:** {report.get('file_size')} bytes",
+                    f"- **Has Trailing Slack:** `{report.get('has_trailing_slack')}`",
+                    f"- **Slack Bytes Count:** {report.get('slack_bytes_count')} bytes",
+                    f"- **Slack Type:** `{report.get('slack_type')}`",
+                    f"- **Entropy:** {report.get('slack_entropy', 0.0)}",
+                    f"- **Diagnostic Note:** {report.get('diagnostic_note')}"
+                ]
+                print("\n".join(lines))
+            else:
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+            return
+
     if cmd in SENSORY_COMMANDS:
         parser = argparse.ArgumentParser(description="Bintra 10-Sense Diagnostic Audit")
         parser.add_argument("command", help="sense or sensory-audit")
@@ -2641,11 +2710,15 @@ def _dispatch_cli():
         elif cmd == "match-functions":
             sys.argv[1] = "match"
         else:
-            # Normalize --binary or --input to --file for inspect, scan-hybrid, etc.
-            for alt in ("--binary", "--input"):
+            # Normalize -f / --binary / -b / --input to --file for inspect, scan-hybrid, etc.
+            for alt in ("-f", "--binary", "-b", "--input"):
                 if alt in sys.argv and "--file" not in sys.argv:
                     idx = sys.argv.index(alt)
                     sys.argv[idx] = "--file"
+            # Support positional argument: bintra inspect <file>
+            if "--file" not in sys.argv and len(sys.argv) == 3:
+                if not sys.argv[2].startswith("-"):
+                    sys.argv.insert(2, "--file")
 
         binary_neural_engine.main()
 
@@ -2804,26 +2877,43 @@ def _dispatch_cli():
         }})
         print(resp["content"][0]["text"])
 
-    elif cmd == "triage":
+    elif cmd in ("triage", "triage-binary"):
         ap = argparse.ArgumentParser(
             prog="bintra triage",
-            description="Unified read-only binary triage (PE inspection, deep forensics, signature trust, obfuscation, optional crash RCA & Ghidra fusion)",
+            description="Unified read-only binary triage (PE inspection, deep forensics, signature trust, obfuscation, slack space, optional crash RCA & Ghidra fusion)",
         )
-        ap.add_argument("--file", required=True, help="Target binary file (.exe, .dll, .sys)")
+        ap.add_argument("pos_file", nargs="?", default=None, help="Target binary file (.exe, .dll, .sys)")
+        ap.add_argument("--file", "-f", "--binary", "-b", dest="flag_file", default=None, help="Target binary file (.exe, .dll, .sys)")
         ap.add_argument("--dmp", default=None, help="Optional MiniDump (.dmp) file for crash RCA correlation")
         ap.add_argument("--ghidra", default=None, help="Optional Ghidra export (.json, .jsonl, .db)")
         ap.add_argument("--function", default=None, help="Optional target function name for Ghidra slicing")
         ap.add_argument("--skip-deobf", action="store_true", help="Skip entry-point obfuscation analysis")
+        ap.add_argument("--format", choices=["json", "md"], default="json", help="Output format (json or deterministic md report)")
+        ap.add_argument("--output", "-o", default=None, help="Optional destination path to write output report")
         ns = ap.parse_args(sys.argv[2:])
+        target_file = ns.flag_file or ns.pos_file
+        if not target_file:
+            ap.error("Target binary file is required (positional or via -f / --file)")
+
         from analysis_orchestrator import BinaryTriageOrchestrator
         res = BinaryTriageOrchestrator.triage_binary(
-            file_path=ns.file,
+            file_path=target_file,
             dmp_path=ns.dmp,
             ghidra_export_path=ns.ghidra,
             function_name=ns.function,
             include_deobfuscation=not ns.skip_deobf,
         )
-        print(json.dumps(res, indent=2, ensure_ascii=False))
+        if ns.format == "md":
+            out_content = BinaryTriageOrchestrator.generate_markdown_report(res)
+        else:
+            out_content = json.dumps(res, indent=2, ensure_ascii=False)
+
+        if ns.output:
+            with open(ns.output, "w", encoding="utf-8") as out_f:
+                out_f.write(out_content)
+            print(f"[+] Written report to: {ns.output}")
+        else:
+            print(out_content)
 
     elif cmd == "capabilities":
         ap = argparse.ArgumentParser(prog="bintra capabilities")

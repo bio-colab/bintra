@@ -63,7 +63,7 @@ graph TD
 
 ---
 
-## 3. تفاصيل محركات البرنامج وعقود أدوات الـ MCP الرئيسية (ضمن 48 أداة مسجلة مع موارد وقوالب MCP)
+## 3. تفاصيل محركات البرنامج وعقود أدوات الـ MCP الرئيسية (ضمن 50 أداة مسجلة مع موارد وقوالب MCP)
 
 ### أداة 1: `bintra_deobfuscate_binary` (مفكك التعمية الدلالي المستمر)
 * **المشكلة:** تقنيات التعمية تقوم بتسطيح تدفق التحكم (Control Flow Flattening) وتحويل الدالة إلى حلقة `switch-case` عملاقة مع مئات المتغيرات الوهمية، مما يعطل المفككات التقليدية تماماً.
@@ -133,7 +133,7 @@ graph TD
   2. **التحقق المشفر من مصدر الأدلة (Provenance Verification):** فحص هوية ملفات تصدير Ghidra ومطابقة تجزئة SHA-256 أو اسم البرنامج مع الملف التنفيذي المستهدف لضمان عدم ربط أدلة من ملفات غريبة في رسم العلاقات.
   3. **الفصل الإبستمولوجي الصارم في المخرجات:** تصنيف النتائج إلى "حقائق قطعية مشاهدة" (Observed Facts)، و"مؤشرات استدلالية ظنية" (Heuristic Indicators)، و"خطوات تحقيقية موصى بها" (Recommended Next Steps).
   4. **رسم الأدلة البياني السببي (Evidence Graph):** ربط أبعاد التحليل (PE Forensics, Authenticode Trust, Obfuscation Signals, Crash Events, Ghidra Topologies) بعلاقات سببية واضحة مع تحديد مصدر الدليل (`evidence_source`)، ومستوى التحقق (`verification_level`)، والدلالة المعنوية للعلاقة (`relation_semantic`)، ودرجة الثقة المعايرة (`epistemic_confidence`).
-  5. **اكتمال ثالوث MCP الحديث (SOTA MCP Triad):** تقديم 48 أداة موسومة بـ `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentHint`)، مع 4 موارد حية (`resources/list`, `resources/read`)، و4 قوالب توجيه لسير العمل (`prompts/list`, `prompts/get`)، ودعم التفاوض على إصدارات البروتوكول وإرجاع `structuredContent`.
+  5. **اكتمال ثالوث MCP الحديث (SOTA MCP Triad):** تقديم 50 أداة موسومة بـ `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentHint`)، مع 4 موارد حية (`resources/list`, `resources/read`)، و4 قوالب توجيه لسير العمل (`prompts/list`, `prompts/get`)، ودعم التفاوض على إصدارات البروتوكول وإرجاع `structuredContent`.
 
 > للاطلاع على منظومة القياس الحي وفحص الذاكرة (`bintra_vad_inspect`, `bintra_memory_scan`, `bintra_pointer_scan`, `bintra_struct_dissect`, `bintra_crash_rca`, `bintra_etw_capture`) وأدوات استخبارات ويندوز الـ 34 كاملةً، راجع [`RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md`](RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md).
 

@@ -149,6 +149,23 @@ class BinaryTriageOrchestrator:
         else:
             stages["deobfuscation"] = {"status": "skipped", "reason": "disabled_by_caller"}
 
+        # Stage 5: Binary Slack Space & Overlay Forensics
+        slack_res: Optional[Dict[str, Any]] = None
+        try:
+            from windows_intelligence.evidence_engine.binary_slack_inspector import BinarySlackInspector
+            slack_res = BinarySlackInspector.inspect_file(can_path)
+            st_slack = slack_res.get("status", "ok") if isinstance(slack_res, dict) else "ok"
+            stages["slack_and_overlay"] = {
+                "status": st_slack,
+                "has_trailing_slack": slack_res.get("has_trailing_slack", False),
+                "slack_bytes_count": slack_res.get("slack_bytes_count", 0),
+                "slack_type": slack_res.get("slack_type", "CLEAN_EXACT_EOF"),
+            }
+        except SecurityViolationError:
+            raise
+        except Exception as exc:
+            stages["slack_and_overlay"] = {"status": "error", "error": str(exc)}
+
         # Stage 5: Optional Crash MiniDump RCA
         if dmp_path:
             try:
@@ -285,6 +302,7 @@ class BinaryTriageOrchestrator:
             crash_rca=crash_rca_res,
             ghidra_cg=ghidra_cg_res,
             ghidra_prov=ghidra_provenance,
+            slack_res=slack_res,
         )
 
         failed_stages = [name for name, st in stages.items() if st.get("status") in ("error", "failed", "provenance_mismatch")]
@@ -314,6 +332,7 @@ class BinaryTriageOrchestrator:
                 "pe_deep_forensics": pe_forensics_res,
                 "signature_intelligence": sig_res,
                 "deobfuscation": deobf_res,
+                "slack_and_overlay": slack_res,
                 "crash_rca": crash_rca_res,
                 "ghidra_call_graph": ghidra_cg_res,
                 "ghidra_data_flow": ghidra_df_res,
@@ -330,6 +349,7 @@ class BinaryTriageOrchestrator:
         crash_rca: Optional[Dict[str, Any]],
         ghidra_cg: Optional[Dict[str, Any]],
         ghidra_prov: Optional[Dict[str, Any]] = None,
+        slack_res: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Separates observed facts from heuristic indicators and proposes next steps."""
         observed_facts: List[str] = []
@@ -351,6 +371,14 @@ class BinaryTriageOrchestrator:
                 if entropy >= 7.2:
                     heuristic_indicators.append("HIGH_ENTROPY_PACKED_OR_ENCRYPTED_SUSPECTED")
                     recommended_next_tools.append("bintra_deobfuscate_binary")
+
+        if slack_res and isinstance(slack_res, dict):
+            if slack_res.get("has_trailing_slack"):
+                stype = slack_res.get("slack_type", "UNMAPPED_SLACK")
+                scnt = slack_res.get("slack_bytes_count", 0)
+                observed_facts.append(f"Binary slack space detected: {scnt} bytes ({stype})")
+                if "SUSPICIOUS" in stype:
+                    heuristic_indicators.append(f"SUSPICIOUS_TRAILING_OVERLAY:{stype}")
 
         if pe_forensics and pe_forensics.get("status") == "ok":
             pdata_cnt = pe_forensics.get("pdata_functions", {}).get("total_runtime_functions", 0)
@@ -403,3 +431,93 @@ class BinaryTriageOrchestrator:
             "heuristic_indicators": heuristic_indicators,
             "recommended_next_steps": dedup_tools,
         }
+
+    @classmethod
+    def generate_markdown_report(cls, triage_data: Dict[str, Any]) -> str:
+        """
+        Generates an authoritative, deterministic GitHub-flavored Markdown dossier
+        directly from the unified triage dictionary. Guarantees 1:1 factual
+        consistency with JSON evidence without human divergence.
+        """
+        target_file = triage_data.get("target_file", "UNKNOWN")
+        target_sha256 = triage_data.get("target_sha256", "UNKNOWN")
+        file_name = triage_data.get("file_name", os.path.basename(str(target_file)))
+        overall_status = triage_data.get("status", "UNKNOWN")
+        artifacts = triage_data.get("artifacts", {})
+        summary = triage_data.get("summary", {})
+
+        pe_inspect = artifacts.get("binary_inspection") or {}
+        sig_res = artifacts.get("signature_intelligence") or {}
+        slack_res = artifacts.get("slack_and_overlay") or {}
+        pe_forensics = artifacts.get("pe_deep_forensics") or {}
+        deobf_res = artifacts.get("deobfuscation") or {}
+
+        lines = []
+        lines.append(f"# Bintra Binary Triage Forensic Dossier: `{file_name}`\n")
+        lines.append("> [!IMPORTANT]")
+        lines.append("> Generated deterministically by Bintra BinaryTriageOrchestrator.")
+        lines.append(f"> Epistemic Classification: `{triage_data.get('epistemic_classification', 'UNIFIED_BINARY_TRIAGE')}`\n")
+        
+        lines.append("## 1. Target Inventory & Hashing\n")
+        lines.append("| Property | Forensic Value |")
+        lines.append("| :--- | :--- |")
+        lines.append(f"| **Target Path** | `{target_file}` |")
+        lines.append(f"| **SHA-256** | `{target_sha256}` |")
+        lines.append(f"| **Triage Status** | `{str(overall_status).upper()}` |")
+        arch = pe_inspect.get("format") or pe_inspect.get("pe_type") or pe_inspect.get("architecture") or "N/A"
+        lines.append(f"| **Architecture / Format** | `{arch}` |\n")
+
+        # Mitigations
+        mit = pe_inspect.get("windows_security_mitigations") or pe_inspect.get("mitigations") or {}
+        if isinstance(mit, dict) and mit:
+            lines.append("## 2. Windows Exploit Mitigations\n")
+            lines.append("| Mitigation | State |")
+            lines.append("| :--- | :---: |")
+            for k, v in mit.items():
+                state = "ENABLED (Protected)" if v else "DISABLED (Exposed)"
+                lines.append(f"| `{k}` | {state} |")
+            lines.append("")
+
+        # Digital Trust
+        if sig_res and isinstance(sig_res, dict):
+            lines.append("## 3. Digital Signature & Authenticode Verification\n")
+            lines.append("| Attribute | State |")
+            lines.append("| :--- | :--- |")
+            lines.append(f"| **Trust Status** | `{sig_res.get('trust_status', 'UNKNOWN')}` |")
+            lines.append(f"| **Is Verified** | `{bool(sig_res.get('is_verified', False))}` |")
+            lines.append(f"| **Signer Subject** | `{sig_res.get('signer_subject', 'N/A')}` |")
+            lines.append(f"| **Catalog Verified** | `{sig_res.get('is_catalog_signed', False)}` |\n")
+
+        # Slack & Overlay
+        if slack_res and isinstance(slack_res, dict):
+            lines.append("## 4. Binary Slack Space & Overlay Forensics\n")
+            lines.append("| Property | Value |")
+            lines.append("| :--- | :--- |")
+            lines.append(f"| **Has Trailing Slack** | `{slack_res.get('has_trailing_slack', False)}` |")
+            lines.append(f"| **Slack Bytes Count** | `{slack_res.get('slack_bytes_count', 0)}` bytes |")
+            lines.append(f"| **Slack Classification** | `{slack_res.get('slack_type', 'N/A')}` |")
+            lines.append(f"| **Diagnostic Note** | {slack_res.get('diagnostic_note', 'N/A')} |\n")
+
+        # Observed Facts & Recommendations
+        facts = summary.get("observed_facts", [])
+        if facts:
+            lines.append("## 5. Authoritative Observed Facts\n")
+            for f in facts:
+                lines.append(f"* {f}")
+            lines.append("")
+
+        heuristics = summary.get("heuristic_indicators", [])
+        if heuristics:
+            lines.append("## 6. Heuristic Indicators & Anomalies\n")
+            for h in heuristics:
+                lines.append(f"* `{h}`")
+            lines.append("")
+
+        recs = summary.get("recommended_next_steps", [])
+        if recs:
+            lines.append("## 7. Recommended Next Diagnostic Actions\n")
+            for r in recs:
+                lines.append(f"* `{r}`")
+            lines.append("")
+
+        return "\n".join(lines)

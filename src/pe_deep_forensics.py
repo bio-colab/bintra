@@ -619,6 +619,12 @@ class PeDeepForensicsInspector:
         pdata = self.extract_pdata_functions(data, layout=layout, limit=limit)
         rtti = self.extract_msvc_rtti(data, layout=layout, limit=min(limit, 250))
         pdb = self.correlate_local_pdb(data, binary_path=file_path, pdb_path=pdb_path, layout=layout)
+        try:
+            from windows_intelligence.evidence_engine.binary_slack_inspector import BinarySlackInspector
+            slack = BinarySlackInspector.inspect_pe_file(file_path)
+        except Exception as e:
+            slack = {"status": "error", "error": str(e)}
+
         return {
             "status": "ok",
             "file": os.path.abspath(file_path),
@@ -628,6 +634,7 @@ class PeDeepForensicsInspector:
             "pdata_functions": pdata,
             "msvc_rtti": rtti,
             "pdb_correlation": pdb,
+            "slack_and_overlay": slack,
             "epistemic_classification": "DETERMINISTIC_BINARY_STRUCTURE_PARSE",
         }
 

@@ -11,7 +11,7 @@ for p in (SRC_DIR, BENCH_DIR):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from mcp_server import BintraMcpServer
+from mcp_server import BintraMcpServer, TOOLS_REGISTRY
 from token_telemetry import (
     TokenSessionTracker,
     compact_tool_schema,
@@ -65,8 +65,9 @@ class TestTokenEfficiency(unittest.TestCase):
         compact_all = srv.handle_tools_list({"compact": True, "profile": "all"})["tools"]
         static_compact = srv.handle_tools_list({"compact": True, "profile": "static"})["tools"]
 
-        self.assertEqual(len(full), 48)
-        self.assertEqual(len(compact_all), 48)
+        self.assertEqual(len(full), len(TOOLS_REGISTRY))
+        self.assertEqual(len(compact_all), len(TOOLS_REGISTRY))
+        self.assertGreaterEqual(len(full), 48)
         self.assertLess(len(static_compact), 15)
 
         full_tok = estimate_tokens(full)

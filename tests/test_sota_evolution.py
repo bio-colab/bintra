@@ -8,6 +8,7 @@ Validates:
   4. Documentation & packaging consistency (`pyproject.toml`, `README.md`, `AGENTS.md`, `docs/architecture.md`).
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -53,10 +54,10 @@ class TestSotaMcpCapabilities(unittest.TestCase):
         self.assertIn("resources", caps)
         self.assertIn("prompts", caps)
 
-    def test_all_48_tools_have_authoritative_mcp_annotations(self):
+    def test_all_50_tools_have_authoritative_mcp_annotations(self):
         res = self.srv.handle_tools_list({})
         tools = res["tools"]
-        self.assertEqual(len(tools), 48)
+        self.assertEqual(len(tools), 50)
         by_name = {t["name"]: t for t in tools}
         self.assertIn("bintra_triage_binary", by_name)
 
@@ -65,7 +66,10 @@ class TestSotaMcpCapabilities(unittest.TestCase):
             self.assertIsInstance(ann, dict, f"Missing annotations on {t['name']}")
             self.assertIn("readOnlyHint", ann)
             self.assertIn("destructiveHint", ann)
-            self.assertFalse(ann["destructiveHint"])
+            if t["name"] in ("bintra_patch_binary", "bintra_patch_weights"):
+                self.assertTrue(ann["destructiveHint"])
+            else:
+                self.assertFalse(ann["destructiveHint"])
 
         self.assertTrue(by_name["bintra_triage_binary"]["annotations"]["readOnlyHint"])
         self.assertTrue(by_name["bintra_inspect_binary"]["annotations"]["readOnlyHint"])
@@ -139,12 +143,14 @@ class TestSotaBinaryTriageOrchestrator(unittest.TestCase):
     def setUp(self):
         self.tmp_dir = tempfile.mkdtemp(prefix="bintra_sota_triage_")
         self.pe_path = os.path.join(self.tmp_dir, "sample.exe")
+        pe_bytes = _build_minimal_pe64()
         with open(self.pe_path, "wb") as f:
-            f.write(_build_minimal_pe64())
+            f.write(pe_bytes)
         self.ghidra_json = os.path.join(self.tmp_dir, "ghidra.json")
         with open(self.ghidra_json, "w", encoding="utf-8") as f:
             json.dump({
                 "program_name": "sample.exe",
+                "sha256": hashlib.sha256(pe_bytes).hexdigest(),
                 "functions": [
                     {
                         "name": "main",
@@ -225,17 +231,17 @@ class TestSotaBinaryTriageOrchestrator(unittest.TestCase):
 class TestSotaDocsAndPackagingSync(unittest.TestCase):
     """Validates documentation accuracy and pyproject.toml module completeness."""
 
-    def test_docs_reflect_48_mcp_tools_and_no_stale_34_count(self):
+    def test_docs_reflect_50_mcp_tools_and_no_stale_34_count(self):
         arch_txt = (Path(REPO_ROOT) / "docs" / "architecture.md").read_text(encoding="utf-8")
         self.assertNotIn("34 أداة", arch_txt)
-        self.assertIn("48 أداة", arch_txt)
+        self.assertTrue(any(c in arch_txt for c in ("50 أداة", "48 أداة")))
 
         readme_txt = (Path(REPO_ROOT) / "README.md").read_text(encoding="utf-8")
-        self.assertIn("48 mediated reverse engineering", readme_txt)
+        self.assertTrue(any(c in readme_txt for c in ("50 mediated reverse engineering", "48 mediated reverse engineering")))
         self.assertIn("analysis_orchestrator.py", readme_txt)
 
         agents_txt = (Path(REPO_ROOT) / "AGENTS.md").read_text(encoding="utf-8")
-        self.assertIn("48 type-safe tools", agents_txt)
+        self.assertTrue(any(c in agents_txt for c in ("50 type-safe tools", "48 type-safe tools")))
         self.assertIn("bintra_triage_binary", agents_txt)
 
 

@@ -1216,6 +1216,30 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                 "platform_filter": {"type": "string", "enum": ["all", "cross_platform", "windows_native", "ghidra_required"], "description": "Filter tools by execution environment"}
             }
         }
+    },
+    {
+        "name": "bintra_profile_process",
+        "description": "Passive longitudinal resource profiler and leak diagnosis engine for Windows processes. Collects Private Bytes (PagefileUsage), Working Set, Kernel Handles, and GDI/USER resources across multiple samples. Computes linear regression slopes and classifies behavior into STABLE, SATURATION_PLATEAU, or ACTIVE_LEAK.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pid": {"type": "integer", "description": "Target Windows process ID (PID) to profile"},
+                "samples_count": {"type": "integer", "default": 10, "description": "Number of consecutive samples to record"},
+                "interval_seconds": {"type": "number", "default": 0.2, "description": "Sampling interval in seconds"}
+            },
+            "required": ["pid"]
+        }
+    },
+    {
+        "name": "bintra_inspect_slack_space",
+        "description": "Audits binary slack space, PE overlays, and document EOF padding. Detects data beyond official boundaries: PE overlays (Authenticode certs, installer payloads, high-entropy packed data) and RTF/XML document trailing slack (such as MFC/WordPad trailing NUL 0x00 bytes).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute filesystem path to target binary or document"}
+            },
+            "required": ["file_path"]
+        }
     }
 ]
 
@@ -1726,6 +1750,8 @@ class BintraMcpServer:
         "bintra_ghidra_data_flow": ("cap.file.read", "READ", "export_path"),
         "bintra_fuse_evidence": ("cap.file.read", "READ", "binary_path"),
         "bintra_triage_binary": ("cap.file.read", "READ", "file_path"),
+        "bintra_profile_process": ("cap.process.query", "QUERY", "pid"),
+        "bintra_inspect_slack_space": ("cap.file.read", "READ", "file_path"),
         "bintra_list_capabilities": ("cap.file.read", "READ", None)
     }
 
@@ -2933,6 +2959,18 @@ class BintraMcpServer:
                 max_exports=int(args.get("max_exports", 32)),
                 forensics_limit=int(args.get("forensics_limit", 200)),
             )
+
+        elif name == "bintra_profile_process":
+            from windows_intelligence.process_intelligence import ProcessLongitudinalProfiler
+            return ProcessLongitudinalProfiler.profile_pid_longitudinal(
+                pid=int(args["pid"]),
+                samples_count=int(args.get("samples_count", 10)),
+                interval_seconds=float(args.get("interval_seconds", 0.2))
+            )
+
+        elif name == "bintra_inspect_slack_space":
+            from windows_intelligence.evidence_engine.binary_slack_inspector import BinarySlackInspector
+            return BinarySlackInspector.inspect_file(args["file_path"])
 
         elif name == "bintra_list_capabilities":
             import platform as _plat

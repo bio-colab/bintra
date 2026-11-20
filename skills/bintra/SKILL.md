@@ -45,7 +45,7 @@ Depending on what the user asks for in natural language, navigate to the special
 
 ## 2. Global Safety Kernel Guardrails (Complete Mediation)
 
-All 47 MCP tools and CLI commands are strictly governed by the **Safety Kernel & ExecutionGuard**:
+All 50 MCP tools and CLI commands are strictly governed by the **Safety Kernel & ExecutionGuard**:
 
 1. **Target Immutability:** Never modify source binaries in-place. Passing identical source and destination paths raises `TargetMutationError(TARGET_WRITE_FORBIDDEN)`.
 2. **Workspace Confinement:** All outputs must be written inside a designated workspace directory (e.g. `./workspace/...`). Writing into the target's original directory raises `TARGET_DIRECTORY_WRITE_FORBIDDEN`.
@@ -54,9 +54,9 @@ All 47 MCP tools and CLI commands are strictly governed by the **Safety Kernel &
 
 ---
 
-## 3. Tool Matrix: The 47 Native MCP Tools
+## 3. Tool Matrix: The 50 Native MCP Tools
 
-Bintra exposes 47 type-safe tools over JSON-RPC 2.0 stdio (`bintra-mcp`):
+Bintra exposes 50 type-safe tools over JSON-RPC 2.0 stdio (`bintra-mcp`):
 
 ### Tier 1: Core Binary & Disassembly (13 Tools)
 - `bintra_inspect_binary`: PE32/PE32+ headers, ASLR/DEP/CFG mitigations, sections, entropy.
@@ -73,7 +73,7 @@ Bintra exposes 47 type-safe tools over JSON-RPC 2.0 stdio (`bintra-mcp`):
 - `bintra_wsp_audit`: Zero-evaluation Safetensors weight-space audit.
 - `bintra_patch_weights`: Selective column direction subtraction for loop attractor cure.
 
-### Tier 2: Windows System & Diagnostic Intelligence (18 Tools)
+### Tier 2: Windows System & Diagnostic Intelligence (20 Tools)
 - `bintra_windows_env_audit`: Host OS build, WOW64 mode, security mitigations.
 - `bintra_resolve_dependencies`: Safe DLL search order and API-Set schema resolution.
 - `bintra_inspect_crash_reports`: Windows Error Reporting (WER) and Event 1000 logs.
@@ -92,6 +92,8 @@ Bintra exposes 47 type-safe tools over JSON-RPC 2.0 stdio (`bintra-mcp`):
 - `bintra_evidence_graph`: Formal directed Evidence Graph connecting binary, OS, and crash telemetry.
 - `bintra_device_driver_intelligence`: Driver Store package matching and estimated driver rank.
 - `bintra_process_resource_audit`: Restart Manager file locks, module holders, and process tree.
+- `bintra_profile_process`: Passive longitudinal resource profiler & leak diagnoser.
+- `bintra_inspect_slack_space`: Audits binary slack space, PE overlays, and document EOF padding.
 
 ### Tier 3: Runtime Telemetry, Crash RCA & Live Ghidra Bridge (7 Tools)
 - `bintra_vad_inspect`: Passive virtual memory map (VAD) layout and address classification.
@@ -151,9 +153,9 @@ bintra ghidra-bridge --start --port 41718 --no-temp-marker
 
 ---
 
-## 5. Deep Forensics, Ghidra Topology & Capability Discovery (47 MCP Tools)
+## 5. Deep Forensics, Ghidra Topology & Capability Discovery (50 MCP Tools)
 
-- **Self-Discovery:** Always start with `bintra_list_capabilities` (`bintra capabilities`) to map all 47 tools by host compatibility (`cross_platform`, `windows_native`, `ghidra_required`).
+- **Self-Discovery:** Always start with `bintra_list_capabilities` (`bintra capabilities`) to map all 50 tools by host compatibility (`cross_platform`, `windows_native`, `ghidra_required`).
 - **PE Deep Forensics (`bintra_pe_deep_forensics`):** Recovers x64 `.pdata` `RUNTIME_FUNCTION` boundaries, MSVC RTTI classes/`vftables`, and offline local PDB/RSDS matches.
 - **Semantic Binary Diffing (`bintra_binary_diff`):** Compares PE binaries or Ghidra exports using WL-CFG subtree hashing + 64-D P-Code cosine + API/String anchor Jaccard.
 - **Ghidra Deep Analysis (`bintra_ghidra_call_graph`, `bintra_ghidra_data_flow`):** Extracts caller/callee chains, sensitive API reachability, intra-procedural SSA def-use slices, and Decompiler C AST summaries (supports `.json`, `.jsonl`, and zero-dependency indexed `.db` SQLite stores).

@@ -870,27 +870,62 @@ class EtwTimelineCorrelator:
             }
 
         ref_time = crash_timestamp or (timeline_events[-1]["timestamp"] if timeline_events else time.time())
+        is_post_crash = crash_timestamp is not None
         findings = []
 
-        # 1. Look for DLL loads within 5 seconds before crash
+        # 1. Epistemically evaluate DLL loads and potential injection evidence
         recent_dll_loads = []
+        has_injection_evidence = any(
+            ev.get("details", {}).get("is_injected")
+            or ev.get("details", {}).get("remote_caller")
+            or ev.get("details", {}).get("injection")
+            or ev.get("event_type") in ("REMOTE_THREAD", "PROCESS_INJECTION", "SUSPICIOUS_IMAGE_LOAD")
+            or "injected" in str(ev.get("details", {}).get("image_name", "")).lower()
+            for ev in timeline_events
+        )
+
         for ev in timeline_events:
             delta_sec = ref_time - ev["timestamp"]
-            if 0 <= delta_sec <= 5.0 and ev.get("event_type") == "IMAGE_LOAD":
+            # Within 5 seconds before crash if post-crash, or any dynamic image load during monitoring
+            if (0 <= delta_sec <= 5.0 if is_post_crash else True) and ev.get("event_type") in ("IMAGE_LOAD", "SUSPICIOUS_IMAGE_LOAD"):
                 mod_name = ev.get("details", {}).get("image_name", "Unknown.dll")
+                is_mod_injected = bool(
+                    ev.get("details", {}).get("is_injected")
+                    or ev.get("details", {}).get("remote_caller")
+                    or "injected" in mod_name.lower()
+                    or ev.get("event_type") == "SUSPICIOUS_IMAGE_LOAD"
+                )
                 recent_dll_loads.append({
-                    "delta_seconds_before_crash": round(delta_sec, 3),
+                    "delta_seconds_before_crash": round(delta_sec, 3) if is_post_crash else None,
+                    "delta_seconds_from_ref": round(delta_sec, 3),
                     "module": mod_name,
-                    "base_address": ev.get("details", {}).get("base_address")
+                    "base_address": ev.get("details", {}).get("base_address"),
+                    "is_injected": is_mod_injected
                 })
 
         if recent_dll_loads:
-            findings.append({
-                "category": "DYNAMIC_IMAGE_LOAD",
-                "significance": "HIGH",
-                "description": f"{len(recent_dll_loads)} module(s) loaded within 5 seconds of the fault.",
-                "modules": recent_dll_loads
-            })
+            if has_injection_evidence:
+                findings.append({
+                    "category": "DYNAMIC_IMAGE_LOAD",
+                    "significance": "CRITICAL",
+                    "description": (
+                        f"{len(recent_dll_loads)} module(s) loaded within 5 seconds of the fault with corroborating injection indicators."
+                        if is_post_crash else
+                        f"{len(recent_dll_loads)} module(s) loaded dynamically with cross-process injection indicators."
+                    ),
+                    "modules": recent_dll_loads
+                })
+            else:
+                findings.append({
+                    "category": "DYNAMIC_IMAGE_LOAD",
+                    "significance": "LOW",
+                    "description": (
+                        f"{len(recent_dll_loads)} module(s) loaded within 5 seconds of the fault (standard dynamic loading, no injection indicators evidenced)."
+                        if is_post_crash else
+                        f"{len(recent_dll_loads)} module(s) loaded dynamically during trace session (no injection indicators evidenced)."
+                    ),
+                    "modules": recent_dll_loads
+                })
 
         # 2. Look for memory allocation / deallocation churn
         recent_allocs = [e for e in timeline_events if e.get("event_type") in ("VIRTUAL_ALLOC", "HEAP_ALLOC")]
@@ -945,10 +980,10 @@ class EtwTimelineCorrelator:
             src = ev.get("source", "unknown")
             event_sources[src] = event_sources.get(src, 0) + 1
 
-        # 8. Overall verdict
+        # 8. Overall verdict with epistemic grounding
         if any(f["category"] == "MEMORY_DEALLOCATION" for f in findings):
             verdict = "TEMPORAL_MEMORY_CHURN_DETECTED"
-        elif recent_dll_loads:
+        elif recent_dll_loads and has_injection_evidence:
             verdict = "LATE_MODULE_INJECTION_DETECTED"
         elif gpu_resets:
             verdict = "GRAPHICS_PIPELINE_RESET_DETECTED"
@@ -958,8 +993,10 @@ class EtwTimelineCorrelator:
             verdict = "FILE_LOCK_CONTENTION_DETECTED"
         elif prev_faults:
             verdict = "RECURRENT_APPLICATION_FAULT_DETECTED"
+        elif recent_dll_loads:
+            verdict = "DYNAMIC_MODULE_LOAD_OBSERVED"
         else:
-            verdict = "STABLE_PRE_CRASH_TIMELINE"
+            verdict = "STABLE_PRE_CRASH_TIMELINE" if is_post_crash else "STABLE_LIVE_TRACE"
 
         return {
             "events_count": len(timeline_events),

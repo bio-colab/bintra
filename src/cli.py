@@ -644,17 +644,22 @@ def _dispatch_cli():
             print(json.dumps(res, indent=2, default=str))
 
         elif cmd == "resolve-deps":
-            parser = argparse.ArgumentParser(description="Audit Windows dynamic link library dependencies")
+            parser = argparse.ArgumentParser(prog="bintra resolve-deps", description="Audit Windows dynamic link library dependencies")
             parser.add_argument("command")
-            parser.add_argument("--binary", "--file", dest="binary", required=True, help="Target PE binary")
+            parser.add_argument("pos_binary", nargs="?", default=None, help="Target PE binary")
+            parser.add_argument("--binary", "--file", "-b", "-f", "--target", "-t", dest="flag_binary", default=None, help="Target PE binary")
             parser.add_argument("--app-dir", default=None, help="Host application directory to search first for DLL dependencies")
             parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
-            args = parser.parse_args()
+            args = parser.parse_args(sys.argv[1:])
 
-            report = WindowsDependencyResolver.audit_dependencies(args.binary, app_dir=args.app_dir)
+            target_binary = args.flag_binary or args.pos_binary
+            if not target_binary:
+                parser.error("Target binary path is required (positional or via --binary / --file)")
+
+            report = WindowsDependencyResolver.audit_dependencies(target_binary, app_dir=args.app_dir)
             if args.format == "md":
                 lines = [
-                    f"# Dependency Audit for `{os.path.basename(args.binary)}`",
+                    f"# Dependency Audit for `{os.path.basename(target_binary)}`",
                     f"- **Verdict:** `{report.get('verdict')}`",
                     f"- **Loader Mode:** `{report.get('loader_mode')}` ({report.get('binary_architecture')})",
                     f"- **Resolved DLLs:** {report.get('resolved_dlls_count')}/{report.get('total_imported_dlls')}",
@@ -2046,15 +2051,20 @@ def _dispatch_cli():
         elif cmd == "sig-verify":
             parser = argparse.ArgumentParser(prog="bintra sig-verify", description="Verify Authenticode and Security Catalog (.cat) digital signatures")
             parser.add_argument("command")
-            parser.add_argument("file_path", help="Target executable (.exe), DLL (.dll), or kernel driver (.sys)")
+            parser.add_argument("file_path", nargs="?", default=None, help="Target executable (.exe), DLL (.dll), or kernel driver (.sys)")
+            parser.add_argument("--file", "-f", "--binary", "-b", "--path", "-p", "--target", "-t", dest="flag_file", default=None, help="Target file path")
             parser.add_argument("--no-catalog", action="store_true", help="Disable Windows Security Catalog (.cat) resolution")
             parser.add_argument("--verify-revocation", action="store_true", help="Enable online CRL/OCSP revocation checks")
             parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
             args = parser.parse_args(sys.argv[1:])
 
+            target_file = args.flag_file or args.file_path
+            if not target_file:
+                parser.error("Target file path is required (positional or via --file / -f)")
+
             from windows_intelligence import WindowsSignatureIntelligence
             report = WindowsSignatureIntelligence.verify_file(
-                args.file_path,
+                target_file,
                 check_catalog=not args.no_catalog,
                 verify_revocation=args.verify_revocation
             )
@@ -2085,16 +2095,21 @@ def _dispatch_cli():
         elif cmd == "sig-audit":
             parser = argparse.ArgumentParser(prog="bintra sig-audit", description="Audit digital signatures across a directory of executables or drivers")
             parser.add_argument("command")
-            parser.add_argument("dir_path", help="Target directory path (e.g. C:\\Windows\\System32\\drivers)")
+            parser.add_argument("dir_path", nargs="?", default=None, help="Target directory path (e.g. C:\\Windows\\System32\\drivers)")
+            parser.add_argument("--dir", "-d", "--path", "-p", "--target", "-t", dest="flag_dir", default=None, help="Target directory path")
             parser.add_argument("--pattern", default="*.sys", help="File glob pattern (default: *.sys)")
             parser.add_argument("--recursive", action="store_true", help="Recursively traverse subdirectories")
             parser.add_argument("--limit", type=int, default=100, help="Maximum files to audit (default: 100)")
             parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
             args = parser.parse_args(sys.argv[1:])
 
+            target_dir = args.flag_dir or args.dir_path
+            if not target_dir:
+                parser.error("Target directory path is required (positional or via --dir / -d)")
+
             from windows_intelligence import WindowsSignatureIntelligence
             report = WindowsSignatureIntelligence.audit_directory(
-                args.dir_path,
+                target_dir,
                 pattern=args.pattern,
                 recursive=args.recursive,
                 max_files=args.limit

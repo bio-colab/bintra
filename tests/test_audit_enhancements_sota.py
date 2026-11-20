@@ -410,6 +410,63 @@ class TestSotaAuditEnhancements(unittest.TestCase):
         self.assertIn("control_flow_flattening", res)
         self.assertIn("analysis_file_offset", res)
 
+    def test_windows_dependency_resolver_sxs_resolution(self):
+        """Verify that WindowsDependencyResolver correctly resolves Side-by-Side (SxS) assemblies."""
+        from windows_intelligence.dependency_resolver import WindowsDependencyResolver
+
+        # Check SxS assembly map
+        self.assertIn("comctl32.dll", WindowsDependencyResolver.SXS_ASSEMBLY_MAP)
+        self.assertEqual(WindowsDependencyResolver.SXS_ASSEMBLY_MAP["comctl32.dll"], "microsoft.windows.common-controls")
+
+        # Test manifest extraction and resolution on mspaint.exe if on Windows
+        mspaint = r"C:\Windows\System32\mspaint.exe"
+        if os.path.exists(mspaint):
+            manifest = WindowsDependencyResolver.extract_manifest_text(mspaint)
+            self.assertIn("Microsoft.Windows.Common-Controls", manifest)
+            sxs_path = WindowsDependencyResolver.resolve_sxs_dll("comctl32.dll", mspaint, is_64bit=True, manifest_text=manifest)
+            self.assertIsNotNone(sxs_path)
+            self.assertTrue(os.path.isfile(sxs_path))
+            self.assertIn("WinSxS", sxs_path)
+
+            report = WindowsDependencyResolver.audit_dependencies(mspaint)
+            self.assertEqual(report["verdict"], "HEALTHY")
+            self.assertEqual(report["missing_exports_count"], 0)
+            self.assertEqual(report["missing_dlls_count"], 0)
+            self.assertGreaterEqual(report["sxs_assemblies_count"], 1)
+
+    def test_cli_argument_parsing_resilience(self):
+        """Verify that CLI subcommands (sig-verify, resolve-deps) flexibly handle both flags and positional arguments."""
+        import subprocess
+
+        # 1. sig-verify with --file flag
+        mspaint = r"C:\Windows\System32\mspaint.exe"
+        if os.path.exists(mspaint):
+            res_flag = subprocess.run(
+                [sys.executable, os.path.join(SRC_DIR, "cli.py"), "sig-verify", "--file", mspaint],
+                capture_output=True,
+                text=True
+            )
+            self.assertEqual(res_flag.returncode, 0)
+            self.assertIn("WINDOWS_SIGNATURE_INTELLIGENCE", res_flag.stdout)
+
+            # 2. sig-verify with positional argument
+            res_pos = subprocess.run(
+                [sys.executable, os.path.join(SRC_DIR, "cli.py"), "sig-verify", mspaint],
+                capture_output=True,
+                text=True
+            )
+            self.assertEqual(res_pos.returncode, 0)
+            self.assertIn("WINDOWS_SIGNATURE_INTELLIGENCE", res_pos.stdout)
+
+            # 3. resolve-deps with --file flag
+            res_rd_flag = subprocess.run(
+                [sys.executable, os.path.join(SRC_DIR, "cli.py"), "resolve-deps", "--file", mspaint],
+                capture_output=True,
+                text=True
+            )
+            self.assertEqual(res_rd_flag.returncode, 0)
+            self.assertIn("STATIC_HEURISTIC_AUDIT", res_rd_flag.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

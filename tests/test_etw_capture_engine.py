@@ -218,6 +218,22 @@ class TestEtwCaptureEngine(unittest.TestCase):
         self.assertEqual(report["event_sources"].get("synthetic_manual"), 1)
         self.assertEqual(report["event_sources"].get("event_log_polling"), 1)
 
+    def test_timeline_correlator_normal_module_load_not_injection(self):
+        """Verifies that ordinary dynamic module loads without injection evidence are classified as DYNAMIC_MODULE_LOAD_OBSERVED."""
+        t_now = time.time()
+        # Case 1: Live trace (no crash)
+        live_events = [
+            EtwEventRecord(t_now - 1.0, "Kernel-Process", 5, 2000, 20, "IMAGE_LOAD", details={"image_name": "uxtheme.dll", "base_address": "0x7ffd0000"}).to_dict()
+        ]
+        live_report = EtwTimelineCorrelator.correlate_crash_timeline(live_events, crash_timestamp=None)
+        self.assertEqual(live_report["temporal_verdict"], "DYNAMIC_MODULE_LOAD_OBSERVED")
+        self.assertIn("no injection indicators evidenced", live_report["causality_findings"][0]["description"])
+
+        # Case 2: Post-crash trace with normal module load (no injection evidence)
+        crash_report = EtwTimelineCorrelator.correlate_crash_timeline(live_events, crash_timestamp=t_now)
+        self.assertEqual(crash_report["temporal_verdict"], "DYNAMIC_MODULE_LOAD_OBSERVED")
+        self.assertIn("no injection indicators evidenced", crash_report["causality_findings"][0]["description"])
+
 
 if __name__ == "__main__":
     unittest.main()

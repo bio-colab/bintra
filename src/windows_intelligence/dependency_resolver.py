@@ -8,6 +8,8 @@ against disk DLL export tables.
 
 import os
 import sys
+import re
+import glob
 from typing import Dict, Any, List, Optional, Set
 
 try:
@@ -38,6 +40,16 @@ class WindowsDependencyResolver:
         "api-ms-win-eventing-": "kernelbase.dll",
         "ext-ms-win-gdi-": "gdi32.dll",
         "ext-ms-win-ntuser-": "user32.dll"
+    }
+
+    SXS_ASSEMBLY_MAP = {
+        "comctl32.dll": "microsoft.windows.common-controls",
+        "gdiplus.dll": "microsoft.windows.gdiplus",
+        "msvcr90.dll": "microsoft.vc90.crt",
+        "msvcp90.dll": "microsoft.vc90.crt",
+        "msvcm90.dll": "microsoft.vc90.crt",
+        "msvcr80.dll": "microsoft.vc80.crt",
+        "msvcp80.dll": "microsoft.vc80.crt"
     }
 
     @classmethod
@@ -173,6 +185,104 @@ class WindowsDependencyResolver:
         return None
 
     @classmethod
+    def extract_manifest_text(cls, binary_path: str) -> str:
+        """
+        Extracts application manifest XML text from an external .manifest file or
+        by scanning embedded resource data in the PE binary.
+        """
+        if not binary_path:
+            return ""
+        # 1. External manifest file (e.g., target.exe.manifest)
+        ext_manifest = binary_path + ".manifest"
+        if os.path.isfile(ext_manifest):
+            try:
+                with open(ext_manifest, "r", encoding="utf-8", errors="ignore") as f:
+                    return f.read()
+            except Exception:
+                pass
+
+        # 2. Embedded manifest inside PE file
+        if os.path.isfile(binary_path):
+            try:
+                with open(binary_path, "rb") as f:
+                    # Read up to first 25MB (covers headers and resources of almost all PEs)
+                    data = f.read(25 * 1024 * 1024)
+                # Look for <assembly ... </assembly>
+                m = re.search(rb"(<assembly\b[\s\S]*?</assembly>)", data)
+                if m:
+                    return m.group(1).decode("utf-8", errors="ignore")
+                # Fallback: look for dependentAssembly blocks
+                m = re.search(rb"(<dependentAssembly[\s\S]*?</dependentAssembly>)", data)
+                if m:
+                    return m.group(1).decode("utf-8", errors="ignore")
+            except Exception:
+                pass
+        return ""
+
+    @classmethod
+    def resolve_sxs_dll(
+        cls,
+        dll_name: str,
+        binary_path: str = "",
+        is_64bit: bool = True,
+        manifest_text: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Resolves a Side-by-Side (SxS) assembly DLL from C:\\Windows\\WinSxS based on
+        application manifest declarations and architecture.
+        """
+        dll_lower = dll_name.lower()
+        assembly_name = cls.SXS_ASSEMBLY_MAP.get(dll_lower)
+        if not assembly_name:
+            return None
+
+        if manifest_text is None:
+            manifest_text = cls.extract_manifest_text(binary_path) if binary_path else ""
+
+        lower_manifest = manifest_text.lower() if manifest_text else ""
+
+        # For common-controls: if a manifest is present but does not declare Common-Controls v6,
+        # the Windows loader intentionally loads the legacy v5.82 DLL from System32.
+        if assembly_name == "microsoft.windows.common-controls":
+            if manifest_text and "microsoft.windows.common-controls" not in lower_manifest:
+                return None
+
+        arch_prefix = "amd64" if is_64bit else "x86"
+        winsxs_dir = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "WinSxS")
+        if not os.path.isdir(winsxs_dir):
+            return None
+
+        pattern = os.path.join(winsxs_dir, f"{arch_prefix}_{assembly_name}_*")
+        candidates = glob.glob(pattern)
+        if not candidates and not is_64bit:
+            # Fallback for WOW64
+            candidates = glob.glob(os.path.join(winsxs_dir, f"wow64_{assembly_name}_*"))
+
+        if not candidates:
+            return None
+
+        # Filter version if manifest specifically requests 6.0
+        if assembly_name == "microsoft.windows.common-controls" and ("6.0" in lower_manifest):
+            v6_cands = [c for c in candidates if "_6.0." in os.path.basename(c)]
+            if v6_cands:
+                candidates = v6_cands
+
+        # Highest version candidate first
+        candidates.sort(reverse=True)
+        for cand in candidates:
+            target = os.path.join(cand, dll_name)
+            if os.path.isfile(target):
+                return target
+            try:
+                for entry in os.listdir(cand):
+                    if entry.lower() == dll_lower:
+                        return os.path.join(cand, entry)
+            except OSError:
+                pass
+
+        return None
+
+    @classmethod
     def audit_dependencies(
         cls,
         binary_path: str,
@@ -219,6 +329,7 @@ class WindowsDependencyResolver:
         )
         imports = custom_imports if custom_imports is not None else pe_info.get("imports", {}).get("modules", {})
         known_dlls = cls.get_known_dlls()
+        manifest_text = cls.extract_manifest_text(binary_path) if os.path.isfile(binary_path) else ""
         app_dirs_to_skip = {
             os.path.abspath(d)
             for d in (app_dir, os.path.dirname(os.path.abspath(binary_path)))
@@ -235,13 +346,25 @@ class WindowsDependencyResolver:
             is_known = dll_name.lower() in known_dlls
             search_name = cls.resolve_api_set_target(dll_name) if is_virtual_api_set else dll_name
 
-            # KnownDLLs are loaded directly from system directory, bypassing all application directories
-            effective_search_dirs = (
-                [d for d in search_dirs if os.path.abspath(d) not in app_dirs_to_skip]
-                if is_known
-                else search_dirs
+            # 1. Check Side-by-Side (SxS) assembly context first (e.g. COMCTL32 v6, GDI+, CRT)
+            sxs_path = cls.resolve_sxs_dll(
+                search_name,
+                binary_path=binary_path,
+                is_64bit=is_binary_64,
+                manifest_text=manifest_text
             )
-            located_path = cls.locate_dll(search_name, effective_search_dirs)
+            is_sxs = sxs_path is not None
+
+            if sxs_path:
+                located_path = sxs_path
+            else:
+                # KnownDLLs are loaded directly from system directory, bypassing all application directories
+                effective_search_dirs = (
+                    [d for d in search_dirs if os.path.abspath(d) not in app_dirs_to_skip]
+                    if is_known
+                    else search_dirs
+                )
+                located_path = cls.locate_dll(search_name, effective_search_dirs)
 
             if not located_path:
                 missing_modules.append({
@@ -249,6 +372,7 @@ class WindowsDependencyResolver:
                     "resolved_as": search_name,
                     "is_api_set": is_virtual_api_set,
                     "is_known_dll": is_known,
+                    "is_sxs_assembly": False,
                     "functions_count": len(imported_funcs),
                     "functions_preview": imported_funcs[:5]
                 })
@@ -299,6 +423,7 @@ class WindowsDependencyResolver:
                 "imported_name": dll_name,
                 "is_api_set": is_virtual_api_set,
                 "is_known_dll": is_known,
+                "is_sxs_assembly": is_sxs,
                 "located_path": located_path,
                 "imported_functions_count": len(imported_funcs)
             })
@@ -319,6 +444,7 @@ class WindowsDependencyResolver:
             "missing_dlls_count": len(missing_modules),
             "architecture_mismatches_count": len(architecture_mismatches),
             "missing_exports_count": len(missing_exports),
+            "sxs_assemblies_count": sum(1 for m in resolved_modules if m.get("is_sxs_assembly", False)),
             "resolved_dlls": resolved_modules,
             "missing_dlls": missing_modules,
             "architecture_mismatches": architecture_mismatches,

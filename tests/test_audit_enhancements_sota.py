@@ -263,6 +263,16 @@ class TestSotaAuditEnhancements(unittest.TestCase):
         # Verify signer_cert_expired is accounted for in the contract
         self.assertTrue("expiration_status" in res or "trust_status" in res)
 
+    def test_continuous_deobfuscator_analyze_file_polymorphism(self):
+        """Verify that ContinuousDeobfuscator supports polymorphic analyze_file with status ok."""
+        from binary_neural_engine import ContinuousDeobfuscator
+        res = ContinuousDeobfuscator.analyze_file(self.pe_path, length=512)
+        self.assertIsInstance(res, dict)
+        self.assertEqual(res.get("status"), "ok")
+        self.assertIn("opaque_predicates_detected", res)
+        self.assertIn("control_flow_flattening", res)
+        self.assertIn("analysis_file_offset", res)
+
 
 if __name__ == "__main__":
     unittest.main()

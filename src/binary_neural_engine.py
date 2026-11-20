@@ -1753,6 +1753,7 @@ class ContinuousDeobfuscator:
             code_bytes = f.read(min(length, 65536))
 
         res = ContinuousDeobfuscator.deobfuscate_cfg(code_bytes, is_64bit=is_64bit)
+        res["status"] = "ok"
         res["source_file"] = file_path
         res["analysis_file_offset"] = hex(actual_offset)
         res["analysis_window_size"] = len(code_bytes)
@@ -1760,6 +1761,16 @@ class ContinuousDeobfuscator:
         res["is_truncated"] = (actual_offset + len(code_bytes)) < file_sz
         res["truncated"] = res["is_truncated"]
         return res
+
+    @classmethod
+    def analyze_file(
+        cls,
+        file_path: str,
+        offset: Optional[int] = None,
+        length: int = 4096
+    ) -> Dict[str, Any]:
+        """Polymorphic entry point for binary triage and analysis orchestrators."""
+        return cls.deobfuscate_file(file_path, offset=offset, length=length)
 
 
 class SemanticFunctionMatcher:

@@ -175,6 +175,9 @@ class BinaryTriageOrchestrator:
                     gh_sha256 = str(store.get("sha256") or "").lower()
                     gh_md5 = str(store.get("md5") or "").lower()
 
+                    is_cryptographically_proven = False
+                    is_heuristic_match = False
+
                     if gh_sha256:
                         if gh_sha256 == target_sha256:
                             ghidra_provenance = {
@@ -183,52 +186,75 @@ class BinaryTriageOrchestrator:
                                 "matched_sha256": gh_sha256,
                                 "program_name": gh_prog_name,
                             }
+                            is_cryptographically_proven = True
                         else:
                             ghidra_provenance = {
                                 "status": "PROVENANCE_HASH_MISMATCH",
                                 "verified": False,
                                 "export_sha256": gh_sha256,
                                 "target_sha256": target_sha256,
-                                "warning": f"Ghidra export SHA-256 ({gh_sha256}) does not match target ({target_sha256})."
+                                "warning": f"Ghidra export SHA-256 ({gh_sha256}) does not match target ({target_sha256}). Quarantined."
                             }
                     elif gh_prog_name:
                         target_stem = Path(target_filename).stem.lower()
                         gh_stem = Path(gh_prog_name).stem.lower()
                         if target_stem in gh_stem or gh_stem in target_stem:
                             ghidra_provenance = {
-                                "status": "VERIFIED_PROGRAM_NAME_MATCH",
-                                "verified": True,
+                                "status": "HEURISTIC_NAME_MATCH",
+                                "verified": False,
+                                "is_heuristic": True,
                                 "program_name": gh_prog_name,
+                                "warning": f"Matched by filename heuristic '{gh_prog_name}' only; cryptographic hash unavailable."
                             }
+                            is_heuristic_match = True
                         else:
                             ghidra_provenance = {
                                 "status": "PROVENANCE_NAME_MISMATCH",
                                 "verified": False,
                                 "export_program_name": gh_prog_name,
                                 "target_filename": target_filename,
-                                "warning": f"Ghidra export program '{gh_prog_name}' does not match target filename '{target_filename}'."
+                                "warning": f"Ghidra export program '{gh_prog_name}' does not match target filename '{target_filename}'. Quarantined."
                             }
                     else:
                         ghidra_provenance = {
                             "status": "UNVERIFIED_NO_METADATA",
                             "verified": False,
-                            "warning": "Ghidra export lacks program_name or sha256 metadata."
+                            "warning": "Ghidra export lacks program_name or sha256 metadata. Quarantined."
                         }
 
-                    analyzer = GhidraDeepAnalyzer()
-                    ghidra_cg_res = analyzer.build_call_graph_and_xrefs(
-                        store, target_function=function_name
-                    )
-                    if function_name:
-                        fn_match = store.get_function(function_name)
-                        if fn_match:
-                            ghidra_df_res = analyzer.slice_data_flow(fn_match)
+                    if is_cryptographically_proven or is_heuristic_match:
+                        analyzer = GhidraDeepAnalyzer()
+                        ghidra_cg_res = analyzer.build_call_graph_and_xrefs(
+                            store, target_function=function_name
+                        )
+                        if function_name:
+                            fn_match = store.get_function(function_name)
+                            if fn_match:
+                                ghidra_df_res = analyzer.slice_data_flow(fn_match)
+                    else:
+                        # STRICT ENFORCEMENT: Mismatched or alien export is quarantined from evidence fusion
+                        ghidra_cg_res = None
+                        ghidra_df_res = None
 
-                cg_stat = ghidra_cg_res.get("status", "ok") if isinstance(ghidra_cg_res, dict) else "ok"
-                stages["ghidra_analysis"] = {
-                    "status": cg_stat,
-                    "provenance": ghidra_provenance,
-                }
+                if not is_cryptographically_proven and not is_heuristic_match:
+                    stages["ghidra_analysis"] = {
+                        "status": "provenance_mismatch",
+                        "provenance": ghidra_provenance,
+                        "error": ghidra_provenance.get("warning", "Ghidra export provenance verification failed.")
+                    }
+                elif is_heuristic_match:
+                    cg_stat = ghidra_cg_res.get("status", "ok") if isinstance(ghidra_cg_res, dict) else "ok"
+                    stages["ghidra_analysis"] = {
+                        "status": "heuristic_unverified",
+                        "provenance": ghidra_provenance,
+                        "warning": ghidra_provenance.get("warning")
+                    }
+                else:
+                    cg_stat = ghidra_cg_res.get("status", "ok") if isinstance(ghidra_cg_res, dict) else "ok"
+                    stages["ghidra_analysis"] = {
+                        "status": cg_stat,
+                        "provenance": ghidra_provenance,
+                    }
             except SecurityViolationError:
                 raise
             except Exception as exc:
@@ -246,6 +272,7 @@ class BinaryTriageOrchestrator:
             binary_inspection=pe_inspect_res,
             signature_intel=sig_res,
             deobfuscation=deobf_res,
+            ghidra_provenance=ghidra_provenance,
         )
 
         # Stage 8: Epistemic Summary (Observed Facts vs Heuristic Indicators vs Recommendations)
@@ -260,8 +287,8 @@ class BinaryTriageOrchestrator:
             ghidra_prov=ghidra_provenance,
         )
 
-        failed_stages = [name for name, st in stages.items() if st.get("status") in ("error", "failed")]
-        partial_stages = [name for name, st in stages.items() if st.get("status") in ("partial", "partial_success", "verification_error", "untrusted", "untrusted_revoked")]
+        failed_stages = [name for name, st in stages.items() if st.get("status") in ("error", "failed", "provenance_mismatch")]
+        partial_stages = [name for name, st in stages.items() if st.get("status") in ("partial", "partial_success", "verification_error", "untrusted", "untrusted_revoked", "heuristic_unverified")]
         active_stages = [name for name, st in stages.items() if st.get("status") != "skipped"]
 
         if failed_stages and len(failed_stages) == len(active_stages):
@@ -353,15 +380,18 @@ class BinaryTriageOrchestrator:
             if exc:
                 observed_facts.append(f"Correlated crash exception: {exc}")
 
+        if ghidra_prov and isinstance(ghidra_prov, dict):
+            p_stat = ghidra_prov.get("status", "UNVERIFIED")
+            if p_stat == "VERIFIED_CRYPTOGRAPHIC_HASH":
+                observed_facts.append(f"Ghidra export provenance cryptographically verified: {p_stat}")
+            elif p_stat == "HEURISTIC_NAME_MATCH":
+                heuristic_indicators.append("GHIDRA_EXPORT_MATCHED_BY_HEURISTIC_FILENAME_ONLY")
+            elif p_stat in ("PROVENANCE_HASH_MISMATCH", "PROVENANCE_NAME_MISMATCH", "UNVERIFIED_NO_METADATA"):
+                heuristic_indicators.append(f"GHIDRA_PROVENANCE_MISMATCH_QUARANTINED:{p_stat}")
+
         if ghidra_cg and ghidra_cg.get("status") == "ok":
             fn_cnt = ghidra_cg.get("functions_indexed", 0)
             observed_facts.append(f"Ghidra call graph indexed {fn_cnt} functions")
-            if ghidra_prov and isinstance(ghidra_prov, dict):
-                p_stat = ghidra_prov.get("status", "UNVERIFIED")
-                if ghidra_prov.get("verified"):
-                    observed_facts.append(f"Ghidra export provenance verified: {p_stat}")
-                else:
-                    heuristic_indicators.append(f"GHIDRA_PROVENANCE_ALERT:{p_stat}")
         else:
             recommended_next_tools.append("bintra_ghidra_analyze")
 

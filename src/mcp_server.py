@@ -1231,6 +1231,9 @@ class BintraMcpServer:
         self.handlers = {
             "initialize": self.handle_initialize,
             "notifications/initialized": self.handle_initialized_notification,
+            "server/discover": self.handle_server_discover,
+            "mcp/discover": self.handle_server_discover,
+            "discovery": self.handle_server_discover,
             "tools/list": self.handle_tools_list,
             "tools/call": self.handle_tools_call,
             "resources/list": self.handle_resources_list,
@@ -1372,16 +1375,21 @@ class BintraMcpServer:
 
     def handle_initialize(self, params: Dict[str, Any]) -> Dict[str, Any]:
         req_ver = params.get("protocolVersion") if isinstance(params, dict) else None
-        if req_ver in SUPPORTED_PROTOCOL_VERSIONS:
-            negotiated_version = req_ver
-        elif req_ver and isinstance(req_ver, str) and req_ver > LATEST_PROTOCOL_VERSION:
-            negotiated_version = LATEST_PROTOCOL_VERSION
+        if req_ver is not None:
+            if req_ver in SUPPORTED_PROTOCOL_VERSIONS:
+                negotiated_version = req_ver
+            else:
+                # Per MCP 2026-07-28 specification: explicitly reject unsupported protocol versions!
+                raise ValueError(
+                    f"Unsupported protocol version: '{req_ver}'. "
+                    f"Supported versions: {SUPPORTED_PROTOCOL_VERSIONS}"
+                )
         else:
             negotiated_version = DEFAULT_PROTOCOL_VERSION
 
         return {
             "protocolVersion": negotiated_version,
-            "supportedProtocolVersions": SUPPORTED_PROTOCOL_VERSIONS,
+            "supportedProtocolVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
             "capabilities": {
                 "tools": {
                     "listChanged": False
@@ -1398,6 +1406,24 @@ class BintraMcpServer:
                 "name": SERVER_NAME,
                 "version": SERVER_VERSION
             }
+        }
+
+    def handle_server_discover(self, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Stateless MCP 2026-07-28 server discovery handler."""
+        return {
+            "name": SERVER_NAME,
+            "version": SERVER_VERSION,
+            "protocolVersion": LATEST_PROTOCOL_VERSION,
+            "supportedProtocolVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
+            "capabilities": {
+                "tools": {"listChanged": False},
+                "resources": {"subscribe": False, "listChanged": False},
+                "prompts": {"listChanged": False},
+            },
+            "serverInfo": {
+                "name": SERVER_NAME,
+                "version": SERVER_VERSION,
+            },
         }
 
     def handle_initialized_notification(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -1462,11 +1488,15 @@ class BintraMcpServer:
         sec = cls.TOOL_SECURITY_METADATA.get(tool_name, ("cap.file.read", "READ", None))
         cap_val, mode, _ = sec
         is_read_only = mode in ("READ", "QUERY") and cap_val not in (
-            "cap.workspace.write", "cap.ghidra.headless_exec", "cap.ghidra.project_mutate"
+            "cap.workspace.write", "cap.ghidra.headless_exec", "cap.ghidra.project_mutate", "cap.binary.patch"
+        )
+        is_destructive = not is_read_only and (
+            cap_val in ("cap.workspace.write", "cap.ghidra.project_mutate", "cap.binary.patch")
+            or any(kw in tool_name for kw in ("patch", "modify", "mutate"))
         )
         return {
             "readOnlyHint": is_read_only,
-            "destructiveHint": False,  # Target binaries are strictly immutable across all Bintra tools
+            "destructiveHint": is_destructive,
             "idempotentHint": is_read_only,
             "openWorldHint": False,
         }
@@ -2974,6 +3004,28 @@ class BintraMcpServer:
         if not isinstance(params, (dict, list)):
             params = {}
 
+        # Stateless MCP 2026-07-28: per-request protocolVersion check via _meta
+        meta = params.get("_meta") if isinstance(params, dict) else None
+        if not meta and isinstance(msg, dict):
+            meta = msg.get("_meta")
+        if meta and isinstance(meta, dict):
+            meta_ver = meta.get("protocolVersion")
+            if meta_ver is not None and meta_ver not in SUPPORTED_PROTOCOL_VERSIONS:
+                if not is_notification:
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": msg_id,
+                        "error": {
+                            "code": -32602,
+                            "message": f"Unsupported protocol version: '{meta_ver}'. Supported versions: {SUPPORTED_PROTOCOL_VERSIONS}",
+                            "data": {
+                                "supportedProtocolVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
+                                "latestProtocolVersion": LATEST_PROTOCOL_VERSION,
+                            }
+                        }
+                    }
+                return None
+
         if method not in self.handlers:
             if not is_notification:
                 return {
@@ -2995,6 +3047,21 @@ class BintraMcpServer:
                     "id": msg_id,
                     "result": result
                 }
+        except ValueError as ve:
+            if not is_notification:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": msg_id,
+                    "error": {
+                        "code": -32602,
+                        "message": str(ve),
+                        "data": {
+                            "supportedProtocolVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
+                            "latestProtocolVersion": LATEST_PROTOCOL_VERSION,
+                        }
+                    }
+                }
+            return None
         except Exception as ex:
             if not is_notification:
                 return {

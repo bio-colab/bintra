@@ -106,10 +106,10 @@ class TestSotaAuditEnhancements(unittest.TestCase):
         self.assertEqual(gh_stage["status"], "ok")
         self.assertEqual(gh_stage["provenance"]["status"], "VERIFIED_CRYPTOGRAPHIC_HASH")
         self.assertTrue(gh_stage["provenance"]["verified"])
-        self.assertIn("Ghidra export provenance verified: VERIFIED_CRYPTOGRAPHIC_HASH", res["summary"]["observed_facts"])
+        self.assertIn("Ghidra export provenance cryptographically verified: VERIFIED_CRYPTOGRAPHIC_HASH", res["summary"]["observed_facts"])
 
     def test_ghidra_provenance_verification_hash_mismatch(self):
-        """Verify that Ghidra export with mismatched SHA-256 gets PROVENANCE_HASH_MISMATCH and alert."""
+        """Verify that Ghidra export with mismatched SHA-256 gets quarantined, failing stage status and alert."""
         from analysis_orchestrator import BinaryTriageOrchestrator
 
         ghidra_json = os.path.join(self.ws_dir, "ghidra_foreign.json")
@@ -117,7 +117,7 @@ class TestSotaAuditEnhancements(unittest.TestCase):
             json.dump({
                 "program_name": "other_binary.exe",
                 "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-                "functions": []
+                "functions": [{"name": "evil_func", "entry_point": "0x1000", "pcode_opcodes": ["CALL"]}]
             }, f)
 
         res = BinaryTriageOrchestrator.triage_binary(
@@ -126,9 +126,86 @@ class TestSotaAuditEnhancements(unittest.TestCase):
             include_deobfuscation=False,
         )
         gh_stage = res["stage_statuses"]["ghidra_analysis"]
+        self.assertEqual(gh_stage["status"], "provenance_mismatch")
         self.assertEqual(gh_stage["provenance"]["status"], "PROVENANCE_HASH_MISMATCH")
         self.assertFalse(gh_stage["provenance"]["verified"])
-        self.assertIn("GHIDRA_PROVENANCE_ALERT:PROVENANCE_HASH_MISMATCH", res["summary"]["heuristic_indicators"])
+        self.assertIn("ghidra_analysis", res["failed_stages"])
+        self.assertNotEqual(res["status"], "ok")
+        self.assertIn("GHIDRA_PROVENANCE_MISMATCH_QUARANTINED:PROVENANCE_HASH_MISMATCH", res["summary"]["heuristic_indicators"])
+        # Ensure foreign graph nodes were strictly quarantined
+        nodes = {n["id"]: n for n in res["evidence_graph"].get("nodes", [])}
+        self.assertNotIn("ghidra:call_graph", nodes)
+
+    def test_adversarial_ghidra_name_match_is_heuristic_unverified(self):
+        """Verify that filename matching without SHA-256 is labeled HEURISTIC_NAME_MATCH and unverified."""
+        from analysis_orchestrator import BinaryTriageOrchestrator
+
+        ghidra_json = os.path.join(self.ws_dir, "ghidra_name_only.json")
+        with open(ghidra_json, "w", encoding="utf-8") as f:
+            json.dump({
+                "program_name": "sample_target.exe",  # Same name, but no sha256
+                "functions": [{"name": "main", "entry_point": "0x140001000", "pcode_opcodes": ["CALL"]}]
+            }, f)
+
+        res = BinaryTriageOrchestrator.triage_binary(
+            self.pe_path,
+            ghidra_export_path=ghidra_json,
+            include_deobfuscation=False,
+        )
+        gh_stage = res["stage_statuses"]["ghidra_analysis"]
+        self.assertEqual(gh_stage["status"], "heuristic_unverified")
+        self.assertEqual(gh_stage["provenance"]["status"], "HEURISTIC_NAME_MATCH")
+        self.assertFalse(gh_stage["provenance"]["verified"])
+        self.assertTrue(gh_stage["provenance"].get("is_heuristic"))
+        self.assertIn("GHIDRA_EXPORT_MATCHED_BY_HEURISTIC_FILENAME_ONLY", res["summary"]["heuristic_indicators"])
+
+    def test_causal_evidence_validation_co_occurrence_low_confidence(self):
+        """Verify that unrelated data flow slice and crash telemetry produce CO_OCCURRENCE with low confidence."""
+        from windows_intelligence.evidence_engine.graph_model import evaluate_data_flow_crash_causality
+
+        unrelated_df = {
+            "function": "LogMessage",
+            "entry_point": "0x1000",
+            "sinks": [{"address": "0x1020", "var": "ECX", "inputs": ["ESP"]}],
+            "sources": [],
+            "backward_slice": [],
+        }
+        crash_telemetry = {
+            "fault_module": "game.exe",
+            "fault_rva": "0x245F40",
+            "fault_virtual_address": "0x645f40",
+            "culprit_register": "EAX",
+            "exception_code": "0xC0000005",
+        }
+        res = evaluate_data_flow_crash_causality(unrelated_df, crash_telemetry)
+        self.assertEqual(res["level"], "CO_OCCURRENCE")
+        self.assertEqual(res["relation"], "CO_OCCURS_IN_INCIDENT")
+        self.assertEqual(res["relation_semantic"], "CO_OCCURRENCE")
+        self.assertLessEqual(res["epistemic_confidence"], 0.30)
+
+    def test_causal_evidence_validation_causally_validated_high_confidence(self):
+        """Verify that exact instruction address and culprit register match produce CAUSALLY_VALIDATED with >=0.90."""
+        from windows_intelligence.evidence_engine.graph_model import evaluate_data_flow_crash_causality
+
+        matching_df = {
+            "function": "RenderEntity",
+            "entry_point": "0x245f00",
+            "sinks": [{"address": "0x245f40", "var": "ECX", "inputs": ["EAX", "0x474"]}],
+            "sources": [{"address": "0x245f37", "var": "EAX"}],
+            "backward_slice": [],
+        }
+        crash_telemetry = {
+            "fault_module": "game.exe",
+            "fault_rva": "0x245f40",
+            "fault_virtual_address": "0x645f40",
+            "culprit_register": "EAX",
+            "exception_code": "0xC0000005",
+        }
+        res = evaluate_data_flow_crash_causality(matching_df, crash_telemetry)
+        self.assertEqual(res["level"], "CAUSALLY_VALIDATED")
+        self.assertEqual(res["relation"], "EXPLAINS_DATA_PROVENANCE")
+        self.assertEqual(res["relation_semantic"], "CAUSALLY_VALIDATED_FAULT_PATHWAY")
+        self.assertGreaterEqual(res["epistemic_confidence"], 0.90)
 
     def test_evidence_graph_epistemic_metadata(self):
         """Verify that fused EvidenceGraph edges and nodes contain rich epistemic metadata."""
@@ -217,14 +294,59 @@ class TestSotaAuditEnhancements(unittest.TestCase):
         resp_legacy = server.handle_initialize(init_req_legacy)
         self.assertEqual(resp_legacy["protocolVersion"], "2024-11-05")
 
-        # 3. Request unsupported future version negotiates to latest supported
+        # 3. Request unsupported future version is strictly rejected per MCP 2026-07-28 spec
         init_req_future = {"protocolVersion": "2029-01-01", "capabilities": {}}
-        resp_future = server.handle_initialize(init_req_future)
-        self.assertEqual(resp_future["protocolVersion"], "2026-07-28")
+        with self.assertRaises(ValueError) as ctx:
+            server.handle_initialize(init_req_future)
+        self.assertIn("Unsupported protocol version", str(ctx.exception))
+
+        # Check rejection via JSON-RPC request interface returns error code -32602
+        rpc_req = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2029-01-01"}
+        }
+        rpc_err = server._handle_single_request(rpc_req)
+        self.assertEqual(rpc_err["error"]["code"], -32602)
+        self.assertIn("supportedProtocolVersions", rpc_err["error"]["data"])
 
         # 4. Request without version defaults to standard
         resp_empty = server.handle_initialize({})
         self.assertEqual(resp_empty["protocolVersion"], "2024-11-05")
+
+    def test_mcp_stateless_server_discover(self):
+        """Verify that stateless server/discover returns capabilities and supported versions without initialize."""
+        from mcp_server import BintraMcpServer
+
+        server = BintraMcpServer()
+        resp = server._handle_single_request({
+            "jsonrpc": "2.0",
+            "id": "disco-1",
+            "method": "server/discover",
+            "params": {}
+        })
+        self.assertIsNotNone(resp)
+        self.assertEqual(resp["id"], "disco-1")
+        res = resp["result"]
+        self.assertEqual(res["name"], "bintra")
+        self.assertEqual(res["protocolVersion"], "2026-07-28")
+        self.assertIn("2026-07-28", res["supportedProtocolVersions"])
+        self.assertIn("tools", res["capabilities"])
+
+    def test_mcp_destructive_hint_accurate(self):
+        """Verify that destructiveHint accurately classifies mutating vs read-only tools."""
+        from mcp_server import BintraMcpServer
+
+        # Pure inspection tool
+        inspect_ann = BintraMcpServer._derive_tool_annotations("bintra_inspect_binary")
+        self.assertTrue(inspect_ann["readOnlyHint"])
+        self.assertFalse(inspect_ann["destructiveHint"])
+
+        # Binary patch tool
+        patch_ann = BintraMcpServer._derive_tool_annotations("bintra_patch_binary")
+        self.assertFalse(patch_ann["readOnlyHint"])
+        self.assertTrue(patch_ann["destructiveHint"])
 
     def test_mcp_structured_content_returned(self):
         """Verify that handle_tools_call returns both content and structuredContent."""
@@ -254,14 +376,29 @@ class TestSotaAuditEnhancements(unittest.TestCase):
         self.assertIsNone(res["pipe_read_error"])
 
     def test_signature_signer_cert_expired_field(self):
-        """Verify that WindowsSignatureIntelligence extracts or exposes signer_cert_expired."""
+        """Verify that WindowsSignatureIntelligence genuinely extracts expiration_status and timestamp_status."""
         from windows_intelligence.signature_intelligence import WindowsSignatureIntelligence
 
         sig_intel = WindowsSignatureIntelligence()
         res = sig_intel.verify_file(self.pe_path)
         self.assertIn("trust_status", res)
-        # Verify signer_cert_expired is accounted for in the contract
-        self.assertTrue("expiration_status" in res or "trust_status" in res)
+        self.assertIn("expiration_status", res)
+        self.assertIn("timestamp_status", res)
+        self.assertIn("is_driver", res)
+        self.assertEqual(res["trust_status"], "UNSIGNED")
+        self.assertEqual(res["expiration_status"], "UNKNOWN")
+
+        # Test on a real system driver with Authenticode if available
+        netwtw = r"C:\Windows\System32\drivers\Netwtw06.sys"
+        if os.path.exists(netwtw):
+            res_driver = sig_intel.verify_file(netwtw)
+            self.assertIn("expiration_status", res_driver)
+            self.assertIn("timestamp_status", res_driver)
+            self.assertEqual(res_driver["timestamp_status"], "VALID_TRUSTED")
+            self.assertEqual(res_driver["expiration_status"], "EXPIRED_WITH_VALID_TIMESTAMP")
+            if res_driver.get("primary_signer"):
+                self.assertIn("is_expired", res_driver["primary_signer"])
+                self.assertIsInstance(res_driver["primary_signer"]["is_expired"], bool)
 
     def test_continuous_deobfuscator_analyze_file_polymorphism(self):
         """Verify that ContinuousDeobfuscator supports polymorphic analyze_file with status ok."""

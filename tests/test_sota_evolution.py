@@ -54,10 +54,10 @@ class TestSotaMcpCapabilities(unittest.TestCase):
         self.assertIn("resources", caps)
         self.assertIn("prompts", caps)
 
-    def test_all_50_tools_have_authoritative_mcp_annotations(self):
+    def test_all_51_tools_have_authoritative_mcp_annotations(self):
         res = self.srv.handle_tools_list({})
         tools = res["tools"]
-        self.assertEqual(len(tools), 50)
+        self.assertEqual(len(tools), 51)
         by_name = {t["name"]: t for t in tools}
         self.assertIn("bintra_triage_binary", by_name)
 
@@ -105,7 +105,7 @@ class TestSotaMcpCapabilities(unittest.TestCase):
         names = [p["name"] for p in prompts]
         self.assertEqual(
             names,
-            ["triage_pe_binary", "root_cause_crash", "audit_windows_host", "diff_binary_versions"],
+            ["triage_pe_binary", "root_cause_crash", "audit_windows_host", "diff_binary_versions", "audit_neural_weights"],
         )
 
         p1 = self.srv.handle_prompts_get({"name": "triage_pe_binary", "arguments": {"file_path": "/tmp/a.exe"}})
@@ -234,15 +234,16 @@ class TestSotaDocsAndPackagingSync(unittest.TestCase):
     def test_docs_reflect_50_mcp_tools_and_no_stale_34_count(self):
         arch_txt = (Path(REPO_ROOT) / "docs" / "architecture.md").read_text(encoding="utf-8")
         self.assertNotIn("34 أداة", arch_txt)
-        self.assertTrue(any(c in arch_txt for c in ("50 أداة", "48 أداة")))
+        self.assertIn("51 أداة", arch_txt)
 
         readme_txt = (Path(REPO_ROOT) / "README.md").read_text(encoding="utf-8")
-        self.assertTrue(any(c in readme_txt for c in ("50 mediated reverse engineering", "48 mediated reverse engineering")))
+        self.assertIn("51 mediated reverse engineering", readme_txt)
         self.assertIn("analysis_orchestrator.py", readme_txt)
 
         agents_txt = (Path(REPO_ROOT) / "AGENTS.md").read_text(encoding="utf-8")
-        self.assertTrue(any(c in agents_txt for c in ("50 type-safe tools", "48 type-safe tools")))
+        self.assertIn("51 type-safe tools", agents_txt)
         self.assertIn("bintra_triage_binary", agents_txt)
+        self.assertIn("bintra_ghidra_similar_functions", agents_txt)
 
 
 if __name__ == "__main__":

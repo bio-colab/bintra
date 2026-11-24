@@ -3,7 +3,7 @@ name: bintra-neural-weight-security
 description: Audit embedded neural models and Safetensors weights without execution, detect dormant trojan/backdoor neurons (>4.5σ), compute spectral effective rank, and surgically cure infinite loop attractors using selective column direction subtraction without retraining.
 metadata:
   framework: bintra
-  version: "1.0.0"
+  version: "1.1.0"
   tier: neural-weight-space
 ---
 
@@ -35,7 +35,7 @@ This skill operationalizes recent breakthroughs from MIT CSAIL (*"Sparks of Weig
    - **Spectral Effective Rank:** Evaluates singular value entropy ($H(\mathbf{p})$) to measure model expressive capacity without tokens.
    - **Backdoor / Trojan Outliers:** Maliciously grafted trigger neurons exhibit extreme norm z-scores ($> 4.5\sigma$) relative to the background weight distribution.
 2. **Selective Column Direction Subtraction:**
-   Pathological loop attractors (repetitive loops) concentrate along specific singular projection directions. Rather than fine-tuning with gradients, Bintra subtracts the loop vector exclusively from the top-$K$ most active columns (e.g., 64 columns; $\approx 0.016\%$ of weights), curing the loop while leaving $98.4\%$ of parameters untouched.
+   Pathological loop attractors (repetitive loops) concentrate along specific singular projection directions. Rather than fine-tuning with gradients, Bintra subtracts the loop vector exclusively from the top-$K$ most active columns (e.g., 64 of 4096 columns; $\approx 1.56\%$ of weights), curing the loop while leaving $98.4\%$ of parameters untouched.
 
 ---
 

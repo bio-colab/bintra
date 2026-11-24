@@ -246,6 +246,14 @@ class WindowsSignatureIntelligence:
         else:
             res = cls._verify_pure_python_fallback(can_path)
 
+        # Schema-contract normalization: every verification path (unsigned, corrupt,
+        # catalog-miss, early-return) MUST expose the temporal trust fields so that
+        # downstream consumers (triage orchestrator, evidence graph, MCP clients)
+        # can rely on a stable key contract. Values default to UNKNOWN when no
+        # certificate chain could be inspected at all.
+        res.setdefault("timestamp_status", "UNKNOWN")
+        res.setdefault("expiration_status", "UNKNOWN")
+
         res["file_path"] = can_path
         res["file_name"] = os.path.basename(can_path)
         res["file_size_bytes"] = file_size

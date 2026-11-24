@@ -419,12 +419,20 @@ def fuse_static_dynamic_ghidra(
     signature_intel: Optional[Dict[str, Any]] = None,
     deobfuscation: Optional[Dict[str, Any]] = None,
     ghidra_provenance: Optional[Dict[str, Any]] = None,
+    sensory_audit: Optional[Dict[str, Any]] = None,
+    embedded_ai_scan: Optional[Dict[str, Any]] = None,
+    slack_forensics: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Fuses static PE inspection, PE deep forensics (.pdata, RTTI, PDB),
     digital signature trust intelligence, deobfuscation telemetry,
     MiniDump/Crash RCA, and Ghidra Call-Graph / Data-Flow slices into a
     unified EvidenceGraph.
+
+    The three optional trailing inputs (sensory_audit, embedded_ai_scan,
+    slack_forensics) extend the graph with Sensory-Cortex perception,
+    embedded neural-asset discoveries, and slack-space/overlay findings
+    without altering any pre-existing node or edge contract.
     """
     graph = EvidenceGraph()
     bin_props: Dict[str, Any] = {}
@@ -651,6 +659,101 @@ def fuse_static_dynamic_ghidra(
                     "relation_semantic": causality["relation_semantic"],
                     "epistemic_confidence": causality["epistemic_confidence"],
                     "confidence_rationale": causality["confidence_rationale"],
+                },
+            )
+
+    # Sensory Cortex perception channel (10 metaphorical senses)
+    if sensory_audit and isinstance(sensory_audit, dict) and sensory_audit.get("senses"):
+        cortex_id = "sensory:cortex"
+        graph.add_node(
+            cortex_id,
+            "SENSORY_PERCEPTION",
+            f"Sensory Cortex ({sensory_audit.get('active_senses_count', 0)}/10 senses)",
+            properties={
+                "evidence_source": "CONTINUOUS_SENSORY_CORTEX",
+                "verification_level": "HEURISTIC_PERCEPTION_MODEL",
+                "active_senses_count": sensory_audit.get("active_senses_count", 0),
+                "overall_sensory_efficiency": sensory_audit.get("overall_sensory_efficiency"),
+            },
+        )
+        if bin_id in graph.nodes:
+            graph.add_edge(
+                bin_id,
+                cortex_id,
+                "IS_PERCEIVED_BY",
+                metadata={
+                    "weight": 0.70,
+                    "evidence_source": "CONTINUOUS_SENSORY_CORTEX",
+                    "verification_level": "HEURISTIC_PERCEPTION_MODEL",
+                    "relation_semantic": "HOLISTIC_SENSE_PERCEPTION_PROFILE",
+                    "epistemic_confidence": 0.70,
+                    "confidence_rationale": "Ten-channel behavioral perception model; efficiency scores are capability-presence indicators, not measured accuracy.",
+                },
+            )
+
+    # Embedded neural inference assets (hybrid native-neural binaries)
+    if embedded_ai_scan and isinstance(embedded_ai_scan, dict):
+        ai_findings = embedded_ai_scan.get("findings", [])
+        if isinstance(ai_findings, list):
+            for ai_idx, finding in enumerate(ai_findings):
+                if not isinstance(finding, dict):
+                    continue
+                kind = finding.get("kind") or finding.get("type") or "ASSET"
+                ai_id = f"ai:{ai_idx}:{kind}"
+                graph.add_node(
+                    ai_id,
+                    "EMBEDDED_AI_ASSET",
+                    str(finding.get("description") or finding.get("framework") or kind),
+                    properties={
+                        "evidence_source": "HYBRID_BINARY_DISSECTOR",
+                        "verification_level": "STATIC_BYTE_SIGNATURE_MATCH",
+                        "kind": kind,
+                        "file_offset": finding.get("offset", finding.get("file_offset")),
+                        "size_bytes": finding.get("size", finding.get("size_bytes")),
+                        "shannon_entropy": finding.get("entropy", finding.get("shannon_entropy")),
+                    },
+                )
+                if bin_id in graph.nodes:
+                    graph.add_edge(
+                        bin_id,
+                        ai_id,
+                        "EMBEDS_NEURAL_ASSET",
+                        metadata={
+                            "weight": 0.85,
+                            "evidence_source": "HYBRID_BINARY_DISSECTOR",
+                            "verification_level": "STATIC_BYTE_SIGNATURE_MATCH",
+                            "relation_semantic": "EMBEDDED_INFERENCE_LOGIC_DISCOVERED",
+                            "epistemic_confidence": 0.85,
+                            "confidence_rationale": "Deterministic byte-signature and container-structure match inside the PE image.",
+                        },
+                    )
+
+    # Slack space / overlay forensics
+    if slack_forensics and isinstance(slack_forensics, dict) and slack_forensics.get("has_trailing_slack"):
+        slack_id = "slack:trailing"
+        graph.add_node(
+            slack_id,
+            "SLACK_SPACE",
+            f"Slack ({slack_forensics.get('slack_bytes_count', 0)} bytes)",
+            properties={
+                "evidence_source": "BINARY_SLACK_INSPECTOR",
+                "verification_level": "STRUCTURAL_SECTION_GEOMETRY",
+                "slack_type": slack_forensics.get("slack_type", "UNMAPPED_SLACK"),
+                "slack_bytes_count": slack_forensics.get("slack_bytes_count", 0),
+            },
+        )
+        if bin_id in graph.nodes:
+            graph.add_edge(
+                bin_id,
+                slack_id,
+                "HAS_SLACK_SPACE",
+                metadata={
+                    "weight": 0.80,
+                    "evidence_source": "BINARY_SLACK_INSPECTOR",
+                    "verification_level": "STRUCTURAL_SECTION_GEOMETRY",
+                    "relation_semantic": "TRAILING_UNMAPPED_BYTES",
+                    "epistemic_confidence": 0.80,
+                    "confidence_rationale": "Section table raw extents compared against physical file size.",
                 },
             )
 

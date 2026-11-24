@@ -39,6 +39,8 @@ class BinaryTriageOrchestrator:
         ghidra_export_path: Optional[str] = None,
         function_name: Optional[str] = None,
         include_deobfuscation: bool = True,
+        include_sensory: bool = True,
+        include_hybrid_scan: bool = True,
         max_exports: int = 32,
         forensics_limit: int = 200,
     ) -> Dict[str, Any]:
@@ -70,6 +72,8 @@ class BinaryTriageOrchestrator:
         pe_forensics_res: Optional[Dict[str, Any]] = None
         sig_res: Optional[Dict[str, Any]] = None
         deobf_res: Optional[Dict[str, Any]] = None
+        sensory_res: Optional[Dict[str, Any]] = None
+        hybrid_res: Optional[Dict[str, Any]] = None
         crash_rca_res: Optional[Dict[str, Any]] = None
         ghidra_cg_res: Optional[Dict[str, Any]] = None
         ghidra_df_res: Optional[Dict[str, Any]] = None
@@ -149,6 +153,41 @@ class BinaryTriageOrchestrator:
         else:
             stages["deobfuscation"] = {"status": "skipped", "reason": "disabled_by_caller"}
 
+        # Stage 4.5: Holistic 10-Sense Sensory Cortex Perception
+        if include_sensory:
+            try:
+                from binary_neural_engine import SensoryCortex
+                sensory_res = SensoryCortex().evaluate_all_senses(file_path=can_path)
+                stages["sensory_perception"] = {
+                    "status": "ok" if isinstance(sensory_res, dict) and sensory_res.get("senses") else "partial",
+                    "active_senses_count": sensory_res.get("active_senses_count", 0) if isinstance(sensory_res, dict) else 0,
+                    "overall_sensory_efficiency": sensory_res.get("overall_sensory_efficiency") if isinstance(sensory_res, dict) else None,
+                }
+            except SecurityViolationError:
+                raise
+            except Exception as exc:
+                stages["sensory_perception"] = {"status": "error", "error": str(exc)}
+        else:
+            stages["sensory_perception"] = {"status": "skipped", "reason": "disabled_by_caller"}
+
+        # Stage 4.7: Embedded Neural Inference Asset Scan (hybrid native-neural binaries)
+        if include_hybrid_scan:
+            try:
+                from binary_neural_engine import HybridBinaryDissector
+                hybrid_res = HybridBinaryDissector.scan_for_embedded_logic(can_path)
+                st_hybrid = "ok" if isinstance(hybrid_res, dict) else "error"
+                stages["embedded_ai_scan"] = {
+                    "status": st_hybrid,
+                    "is_hybrid_binary": bool(hybrid_res.get("is_hybrid_binary", False)) if isinstance(hybrid_res, dict) else False,
+                    "embedded_logic_assets_count": hybrid_res.get("embedded_logic_assets_count", 0) if isinstance(hybrid_res, dict) else 0,
+                }
+            except SecurityViolationError:
+                raise
+            except Exception as exc:
+                stages["embedded_ai_scan"] = {"status": "error", "error": str(exc)}
+        else:
+            stages["embedded_ai_scan"] = {"status": "skipped", "reason": "disabled_by_caller"}
+
         # Stage 5: Binary Slack Space & Overlay Forensics
         slack_res: Optional[Dict[str, Any]] = None
         try:
@@ -187,57 +226,11 @@ class BinaryTriageOrchestrator:
                 from ghidra_export_store import GhidraExportStore
                 from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
                 with GhidraExportStore.from_path(ghidra_export_path) as store:
-                    # Provenance verification against target binary
-                    gh_prog_name = str(store.get("program_name") or "")
-                    gh_sha256 = str(store.get("sha256") or "").lower()
-                    gh_md5 = str(store.get("md5") or "").lower()
-
-                    is_cryptographically_proven = False
-                    is_heuristic_match = False
-
-                    if gh_sha256:
-                        if gh_sha256 == target_sha256:
-                            ghidra_provenance = {
-                                "status": "VERIFIED_CRYPTOGRAPHIC_HASH",
-                                "verified": True,
-                                "matched_sha256": gh_sha256,
-                                "program_name": gh_prog_name,
-                            }
-                            is_cryptographically_proven = True
-                        else:
-                            ghidra_provenance = {
-                                "status": "PROVENANCE_HASH_MISMATCH",
-                                "verified": False,
-                                "export_sha256": gh_sha256,
-                                "target_sha256": target_sha256,
-                                "warning": f"Ghidra export SHA-256 ({gh_sha256}) does not match target ({target_sha256}). Quarantined."
-                            }
-                    elif gh_prog_name:
-                        target_stem = Path(target_filename).stem.lower()
-                        gh_stem = Path(gh_prog_name).stem.lower()
-                        if target_stem in gh_stem or gh_stem in target_stem:
-                            ghidra_provenance = {
-                                "status": "HEURISTIC_NAME_MATCH",
-                                "verified": False,
-                                "is_heuristic": True,
-                                "program_name": gh_prog_name,
-                                "warning": f"Matched by filename heuristic '{gh_prog_name}' only; cryptographic hash unavailable."
-                            }
-                            is_heuristic_match = True
-                        else:
-                            ghidra_provenance = {
-                                "status": "PROVENANCE_NAME_MISMATCH",
-                                "verified": False,
-                                "export_program_name": gh_prog_name,
-                                "target_filename": target_filename,
-                                "warning": f"Ghidra export program '{gh_prog_name}' does not match target filename '{target_filename}'. Quarantined."
-                            }
-                    else:
-                        ghidra_provenance = {
-                            "status": "UNVERIFIED_NO_METADATA",
-                            "verified": False,
-                            "warning": "Ghidra export lacks program_name or sha256 metadata. Quarantined."
-                        }
+                    ghidra_provenance, is_cryptographically_proven, is_heuristic_match = (
+                        cls.verify_ghidra_export_provenance(
+                            store, target_sha256=target_sha256, target_filename=target_filename
+                        )
+                    )
 
                     if is_cryptographically_proven or is_heuristic_match:
                         analyzer = GhidraDeepAnalyzer()
@@ -290,6 +283,9 @@ class BinaryTriageOrchestrator:
             signature_intel=sig_res,
             deobfuscation=deobf_res,
             ghidra_provenance=ghidra_provenance,
+            sensory_audit=sensory_res,
+            embedded_ai_scan=hybrid_res,
+            slack_forensics=slack_res,
         )
 
         # Stage 8: Epistemic Summary (Observed Facts vs Heuristic Indicators vs Recommendations)
@@ -303,6 +299,8 @@ class BinaryTriageOrchestrator:
             ghidra_cg=ghidra_cg_res,
             ghidra_prov=ghidra_provenance,
             slack_res=slack_res,
+            sensory_res=sensory_res,
+            hybrid_res=hybrid_res,
         )
 
         failed_stages = [name for name, st in stages.items() if st.get("status") in ("error", "failed", "provenance_mismatch")]
@@ -332,12 +330,79 @@ class BinaryTriageOrchestrator:
                 "pe_deep_forensics": pe_forensics_res,
                 "signature_intelligence": sig_res,
                 "deobfuscation": deobf_res,
+                "sensory_perception": sensory_res,
+                "embedded_ai_scan": hybrid_res,
                 "slack_and_overlay": slack_res,
                 "crash_rca": crash_rca_res,
                 "ghidra_call_graph": ghidra_cg_res,
                 "ghidra_data_flow": ghidra_df_res,
             },
         }
+
+    @staticmethod
+    def verify_ghidra_export_provenance(
+        store: Any,
+        target_sha256: str,
+        target_filename: str,
+    ) -> tuple:
+        """Verifies that a Ghidra export truly belongs to the analyzed target binary.
+
+        Single authoritative implementation shared by the triage orchestrator and
+        the MCP ``bintra_fuse_evidence`` tool so that provenance quarantine rules
+        cannot drift between entry points.
+
+        Returns ``(provenance_dict, is_cryptographically_proven, is_heuristic_match)``.
+        """
+        gh_prog_name = str(store.get("program_name") or "")
+        gh_sha256 = str(store.get("sha256") or "").lower()
+
+        is_cryptographically_proven = False
+        is_heuristic_match = False
+
+        if gh_sha256:
+            if gh_sha256 == target_sha256:
+                provenance = {
+                    "status": "VERIFIED_CRYPTOGRAPHIC_HASH",
+                    "verified": True,
+                    "matched_sha256": gh_sha256,
+                    "program_name": gh_prog_name,
+                }
+                is_cryptographically_proven = True
+            else:
+                provenance = {
+                    "status": "PROVENANCE_HASH_MISMATCH",
+                    "verified": False,
+                    "export_sha256": gh_sha256,
+                    "target_sha256": target_sha256,
+                    "warning": f"Ghidra export SHA-256 ({gh_sha256}) does not match target ({target_sha256}). Quarantined."
+                }
+        elif gh_prog_name:
+            target_stem = Path(target_filename).stem.lower()
+            gh_stem = Path(gh_prog_name).stem.lower()
+            if target_stem in gh_stem or gh_stem in target_stem:
+                provenance = {
+                    "status": "HEURISTIC_NAME_MATCH",
+                    "verified": False,
+                    "is_heuristic": True,
+                    "program_name": gh_prog_name,
+                    "warning": f"Matched by filename heuristic '{gh_prog_name}' only; cryptographic hash unavailable."
+                }
+                is_heuristic_match = True
+            else:
+                provenance = {
+                    "status": "PROVENANCE_NAME_MISMATCH",
+                    "verified": False,
+                    "export_program_name": gh_prog_name,
+                    "target_filename": target_filename,
+                    "warning": f"Ghidra export program '{gh_prog_name}' does not match target filename '{target_filename}'. Quarantined."
+                }
+        else:
+            provenance = {
+                "status": "UNVERIFIED_NO_METADATA",
+                "verified": False,
+                "warning": "Ghidra export lacks program_name or sha256 metadata. Quarantined."
+            }
+        return provenance, is_cryptographically_proven, is_heuristic_match
 
     @staticmethod
     def _synthesize_triage_summary(
@@ -350,6 +415,8 @@ class BinaryTriageOrchestrator:
         ghidra_cg: Optional[Dict[str, Any]],
         ghidra_prov: Optional[Dict[str, Any]] = None,
         slack_res: Optional[Dict[str, Any]] = None,
+        sensory_res: Optional[Dict[str, Any]] = None,
+        hybrid_res: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Separates observed facts from heuristic indicators and proposes next steps."""
         observed_facts: List[str] = []
@@ -379,6 +446,35 @@ class BinaryTriageOrchestrator:
                 observed_facts.append(f"Binary slack space detected: {scnt} bytes ({stype})")
                 if "SUSPICIOUS" in stype:
                     heuristic_indicators.append(f"SUSPICIOUS_TRAILING_OVERLAY:{stype}")
+
+        if sensory_res and isinstance(sensory_res, dict) and sensory_res.get("senses"):
+            active_cnt = sensory_res.get("active_senses_count", 0)
+            efficiency = sensory_res.get("overall_sensory_efficiency")
+            observed_facts.append(
+                f"Sensory Cortex perception active on {active_cnt}/10 metaphorical senses "
+                + (f"(overall efficiency {efficiency})" if isinstance(efficiency, (int, float)) else "")
+            )
+            for s_key, s_val in sensory_res.get("senses", {}).items():
+                if not isinstance(s_val, dict):
+                    continue
+                anomalies = s_val.get("telemetry", {}).get("anomalies") if isinstance(s_val.get("telemetry"), dict) else None
+                if anomalies:
+                    heuristic_indicators.append(f"SENSE_ANOMALY:{s_key}:{anomalies}")
+
+        if hybrid_res and isinstance(hybrid_res, dict):
+            ai_cnt = hybrid_res.get("embedded_logic_assets_count", 0)
+            if hybrid_res.get("is_hybrid_binary") or ai_cnt:
+                frameworks = sorted({
+                    str(f.get("kind") or f.get("type") or "ASSET")
+                    for f in (hybrid_res.get("findings") or []) if isinstance(f, dict)
+                })
+                observed_facts.append(
+                    f"Embedded neural inference assets detected: {ai_cnt}"
+                    + (f" (kinds: {', '.join(frameworks)})" if frameworks else "")
+                )
+                heuristic_indicators.append("EMBEDDED_NEURAL_INFERENCE_LOGIC_PRESENT")
+                recommended_next_tools.append("bintra_wsp_audit")
+                recommended_next_tools.append("bintra_dump_bytes")
 
         if pe_forensics and pe_forensics.get("status") == "ok":
             pdata_cnt = pe_forensics.get("pdata_functions", {}).get("total_runtime_functions", 0)
@@ -451,6 +547,8 @@ class BinaryTriageOrchestrator:
         slack_res = artifacts.get("slack_and_overlay") or {}
         pe_forensics = artifacts.get("pe_deep_forensics") or {}
         deobf_res = artifacts.get("deobfuscation") or {}
+        sensory_res = artifacts.get("sensory_perception") or {}
+        hybrid_res = artifacts.get("embedded_ai_scan") or {}
 
         lines = []
         lines.append(f"# Bintra Binary Triage Forensic Dossier: `{file_name}`\n")
@@ -498,24 +596,56 @@ class BinaryTriageOrchestrator:
             lines.append(f"| **Slack Classification** | `{slack_res.get('slack_type', 'N/A')}` |")
             lines.append(f"| **Diagnostic Note** | {slack_res.get('diagnostic_note', 'N/A')} |\n")
 
+        # Sensory Cortex Perception
+        if sensory_res and isinstance(sensory_res, dict) and sensory_res.get("senses"):
+            lines.append("## 5. Sensory Cortex Perception (10 Metaphorical Senses)\n")
+            lines.append("| Sense | Status | Telemetry Highlights |")
+            lines.append("| :--- | :--- | :--- |")
+            for s_key, s_val in sensory_res.get("senses", {}).items():
+                if not isinstance(s_val, dict):
+                    continue
+                tele = s_val.get("telemetry") if isinstance(s_val.get("telemetry"), dict) else {}
+                highlights = "; ".join(
+                    f"{tk}={tv}" for tk, tv in list(tele.items())[:3]
+                ) if tele else "N/A"
+                lines.append(f"| {s_val.get('name_en', s_key)} | `{'ACTIVE' if s_val.get('present') else 'INACTIVE'}` | {highlights} |")
+            lines.append("")
+
+        # Embedded Neural Inference Assets
+        if hybrid_res and isinstance(hybrid_res, dict) and (
+            hybrid_res.get("is_hybrid_binary") or hybrid_res.get("embedded_logic_assets_count")
+        ):
+            lines.append("## 6. Embedded Neural Inference Assets (Hybrid Dissection)\n")
+            lines.append("| Asset | Kind | Offset |")
+            lines.append("| :--- | :--- | :--- |")
+            for f_item in hybrid_res.get("findings", []) or []:
+                if not isinstance(f_item, dict):
+                    continue
+                lines.append(
+                    f"| {f_item.get('description', f_item.get('framework', 'AI asset'))} "
+                    f"| `{f_item.get('kind', f_item.get('type', 'ASSET'))}` "
+                    f"| `{f_item.get('offset', f_item.get('file_offset', 'N/A'))}` |"
+                )
+            lines.append("")
+
         # Observed Facts & Recommendations
         facts = summary.get("observed_facts", [])
         if facts:
-            lines.append("## 5. Authoritative Observed Facts\n")
+            lines.append("## 7. Authoritative Observed Facts\n")
             for f in facts:
                 lines.append(f"* {f}")
             lines.append("")
 
         heuristics = summary.get("heuristic_indicators", [])
         if heuristics:
-            lines.append("## 6. Heuristic Indicators & Anomalies\n")
+            lines.append("## 8. Heuristic Indicators & Anomalies\n")
             for h in heuristics:
                 lines.append(f"* `{h}`")
             lines.append("")
 
         recs = summary.get("recommended_next_steps", [])
         if recs:
-            lines.append("## 7. Recommended Next Diagnostic Actions\n")
+            lines.append("## 9. Recommended Next Diagnostic Actions\n")
             for r in recs:
                 lines.append(f"* `{r}`")
             lines.append("")

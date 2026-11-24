@@ -3,7 +3,7 @@ name: bintra-safe-binary-patching
 description: Surgically patch compiled Windows executables (.exe, .dll) and machine code with stack frame balance proprioception (RSP/RBP guard), automated PE checksum recalculation, and strict workspace isolation. Use when modifying binary instructions, NOPing out calls, bypassing checks, or applying hotfixes without corrupting the target or violating Windows security policies.
 metadata:
   framework: bintra
-  version: "1.0.0"
+  version: "1.1.0"
   tier: binary-mutation
 ---
 

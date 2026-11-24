@@ -376,6 +376,133 @@ class PcodeFunctionMatcher:
             return np.zeros((vecs_a.shape[0], vecs_b.shape[0]), dtype=np.float32)
         return np.clip(vecs_a @ vecs_b.T, -1.0, 1.0)
 
+
+class PcodeSimilarityIndex:
+    """
+    Scalable nearest-routine search over a corpus of Ghidra functions.
+
+    Bridges the existing 64-D High P-Code behavioral vectorizer
+    (PcodeVectorizer.vectorize_high_function) with the vectorized batch
+    cosine engine (PcodeFunctionMatcher.match_batch) to answer the classic
+    reverse-engineering question: "which routines in this program behave
+    like this reference routine?" without pairwise O(N^2) Python loops.
+
+    Streams functions one-by-one (compatible with GhidraExportStore.iter_functions)
+    so multi-hundred-MB exports stay memory-bounded, and skips functions with
+    too few P-code operations (import thunks, stubs) that would produce
+    degenerate near-zero vectors.
+    """
+
+    DEFAULT_THRESHOLD = 0.75
+    DEFAULT_LIMIT = 20
+    MIN_PCODE_OPS = 1
+
+    def __init__(self, min_pcode_ops: int = MIN_PCODE_OPS):
+        self.min_pcode_ops = max(1, int(min_pcode_ops))
+        self._names: List[str] = []
+        self._entry_points: List[str] = []
+        self._op_counts: List[int] = []
+        self._vectors: List[np.ndarray] = []
+        self.skipped_functions = 0
+
+    @staticmethod
+    def _function_pcode_ops(fn: Dict[str, Any]) -> List[Dict[str, Any]]:
+        ops = fn.get("pcode_ops") or fn.get("pcode") or []
+        return ops if isinstance(ops, list) else []
+
+    def index_function(self, fn: Dict[str, Any]) -> bool:
+        """Vectorizes one function record and adds it to the index.
+
+        Returns True when the function was indexed, False when skipped
+        (missing/too-small P-code stream).
+        """
+        ops = self._function_pcode_ops(fn)
+        if len(ops) < self.min_pcode_ops:
+            self.skipped_functions += 1
+            return False
+        vec_res = PcodeVectorizer.vectorize_high_function(
+            ops, basic_blocks=fn.get("basic_blocks")
+        )
+        vec = np.array(vec_res.get("vector", []), dtype=np.float32)
+        if vec.size != PcodeVectorizer.VECTOR_DIM or float(np.linalg.norm(vec)) <= 1e-12:
+            self.skipped_functions += 1
+            return False
+        self._names.append(str(fn.get("name") or f"sub_{fn.get('entry_point', len(self._names))}"))
+        self._entry_points.append(str(fn.get("entry_point") or ""))
+        self._op_counts.append(int(vec_res.get("op_count", len(ops))))
+        self._vectors.append(vec)
+        return True
+
+    def build(self, functions_iter) -> int:
+        """Indexes an iterable/stream of function records; returns indexed count."""
+        for fn in functions_iter:
+            if not isinstance(fn, dict):
+                self.skipped_functions += 1
+                continue
+            self.index_function(fn)
+        return len(self._vectors)
+
+    @property
+    def matrix(self) -> np.ndarray:
+        if not self._vectors:
+            return np.zeros((0, PcodeVectorizer.VECTOR_DIM), dtype=np.float32)
+        return np.stack(self._vectors).astype(np.float32)
+
+    def search(
+        self,
+        reference_ops: List[Dict[str, Any]],
+        basic_blocks: Optional[List[Dict[str, Any]]] = None,
+        threshold: float = DEFAULT_THRESHOLD,
+        limit: int = DEFAULT_LIMIT,
+    ) -> Dict[str, Any]:
+        """Ranks indexed routines against a reference P-code operation stream."""
+        if not isinstance(reference_ops, list) or not reference_ops:
+            raise ValueError("reference_ops must be a non-empty list of P-code operations.")
+        if len(self._vectors) == 0:
+            return {
+                "status": "empty_index",
+                "indexed_functions": 0,
+                "matches": [],
+            }
+
+        ref_res = PcodeVectorizer.vectorize_high_function(reference_ops, basic_blocks=basic_blocks)
+        ref_vec = np.array(ref_res.get("vector", []), dtype=np.float32)
+        if ref_vec.size != PcodeVectorizer.VECTOR_DIM:
+            raise ValueError("Reference P-code stream produced an invalid vector.")
+
+        sims = PcodeFunctionMatcher.match_batch(self.matrix, ref_vec.reshape(1, -1)).reshape(-1)
+        order = np.argsort(-sims)
+
+        threshold = float(max(-1.0, min(1.0, threshold)))
+        matches: List[Dict[str, Any]] = []
+        for idx in order[: max(0, int(limit))]:
+            sim = float(sims[int(idx)])
+            if sim < threshold:
+                break
+            matches.append({
+                "function_name": self._names[int(idx)],
+                "entry_point": self._entry_points[int(idx)],
+                "pcode_cosine_similarity": round(sim, 4),
+                "is_semantic_match": sim >= PcodeFunctionMatcher.MATCH_THRESHOLD,
+                "confidence": (
+                    "HIGH" if sim >= PcodeFunctionMatcher.HIGH_CONFIDENCE_THRESHOLD
+                    else ("MEDIUM" if sim >= PcodeFunctionMatcher.MATCH_THRESHOLD else "LOW")
+                ),
+                "pcode_op_count": self._op_counts[int(idx)],
+            })
+
+        return {
+            "status": "ok",
+            "indexed_functions": len(self._vectors),
+            "skipped_functions": self.skipped_functions,
+            "reference_op_count": int(ref_res.get("op_count", len(reference_ops))),
+            "reference_effective_rank": ref_res.get("effective_rank"),
+            "threshold": threshold,
+            "matches_count": len(matches),
+            "matches": matches,
+        }
+
+
 class ControlFlowGraphAnalyzer:
     """
     Analyzes Ghidra decompiled Basic Block Control Flow Graphs (CFG).

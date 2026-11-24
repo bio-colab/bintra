@@ -21,11 +21,11 @@ Launch the native zero-dependency MCP server via stdio:
   }
 }
 ```
-Exposes **50 type-safe tools** (with MCP `annotations`), **4 MCP resources** (`resources/list`, `resources/read`), and **4 MCP workflow prompts** (`prompts/list`, `prompts/get`):
+Exposes **51 type-safe tools** (with MCP `annotations`), **4 MCP resources** (`resources/list`, `resources/read`), and **5 MCP workflow prompts** (`prompts/list`, `prompts/get`):
 - **Core Binary, Decompilation & Neural Weights (13 Tools):** `bintra_inspect_binary`, `bintra_dump_bytes`, `bintra_deobfuscate_binary`, `bintra_match_functions`, `bintra_patch_binary`, `bintra_scan_hybrid`, `bintra_sensory_audit`, `bintra_match_pcode`, `bintra_deobfuscate_pcode`, `bintra_ghidra_analyze`, `bintra_ghidra_headless`, `bintra_wsp_audit`, `bintra_patch_weights`.
 - **Windows System Intelligence, Forensics & Profiling (21 Tools):** `bintra_windows_env_audit`, `bintra_resolve_dependencies`, `bintra_inspect_crash_reports`, `bintra_correlate_failure_evidence`, `bintra_win_catalog_cmd`, `bintra_registry_audit`, `bintra_hardware_audit`, `bintra_port_audit`, `bintra_hardware_topology`, `bintra_network_audit`, `bintra_network_hardware_dissect`, `bintra_network_connections`, `bintra_driver_audit`, `bintra_service_audit`, `bintra_dmp_inspect`, `bintra_etw_audit`, `bintra_evidence_graph`, `bintra_device_driver_intelligence`, `bintra_process_resource_audit`, `bintra_profile_process`, `bintra_inspect_slack_space`.
 - **Runtime Telemetry, Crash RCA & Live Ghidra Bridge (7 Tools):** `bintra_vad_inspect`, `bintra_memory_scan`, `bintra_pointer_scan`, `bintra_struct_dissect`, `bintra_crash_rca`, `bintra_etw_capture`, `bintra_ghidra_live_bridge`.
-- **Deep Forensics, Difference & Triaged Evidence Fusion (9 Tools):** `bintra_python_bytecode`, `bintra_cpython_memory_forensics`, `bintra_pe_deep_forensics`, `bintra_binary_diff`, `bintra_ghidra_call_graph`, `bintra_ghidra_data_flow`, `bintra_fuse_evidence`, `bintra_triage_binary`, `bintra_list_capabilities`.
+- **Deep Forensics, Difference & Triaged Evidence Fusion (10 Tools):** `bintra_python_bytecode`, `bintra_cpython_memory_forensics`, `bintra_pe_deep_forensics`, `bintra_binary_diff`, `bintra_ghidra_call_graph`, `bintra_ghidra_data_flow`, `bintra_ghidra_similar_functions`, `bintra_fuse_evidence`, `bintra_triage_binary`, `bintra_list_capabilities`.
 
 ### Modality 2: Unified CLI (`bintra`) -- Recommended for Terminal / Bash / PowerShell
 ```powershell
@@ -138,7 +138,8 @@ Bintra provides **7 specialized sub-skills** (plus the [`bintra`](skills/bintra/
 | `etw-capture` | Hybrid ETW / Event Log timeline capture | `--session-name <s> [--pid <pid>] [--duration 2.0]` | `session_info`, `events_count`, `event_sources`, `temporal_verdict` |
 | `proc-profile` | Longitudinal process profiler & leak diagnoser | `-p <pid> [-n 10] [-i 0.2] [--format json\|md]` | `status`, `verdict`, `private_bytes_slope`, `working_set_slope`, `handles_slope` |
 | `slack-audit` | Binary slack space & overlay forensic auditor | `-f <path> [--format json\|md]` | `status`, `file_type`, `has_overlay`, `has_slack`, `verdict` |
-| `triage` | Unified binary triage dossier | `-f <path> [--format json\|md] [--skip-deobf]` | `status`, `file_name`, `stages`, `verdict` |
+| `triage` | Unified binary triage dossier | `-f <path> [--format json\|md] [--skip-deobf] [--skip-sensory] [--skip-hybrid-scan]` | `status`, `file_name`, `stages`, `verdict` |
+| `ghidra-similar` | P-Code behavioral similar-function search | `--input <export> [--function <name>\|--pcode-file <f.json>] [--threshold 0.75] [--limit 20]` | `status`, `indexed_functions`, `matches` |
 | `ghidra-bridge` | Authenticated localhost Ghidra JSON-RPC | `--start\|--daemon\|--status\|--stop\|--annotate-* [--no-temp-marker]` | `is_running`, `port`, `ghidra_client_connected`, `queued_commands` |
 
 > **Audit Integrity & Failure Disclosures:** Mutation commands (`patch`, `patch-binary`, `patch-weights`, confirmed `update --yes`) fail closed (`AUDIT_INIT_FAILED`) if the hash-chained audit log cannot be recovered or written. Read-only commands surface persistent log degradation via `"audit_degraded": true` and `audit_degraded_reason`.
@@ -189,12 +190,13 @@ All 7 new tools below are **strictly read-only** (`cap.file.read`) and work **cr
 | MCP Tool | CLI Command | Purpose |
 |:---|:---|:---|
 | `bintra_triage_binary` | `bintra triage --file <bin>` | End-to-end read-only binary triage combining PE inspection, `.pdata`/RTTI/PDB deep forensics, Authenticode/Catalog signature intelligence, obfuscation triage, optional Crash RCA, optional Ghidra fusion, and `EvidenceGraph` synthesis. |
-| `bintra_list_capabilities` | `bintra capabilities` | Self-describing JSON manifest of all 48 tools, environment compatibility (`cross_platform` / `windows_native` / `ghidra_required`), and workflows. |
+| `bintra_list_capabilities` | `bintra capabilities` | Self-describing JSON manifest of all 51 tools, environment compatibility (`cross_platform` / `windows_native` / `ghidra_required`), and workflows. |
 | `bintra_pe_deep_forensics` | `bintra pe-forensics` | x64 `.pdata` `RUNTIME_FUNCTION` boundary recovery, MSVC RTTI (`TypeDescriptor`, `CompleteObjectLocator`, `vftable`), and offline local PDB/RSDS verification. |
 | `bintra_binary_diff` | `bintra diff-binaries` | Semantic diffing across two PE binaries or two Ghidra exports (WL-CFG subtree hash + 64-D P-Code cosine + API/String anchor Jaccard). |
 | `bintra_ghidra_call_graph` | `bintra ghidra-callgraph` | Caller/callee topology, indirect calls, XREFs, and sensitive Win32 API reachability paths. |
+| `bintra_ghidra_similar_functions` | `bintra ghidra-similar` | Behavioral nearest-routine search: ranks all functions in a Ghidra export against a reference routine (in-export function or external P-code stream) via 64-D High P-Code cosine similarity. Locates clones, inlined variants, and ported logic. |
 | `bintra_ghidra_data_flow` | `bintra ghidra-dataflow` | Intra-procedural High P-Code SSA def-use backward/forward slice + Decompiler C AST/local variable correlation. |
-| `bintra_fuse_evidence` | `bintra fuse-evidence` | Multi-signal causal fusion of PE Deep Forensics + MiniDump Crash RCA + Ghidra Call-Graph/Data-Flow into `EvidenceGraph`. |
+| `bintra_fuse_evidence` | `bintra fuse-evidence` | Multi-signal causal fusion of PE Deep Forensics + MiniDump Crash RCA + Ghidra Call-Graph/Data-Flow into `EvidenceGraph`. Ghidra exports are provenance-verified (SHA-256 / filename) against the target binary and quarantined on mismatch, identical to the triage orchestrator. |
 
 ### AI Agent Decision Tree
 1. **First turn on an unfamiliar host:** Call `bintra_list_capabilities` (or `bintra capabilities`) to inspect which tools are `cross_platform` vs `windows_native` vs `ghidra_required`.

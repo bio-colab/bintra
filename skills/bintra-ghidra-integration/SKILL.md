@@ -3,7 +3,7 @@ name: bintra-ghidra-integration
 description: Connect Bintra to Ghidra using High P-Code vectorization, headless batch deobfuscation, and the authenticated localhost JSON-RPC 2.0 Live Bridge daemon (with queue+poll transaction lifecycle, RVA/VA awareness, and mediated markers).
 metadata:
   framework: bintra
-  version: "1.0.0"
+  version: "1.1.0"
   tier: ghidra-bridge
 ---
 
@@ -88,6 +88,7 @@ bintra ghidra-bridge --stop --port 41718
 - **Offline / Exported Topology & Data-Flow:**
   - `bintra_ghidra_call_graph` (`bintra ghidra-callgraph --input <export.json>`): Extracts caller/callee edges, indirect `CALLIND` sites, XREFs, and sensitive Win32 API reachability paths.
   - `bintra_ghidra_data_flow` (`bintra ghidra-dataflow --input <export.json> --function <name>`): Performs intra-procedural High P-Code SSA backward/forward def-use slicing and correlates Decompiler C pseudocode & local variables.
+  - `bintra_ghidra_similar_functions` (`bintra ghidra-similar --input <export.json> --function <name>`): Behavioral nearest-routine search — ranks every function in the export against a reference (in-export function or external P-code stream from `--pcode-file <ref.json>`) using 64-D High P-Code cosine similarity. Use it to locate clone routines, inlined variants, and ported logic; tune `--threshold` (default 0.75) and `--min-pcode-ops` (raise to skip thunks).
 - **Live Bridge Read-Only Queries (`ghidra_live_bridge.py` & `BintraLiveBridgeService.py`):**
   - `bintra.request_live_function_fetch` queues `FETCH_FUNCTION_DEEP` in Ghidra to push `callees`, `xrefs`, `decompiled_c`, `signature`, and `pcode_ops`.
   - `bintra.query_call_graph`, `bintra.query_data_flow`, and `bintra.query_decompiled_c` query cached live functions over authenticated localhost JSON-RPC.

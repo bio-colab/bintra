@@ -3,7 +3,7 @@ name: bintra-windows-troubleshooter
 description: Diagnose and resolve Windows application crashes (0xc0000005 Access Violations), identify file locks via Windows Restart Manager, inspect MiniDump (.dmp) crash dumps, resolve missing DLL dependencies, and troubleshoot PnP device driver conflicts (CM_PROB_*) using Bintra.
 metadata:
   framework: bintra
-  version: "1.0.0"
+  version: "1.1.0"
   tier: windows-system-forensics
 ---
 
@@ -92,12 +92,15 @@ bintra file-locks --file "C:\Program Files\App\resource.dll"
 - Inside `usage_breakdown`: `is_actively_executing`, `is_loaded_as_dll`, `has_restart_manager_handle`, `has_exclusive_lock`.
 - Inside each entry of `locking_processes`: `process_id`, `application_name`, `service_name`, `is_restartable`.
 
-**All 5 Supported `bintra_process_resource_audit` Actions:**
+**All 8 Supported `bintra_process_resource_audit` Actions:**
 - `find_file_locks` (requires `file_path`)
 - `find_module_holders` (requires `module_query`; CLI: `bintra proc-modules --module <dll>`)
 - `process_tree` (full running process inventory and parent-child hierarchy)
 - `service_process_map` (maps running SCM services to host PIDs)
 - `audit_process` (detailed process inspection for `pid`)
+- `list_processes` (Task Manager process table; CLI: `bintra proc-list`)
+- `search_processes` (keyword/PID search; CLI: `bintra proc-search --query <q>`)
+- `system_performance` (Task Manager Performance metrics; CLI: `bintra sys-perf`)
 
 ---
 
@@ -151,7 +154,7 @@ bintra dmp-inspect --file "C:\path\to\crash.dmp"
 {
   "name": "bintra_resolve_dependencies",
   "arguments": {
-    "binary_path": "C:\\path\\to\\app.exe"
+    "file_path": "C:\\path\\to\\app.exe"
   }
 }
 ```

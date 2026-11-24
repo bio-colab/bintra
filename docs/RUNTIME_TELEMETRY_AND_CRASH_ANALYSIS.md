@@ -115,16 +115,16 @@ flowchart TD
 
 | الأداة في واجهة CLI | اسم أداة خادم MCP | رقم الأداة | المرحلة | الوظيفة الأساسية |
 |---|---|---|---|---|
-| `bintra vad-inspect` | `bintra_vad_inspect` | **23** | Phase 1 | مسح الذاكرة الافتراضية، تصنيف أقسام PE والـ STACK/HEAP، تدقيق $W \oplus X$، والفارق الحيزي. |
-| `bintra mem-scan` | `bintra_memory_scan` | **24** | Phase 1.5 | قراءة الذاكرة الحية عبر `PROCESS_VM_READ`، والبحث الأولي واللاحق (`first`/`next`) داخل جلسات معزولة. |
-| `bintra ptr-scan` | `bintra_pointer_scan` | **25** | Phase 1.5 | استكشاف سلاسل المؤشرات متعددة المستويات حتى العناوين الثابتة للوحدات (`Base+Offsets`). |
-| `bintra struct-dissect` | `bintra_struct_dissect` | **26** | Phase 1.5 | تشريح كتل الذاكرة الحية تلقائياً وتوليد تعريفات هياكل C قابلة للحقن في غيدرا. |
-| `bintra crash-rca` | `bintra_crash_rca` | **27** | Phase 2 | تحليل ملفات MiniDump، ربط فحص VAD، تفكيك نافذة الانهيار، وإرجاع فرضيات السبب الجذري. |
-| `bintra etw-capture` | `bintra_etw_capture` | **28** | Phase 3 | تشغيل التقاط ETW الهجين (`OpenTraceW` + بديل `WEVTAPI`/Toolhelp32) والارتباط الزمني السببي. |
-| `bintra ghidra-bridge` | `bintra_ghidra_live_bridge` | **29** | Phase 4 | تشغيل خادم JSON-RPC الموثق على الحلقة المحلية مع دعم `--daemon` و `--no-temp-marker`. |
+| `bintra vad-inspect` | `bintra_vad_inspect` | **28** | Phase 1 | مسح الذاكرة الافتراضية، تصنيف أقسام PE والـ STACK/HEAP، تدقيق $W \oplus X$، والفارق الحيزي. |
+| `bintra mem-scan` | `bintra_memory_scan` | **29** | Phase 1.5 | قراءة الذاكرة الحية عبر `PROCESS_VM_READ`، والبحث الأولي واللاحق (`first`/`next`) داخل جلسات معزولة. |
+| `bintra pointer-scan` | `bintra_pointer_scan` | **30** | Phase 1.5 | استكشاف سلاسل المؤشرات متعددة المستويات حتى العناوين الثابتة للوحدات (`Base+Offsets`). |
+| `bintra dissect-struct` | `bintra_struct_dissect` | **31** | Phase 1.5 | تشريح كتل الذاكرة الحية تلقائياً وتوليد تعريفات هياكل C قابلة للحقن في غيدرا. |
+| `bintra crash-rca` | `bintra_crash_rca` | **32** | Phase 2 | تحليل ملفات MiniDump، ربط فحص VAD، تفكيك نافذة الانهيار، وإرجاع فرضيات السبب الجذري. |
+| `bintra etw-capture` | `bintra_etw_capture` | **33** | Phase 3 | تشغيل التقاط ETW الهجين (`OpenTraceW` + بديل `WEVTAPI`/Toolhelp32) والارتباط الزمني السببي. |
+| `bintra ghidra-bridge` | `bintra_ghidra_live_bridge` | **34** | Phase 4 | تشغيل خادم JSON-RPC الموثق على الحلقة المحلية مع دعم `--daemon` و `--no-temp-marker`. |
 
 > [!NOTE]
-> يبلغ إجمالي عدد أدوات خادم MCP الآن **34 أداة متخصصة**، جميعها تخضع لوساطة مرجع الأمان `ExecutionGuard` والتحقق الصارم من المخطط (`_validate_tool_arguments`) بنموذج الفشل المغلق (Fail-Closed).
+> يبلغ إجمالي عدد أدوات خادم MCP الآن **51 أداة متخصصة**، جميعها تخضع لوساطة مرجع الأمان `ExecutionGuard` والتحقق الصارم من المخطط (`_validate_tool_arguments`) بنموذج الفشل المغلق (Fail-Closed).
 
 ---
 
@@ -136,15 +136,16 @@ flowchart TD
 ======================================================================
 Bintra Test Suites Verification Summary:
 - test_suite.py (Core Binary & Neural Engines):         123 Tests  [PASS]
-- test_security_remediation.py (MCP Guard & Schema):     16 Tests  [PASS]
-- test_audit_remediations.py (Audit, CLI, Bridge & Docs): 10 Tests [PASS]
-- test_virtual_memory_inspector.py (Phase 1 VAD & Scan):  14 Tests [PASS]
-- test_etw_capture_engine.py (Phase 3 Hybrid ETW):        13 Tests [PASS]
-- test_ghidra_live_bridge.py (Phase 4 Ghidra Bridge):     14 Tests [PASS]
-- test_crash_rca_engine.py (Phase 2 Crash RCA):            4 Tests [PASS]
-- test_runtime_telemetry_pipeline.py (Phase 5 E2E):        1 Test  [PASS]
+- test_security_remediation.py (MCP Guard & Schema):      16 Tests  [PASS]
+- test_audit_remediations.py (Audit, CLI, Bridge & Docs): 10 Tests  [PASS]
+- test_virtual_memory_inspector.py (Phase 1 VAD & Scan):  14 Tests  [PASS]
+- test_etw_capture_engine.py (Phase 3 Hybrid ETW):        14 Tests  [PASS]
+- test_ghidra_live_bridge.py (Phase 4 Ghidra Bridge):     14 Tests  [PASS]
+- test_crash_rca_engine.py (Phase 2 Crash RCA):            4 Tests  [PASS]
+- test_runtime_telemetry_pipeline.py (Phase 5 E2E):        1 Test   [PASS]
+- (plus 25 additional cross-platform suites incl. NEON SOTA evolution v2)
 ----------------------------------------------------------------------
-TOTAL VERIFIED TESTS:                                    195 Tests [PASS]
+TOTAL VERIFIED TESTS:                                    440+ Tests [PASS]
 ======================================================================
 ```
 

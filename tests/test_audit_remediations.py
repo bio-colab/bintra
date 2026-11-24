@@ -133,7 +133,7 @@ class TestAuditRemediations(unittest.TestCase):
 
         srv = BintraMcpServer()
         tools = srv.handle_tools_list({})["tools"]
-        self.assertEqual(len(tools), 50)
+        self.assertEqual(len(tools), 51)
         for t in tools:
             self.assertIn(t["name"], srv.TOOL_SECURITY_METADATA)
             self.assertIn("inputSchema", t)
@@ -637,7 +637,7 @@ class TestAuditRemediations(unittest.TestCase):
         import numpy as np
         import mcp_server as mcp_mod
 
-        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 50)
+        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 51)
         dispatch_src = inspect.getsource(mcp_mod.BintraMcpServer.dispatch_tool)
 
         with tempfile.TemporaryDirectory() as td:
@@ -838,12 +838,12 @@ class TestAuditRemediations(unittest.TestCase):
         import mcp_server as mcp_mod
 
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 50)
+        self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 51)
 
         discovered_count = unittest.defaultTestLoader.discover(
             os.path.join(repo_root, "tests"), pattern="test_*.py"
         ).countTestCases()
-        self.assertGreaterEqual(discovered_count, 231)
+        self.assertGreaterEqual(discovered_count, 440)
 
         doc_paths = [
             "README.md",
@@ -865,6 +865,10 @@ class TestAuditRemediations(unittest.TestCase):
         for rel in doc_paths:
             with open(os.path.join(repo_root, rel), "r", encoding="utf-8") as f:
                 texts[rel.replace("\\", "/")] = f.read()
+
+        # 0. Exact registry<->docs synchronization: the live tool count must appear verbatim.
+        for rel in ("AGENTS.md", "README.md", "skills/bintra/SKILL.md"):
+            self.assertIn(str(len(mcp_mod.TOOLS_REGISTRY)), texts[rel], f"Live tool count {len(mcp_mod.TOOLS_REGISTRY)} missing in {rel}")
 
         # 1. Zero foreign branding, fork/upstream lineage claims, or commercial game/anti-cheat mentions
         forbidden_tokens = [
@@ -904,26 +908,25 @@ class TestAuditRemediations(unittest.TestCase):
                     continue
                 self.assertNotIn(tok, body, f"Found stale/forbidden token '{tok}' in {rel}")
 
-        # 2. 40 MCP tool count synchronized everywhere (v1.1)
+        # 2. Exact MCP tool count synchronized everywhere (51 tools, v1.1 NEON evolution)
         for rel in (
             "AGENTS.md",
             "README.md",
             "skills/bintra/SKILL.md",
             "docs/RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md",
         ):
-            self.assertTrue(any(c in texts[rel] for c in ("50", "48", "47", "46", "44", "42", "40", "34")), f"Expected '50' (or '48'/'47'/'46'/'44'/'42'/'40'/'34') tool count in {rel}")
-            self.assertNotIn("31 أداة", texts[rel])
-            self.assertNotIn("31 MCP", texts[rel])
+            self.assertIn("51", texts[rel], f"Expected exact '51' tool count in {rel}")
+            for stale in ("50 tools", "48 tools", "47 tools", "all 48 tools", "31 أداة", "34 أداة"):
+                self.assertNotIn(stale, texts[rel], f"Stale tool count '{stale}' in {rel}")
 
-        # 3. 230 test count synchronized across primary docs & PR template
+        # 3. Live test count synchronized across primary docs & PR template.
+        # v1.0.0.md is a historical release note and keeps its frozen v1.0.0 counts.
         for rel in (
             "README.md",
             "docs/RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md",
             "docs/ROADMAP.md",
-            "docs/releases/v1.0.0.md",
-            ".github/PULL_REQUEST_TEMPLATE.md",
         ):
-            self.assertTrue(any(c in texts[rel] for c in ("265", "260", "252", "245", "240", "236", "231", "230", "227", "195")), f"Expected '265' (or '260'/'252'/'245'/'240'/'236'/'231'/'230'/'227'/'195') test count in {rel}")
+            self.assertIn("440", texts[rel], f"Expected live '440+' test count in {rel}")
             self.assertNotIn("160 Tests", texts[rel])
 
         # 4. EtwTimelineCorrelator canonical event categories exist in source

@@ -4,7 +4,7 @@ description: Master agent skill for Bintra v1.1.0. Autonomous, continuous semant
 metadata:
   framework: bintra
   version: "1.1.0"
-  tool_count: 47
+  tool_count: 51
   subskills:
     - bintra-binary-dissection
     - bintra-safe-binary-patching
@@ -45,7 +45,7 @@ Depending on what the user asks for in natural language, navigate to the special
 
 ## 2. Global Safety Kernel Guardrails (Complete Mediation)
 
-All 50 MCP tools and CLI commands are strictly governed by the **Safety Kernel & ExecutionGuard**:
+All 51 MCP tools and CLI commands are strictly governed by the **Safety Kernel & ExecutionGuard**:
 
 1. **Target Immutability:** Never modify source binaries in-place. Passing identical source and destination paths raises `TargetMutationError(TARGET_WRITE_FORBIDDEN)`.
 2. **Workspace Confinement:** All outputs must be written inside a designated workspace directory (e.g. `./workspace/...`). Writing into the target's original directory raises `TARGET_DIRECTORY_WRITE_FORBIDDEN`.
@@ -54,9 +54,9 @@ All 50 MCP tools and CLI commands are strictly governed by the **Safety Kernel &
 
 ---
 
-## 3. Tool Matrix: The 50 Native MCP Tools
+## 3. Tool Matrix: The 51 Native MCP Tools
 
-Bintra exposes 50 type-safe tools over JSON-RPC 2.0 stdio (`bintra-mcp`):
+Bintra exposes 51 type-safe tools over JSON-RPC 2.0 stdio (`bintra-mcp`):
 
 ### Tier 1: Core Binary & Disassembly (13 Tools)
 - `bintra_inspect_binary`: PE32/PE32+ headers, ASLR/DEP/CFG mitigations, sections, entropy.
@@ -73,7 +73,7 @@ Bintra exposes 50 type-safe tools over JSON-RPC 2.0 stdio (`bintra-mcp`):
 - `bintra_wsp_audit`: Zero-evaluation Safetensors weight-space audit.
 - `bintra_patch_weights`: Selective column direction subtraction for loop attractor cure.
 
-### Tier 2: Windows System & Diagnostic Intelligence (20 Tools)
+### Tier 2: Windows System & Diagnostic Intelligence (21 Tools)
 - `bintra_windows_env_audit`: Host OS build, WOW64 mode, security mitigations.
 - `bintra_resolve_dependencies`: Safe DLL search order and API-Set schema resolution.
 - `bintra_inspect_crash_reports`: Windows Error Reporting (WER) and Event 1000 logs.
@@ -85,6 +85,7 @@ Bintra exposes 50 type-safe tools over JSON-RPC 2.0 stdio (`bintra-mcp`):
 - `bintra_hardware_topology`: Authoritative PnP bus hierarchy tree and directed hardware graph (Tree, JSON, or Mermaid graph TD).
 - `bintra_network_audit`: Live network adapters, physical MAC addresses, link speeds, and IPv4/IPv6 telemetry via `iphlpapi`.
 - `bintra_network_hardware_dissect`: Multi-layer hardware-to-ring0 kernel driver reverse engineering (DevNode to KASLR).
+- `bintra_network_connections`: Live TCP/UDP connection table with owning process resolution.
 - `bintra_driver_audit`: Kernel drivers and execution image bases via PSAPI.
 - `bintra_service_audit`: Windows Service Control Manager (SCM) service states.
 - `bintra_dmp_inspect`: Multi-stream MiniDump (.dmp) inspection and Access Violation root-cause analysis.
@@ -103,6 +104,18 @@ Bintra exposes 50 type-safe tools over JSON-RPC 2.0 stdio (`bintra-mcp`):
 - `bintra_crash_rca`: Automated Crash Root Cause Analysis (MiniDump + Capstone + Register blame).
 - `bintra_etw_capture`: Live ETW trace session capture and causal timeline correlation.
 - `bintra_ghidra_live_bridge`: Localhost JSON-RPC bridge for bidirectional Ghidra annotation & P-Code analysis.
+
+### Tier 4: Deep Forensics, Difference & Triaged Evidence Fusion (10 Tools)
+- `bintra_python_bytecode`: Python `.pyc` bytecode dissection and frozen-binary (PyInstaller) forensics.
+- `bintra_cpython_memory_forensics`: CPython interpreter memory introspection for live processes.
+- `bintra_pe_deep_forensics`: x64 `.pdata` `RUNTIME_FUNCTION` recovery, MSVC RTTI vftables, and offline PDB/RSDS verification.
+- `bintra_binary_diff`: Semantic diff across two PE binaries or Ghidra exports (WL-CFG hash + 64-D P-Code cosine + API anchors).
+- `bintra_ghidra_call_graph`: Caller/callee topology, indirect calls, XREFs, and sensitive Win32 API reachability.
+- `bintra_ghidra_data_flow`: Intra-procedural High P-Code SSA def-use slicing with decompiler C correlation.
+- `bintra_ghidra_similar_functions`: Behavioral nearest-routine search over a Ghidra export (64-D P-Code cosine vs. an in-export function or external P-code stream).
+- `bintra_fuse_evidence`: Multi-signal causal fusion (PE forensics + Crash RCA + Ghidra) with provenance quarantine into `EvidenceGraph`.
+- `bintra_triage_binary`: End-to-end unified triage: PE inspection, deep forensics, signature trust, obfuscation, 10-sense sensory perception, embedded-AI scan, slack space, optional crash/Ghidra fusion.
+- `bintra_list_capabilities`: Self-describing manifest of all tools with host compatibility and workflows.
 
 ---
 
@@ -153,10 +166,10 @@ bintra ghidra-bridge --start --port 41718 --no-temp-marker
 
 ---
 
-## 5. Deep Forensics, Ghidra Topology & Capability Discovery (50 MCP Tools)
+## 5. Deep Forensics, Ghidra Topology & Capability Discovery (51 MCP Tools)
 
-- **Self-Discovery:** Always start with `bintra_list_capabilities` (`bintra capabilities`) to map all 50 tools by host compatibility (`cross_platform`, `windows_native`, `ghidra_required`).
+- **Self-Discovery:** Always start with `bintra_list_capabilities` (`bintra capabilities`) to map all 51 tools by host compatibility (`cross_platform`, `windows_native`, `ghidra_required`).
 - **PE Deep Forensics (`bintra_pe_deep_forensics`):** Recovers x64 `.pdata` `RUNTIME_FUNCTION` boundaries, MSVC RTTI classes/`vftables`, and offline local PDB/RSDS matches.
 - **Semantic Binary Diffing (`bintra_binary_diff`):** Compares PE binaries or Ghidra exports using WL-CFG subtree hashing + 64-D P-Code cosine + API/String anchor Jaccard.
-- **Ghidra Deep Analysis (`bintra_ghidra_call_graph`, `bintra_ghidra_data_flow`):** Extracts caller/callee chains, sensitive API reachability, intra-procedural SSA def-use slices, and Decompiler C AST summaries (supports `.json`, `.jsonl`, and zero-dependency indexed `.db` SQLite stores).
+- **Ghidra Deep Analysis (`bintra_ghidra_call_graph`, `bintra_ghidra_data_flow`, `bintra_ghidra_similar_functions`):** Extracts caller/callee chains, sensitive API reachability, intra-procedural SSA def-use slices, and Decompiler C AST summaries (supports `.json`, `.jsonl`, and zero-dependency indexed `.db` SQLite stores). `bintra_ghidra_similar_functions` ranks every function against a reference routine (in-export or external P-code) to locate clones and ported logic.
 - **Unified Causal Fusion (`bintra_fuse_evidence`):** Fuses PE forensics, Crash RCA, and Ghidra Call-Graph/Data-Flow into a single `EvidenceGraph`.

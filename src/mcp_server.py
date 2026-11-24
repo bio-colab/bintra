@@ -1157,6 +1157,41 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
         }
     },
     {
+        "name": "bintra_ghidra_similar_functions",
+        "description": "Behavioral nearest-routine search: ranks every function in a Ghidra export against a reference routine using the 64-D High P-Code semantic vectorizer (architecture- and optimization-invariant cosine similarity). Use it to locate clone routines, inlined variants, or ported logic inside one program.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "export_path": {
+                    "type": "string",
+                    "description": "Path to Ghidra export (.json, .jsonl, or .db) to search"
+                },
+                "reference_function": {
+                    "type": "string",
+                    "description": "Reference function name or entry address that exists in the export"
+                },
+                "reference_pcode": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Externally supplied P-code operation stream (list of {opcode, inputs, output} objects) to search against, e.g. from another binary or a known-bad sample"
+                },
+                "threshold": {
+                    "type": "number",
+                    "description": "Minimum cosine similarity to report (default 0.75)"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum matches to return (default 20)"
+                },
+                "min_pcode_ops": {
+                    "type": "integer",
+                    "description": "Minimum P-code operations for a function to be indexed (default 1; raise to skip thunks)"
+                }
+            },
+            "required": ["export_path"]
+        }
+    },
+    {
         "name": "bintra_fuse_evidence",
         "description": "Strictly read-only multi-signal causal fusion combining PE deep forensics (.pdata/RTTI/PDB), MiniDump Crash RCA, and Ghidra Call-Graph/Data-Flow into an EvidenceGraph.",
         "inputSchema": {
@@ -1195,6 +1230,14 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
                     "type": "boolean",
                     "description": "Run entry-point obfuscation/CFF triage (default true)"
                 },
+                "include_sensory": {
+                    "type": "boolean",
+                    "description": "Run holistic 10-sense Sensory Cortex perception stage (default true)"
+                },
+                "include_hybrid_scan": {
+                    "type": "boolean",
+                    "description": "Scan for embedded neural inference assets (ONNX/TFLite/DirectML/GGUF) (default true)"
+                },
                 "max_exports": {
                     "type": "integer",
                     "description": "Maximum PE exports to include (default 32)"
@@ -1215,6 +1258,29 @@ TOOLS_REGISTRY: List[Dict[str, Any]] = [
             "properties": {
                 "platform_filter": {"type": "string", "enum": ["all", "cross_platform", "windows_native", "ghidra_required"], "description": "Filter tools by execution environment"}
             }
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["ok"]},
+                "host_os": {"type": "string", "description": "Operating system family of the MCP host (e.g. Windows, Linux)"},
+                "total_tools": {"type": "integer", "minimum": 0},
+                "tools": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "environment": {"type": "string", "enum": ["cross_platform", "windows_native", "ghidra_required"]},
+                            "capability": {"type": "string"},
+                            "access_mode": {"type": "string"}
+                        },
+                        "required": ["name", "environment", "capability", "access_mode"]
+                    }
+                },
+                "recommended_workflows": {"type": "object"}
+            },
+            "required": ["status", "host_os", "total_tools", "tools"]
         }
     },
     {
@@ -1472,14 +1538,17 @@ class BintraMcpServer:
         },
         "ghidra": {
             "bintra_ghidra_analyze", "bintra_ghidra_headless", "bintra_ghidra_live_bridge",
-            "bintra_ghidra_call_graph", "bintra_ghidra_data_flow", "bintra_match_pcode",
-            "bintra_deobfuscate_pcode", "bintra_fuse_evidence", "bintra_list_capabilities",
+            "bintra_ghidra_call_graph", "bintra_ghidra_data_flow", "bintra_ghidra_similar_functions",
+            "bintra_match_pcode", "bintra_deobfuscate_pcode", "bintra_fuse_evidence",
+            "bintra_list_capabilities",
         },
         "neural": {
             "bintra_sensory_audit", "bintra_scan_hybrid", "bintra_wsp_audit",
             "bintra_patch_weights", "bintra_list_capabilities",
         },
     }
+
+    TOOLS_LIST_PAGE_SIZE = 25
 
     def handle_tools_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
         params = params or {}
@@ -1495,8 +1564,26 @@ class BintraMcpServer:
             tools = [t for t in TOOLS_REGISTRY if t["name"] in allowed]
         elif profile == "windows":
             tools = [t for t in TOOLS_REGISTRY if t["name"] not in self.MCP_TOOL_PROFILES["neural"] or t["name"] == "bintra_list_capabilities"]
+
+        # MCP 2025-06-18 pagination: when the client supplies an opaque cursor,
+        # serve a fixed-size page and advertise nextCursor while more tools remain.
+        # Without a cursor the full (possibly profile-filtered) list is returned in
+        # one page for backward compatibility with older clients.
+        offset = 0
+        cursor = params.get("cursor")
+        if cursor is not None:
+            if not isinstance(cursor, str) or not cursor.isdigit():
+                raise ValueError(
+                    f"Invalid tools/list cursor: {cursor!r}. Use the opaque nextCursor value returned by a previous page."
+                )
+            offset = int(cursor)
+            if offset < 0 or offset >= len(tools):
+                raise ValueError(f"tools/list cursor out of range: {cursor!r}")
+        page = tools[offset : offset + self.TOOLS_LIST_PAGE_SIZE] if cursor is not None else tools
+        next_offset = offset + self.TOOLS_LIST_PAGE_SIZE if cursor is not None else 0
+
         enriched_tools = []
-        for t in tools:
+        for t in page:
             item = compact_tool_schema(t) if compact else dict(t)
             item["annotations"] = self._derive_tool_annotations(item["name"])
             enriched_tools.append(item)
@@ -1504,9 +1591,12 @@ class BintraMcpServer:
         base_tok = estimate_tokens(TOOLS_REGISTRY)
         act_tok = estimate_tokens(enriched_tools)
         self.token_tracker.record_schema_footprint(act_tok, base_tok)
-        return {
+        result: Dict[str, Any] = {
             "tools": enriched_tools
         }
+        if cursor is not None and next_offset < len(tools):
+            result["nextCursor"] = str(next_offset)
+        return result
 
     @classmethod
     def _derive_tool_annotations(cls, tool_name: str) -> Dict[str, Any]:
@@ -1588,6 +1678,14 @@ class BintraMcpServer:
                 {"name": "target_path", "description": "Path to target binary or Ghidra export", "required": True},
             ],
         },
+        {
+            "name": "audit_neural_weights",
+            "description": "Zero-execution security audit of neural weights embedded in a binary or shipped as a Safetensors model: outlier-neuron trojan detection, spectral effective rank, and surgical amenability.",
+            "arguments": [
+                {"name": "target_path", "description": "Path to the hybrid binary or .safetensors model to audit", "required": True},
+                {"name": "scan_embedded", "description": "First run hybrid embedded-AI scanning on a PE binary (default true)", "required": False},
+            ],
+        },
     ]
 
     def handle_resources_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1615,10 +1713,10 @@ class BintraMcpServer:
             payload = {
                 "playbooks": {
                     "unified_binary_triage": ["bintra_triage_binary"],
-                    "static_pe_deep_audit": ["bintra_inspect_binary", "bintra_pe_deep_forensics", "bintra_deobfuscate_binary", "bintra_scan_hybrid"],
-                    "ghidra_deep_re": ["bintra_ghidra_analyze", "bintra_ghidra_call_graph", "bintra_ghidra_data_flow"],
+                    "static_pe_deep_audit": ["bintra_inspect_binary", "bintra_pe_deep_forensics", "bintra_deobfuscate_binary", "bintra_scan_hybrid", "bintra_sensory_audit"],
+                    "ghidra_deep_re": ["bintra_ghidra_analyze", "bintra_ghidra_call_graph", "bintra_ghidra_data_flow", "bintra_ghidra_similar_functions"],
                     "crash_root_cause_fusion": ["bintra_dmp_inspect", "bintra_crash_rca", "bintra_pe_deep_forensics", "bintra_fuse_evidence"],
-                    "differential_binary_audit": ["bintra_binary_diff", "bintra_match_functions", "bintra_match_pcode"],
+                    "differential_binary_audit": ["bintra_binary_diff", "bintra_match_functions", "bintra_match_pcode", "bintra_ghidra_similar_functions"],
                     "windows_host_audit": ["bintra_windows_env_audit", "bintra_driver_audit", "bintra_service_audit", "bintra_network_connections"],
                 }
             }
@@ -1691,6 +1789,18 @@ class BintraMcpServer:
                 f"Call bintra_binary_diff(baseline_path='{b_path}', target_path='{t_path}') and summarize added, "
                 f"removed, and behaviorally modified routines."
             )
+        elif name == "audit_neural_weights":
+            tp = p_args.get("target_path")
+            if not tp:
+                raise ValueError("Prompt 'audit_neural_weights' requires argument 'target_path'.")
+            text = (
+                f"Audit the neural inference logic at '{tp}' without executing it. "
+                f"If it is a PE binary, first call bintra_scan_hybrid(file_path='{tp}') to enumerate embedded AI "
+                f"assets (ONNX, TFLite, DirectML, GGUF), then call bintra_wsp_audit(model_path='{tp}') when a "
+                f"Safetensors-compatible tensor store is present. Report trojan/outlier-neuron indicators, "
+                f"spectral effective rank, and whether selective column surgery (bintra_patch_weights) is "
+                f"indicated. Separate measured facts from heuristic indicators."
+            )
         else:
             raise ValueError(f"Unknown Bintra MCP prompt: '{name}'.")
 
@@ -1750,6 +1860,7 @@ class BintraMcpServer:
         "bintra_binary_diff": ("cap.file.read", "READ", "baseline_path"),
         "bintra_ghidra_call_graph": ("cap.file.read", "READ", "export_path"),
         "bintra_ghidra_data_flow": ("cap.file.read", "READ", "export_path"),
+        "bintra_ghidra_similar_functions": ("cap.file.read", "READ", "export_path"),
         "bintra_fuse_evidence": ("cap.file.read", "READ", "binary_path"),
         "bintra_triage_binary": ("cap.file.read", "READ", "file_path"),
         "bintra_profile_process": ("cap.process.query", "QUERY", "pid"),
@@ -2071,8 +2182,8 @@ class BintraMcpServer:
             return GhidraAnnotationPlanner.analyze_program_export(store)
 
         elif name == "bintra_ghidra_headless":
-            import subprocess, tempfile, uuid, shutil
             from security import ExecutionGuard, Capability
+            from ghidra_headless_runner import GhidraHeadlessRunner
             bin_path = args["binary_path"]
             apply_flag = bool(args.get("apply", False))
             timeout_sec = int(args.get("timeout_seconds", 300))
@@ -2095,134 +2206,34 @@ class BintraMcpServer:
                     access_mode="WRITE",
                     metadata={"target": "ghidra_project_database"}
                 )
-            ghidra_path_val = args.get("ghidra_path") or os.environ.get("GHIDRA_INSTALL_DIR") or os.environ.get("GHIDRA_HOME")
-            headless_name = "analyzeHeadless.bat" if os.name == "nt" else "analyzeHeadless"
-            alt_name = "analyzeHeadless" if os.name == "nt" else "analyzeHeadless.bat"
 
-            headless_bat = None
-            if ghidra_path_val:
-                p = Path(ghidra_path_val)
-                cand = p / "support" / headless_name
-                if cand.exists():
-                    headless_bat = cand
-                elif (p / "support" / alt_name).exists():
-                    headless_bat = p / "support" / alt_name
-
-            if not headless_bat:
-                candidates = [
-                    Path.home() / "tools" / "ghidra",
-                    Path.home() / "ghidra",
-                    Path(r"C:\ghidra") if os.name == "nt" else Path("/opt/ghidra"),
-                    Path(r"C:\tools\ghidra"),
-                    Path(r"D:\ghidra"),
-                ]
-                for cand_dir in candidates:
-                    cand = cand_dir / "support" / headless_name
-                    if cand.exists():
-                        headless_bat = cand
-                        break
-                    alt = cand_dir / "support" / alt_name
-                    if alt.exists():
-                        headless_bat = alt
-                        break
-
-            if not headless_bat or not headless_bat.exists():
-                raise FileNotFoundError(f"analyzeHeadless executable not found. Configure GHIDRA_INSTALL_DIR or pass 'ghidra_path'.")
-
-            script_dir = SRC_DIR.parent / "ghidra_scripts"
-            post_script = args.get("post_script") or "BintraGhidraBridge.java"
-            from security import GhidraProjectGuard
-
-            proj_name = GhidraProjectGuard.sanitize_project_name(args.get("project_name"))
-            proj_dir = GhidraProjectGuard.resolve_project_dir(args.get("project_dir"))
-            rep_path, gpr_path = GhidraProjectGuard.register_and_prepare_project("ghidra_headless", proj_dir, proj_name)
-
-            script_args = list(args.get("script_args", []))
-            if apply_flag and "apply" not in script_args:
-                script_args.append("apply")
-
-            cmd = [
-                str(headless_bat),
-                proj_dir,
-                proj_name,
-                "-import", bin_path,
-                "-overwrite",
-                "-scriptPath", str(script_dir),
-                "-postScript", post_script
-            ]
-            if args.get("max_cpu"):
-                cmd.extend(["-maxCpu", str(args["max_cpu"])])
-            cmd.extend(script_args)
-
-            try:
-                proc = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=timeout_sec
-                )
-                stdout = proc.stdout or ""
-                stderr = proc.stderr or ""
-                returncode = proc.returncode
-                timed_out = False
-            except subprocess.TimeoutExpired as tex:
-                stdout = tex.stdout or "" if isinstance(tex.stdout, str) else ""
-                stderr = tex.stderr or "" if isinstance(tex.stderr, str) else ""
-                returncode = 124
-                timed_out = True
-
-            # Safely cleanup transient project directory through GhidraProjectGuard & SafeFileAccess
-            project_cleaned = False
-            if delete_proj:
-                project_cleaned = GhidraProjectGuard.clean_transient_project("ghidra_headless", proj_dir, proj_name)
-
-            combined = stdout + "\n" + stderr
-            error_markers = [
-                "SCRIPT ERROR:",
-                "Analysis failed for file:",
-                "GhidraScriptLoadException",
-                "RuntimeException:",
-                "ERROR (GhidraScript)",
-            ]
-            has_script_error = any(m in combined for m in error_markers)
-            effective_exit = returncode if returncode != 0 else (1 if has_script_error else 0)
-
-            # Heuristically parse summary metrics from bridge output if present
-            analyzed_funcs = 0
-            opaque_detected = 0
-            cff_detected = 0
-            for line in stdout.splitlines():
-                if "Proven Invariant Tautologies" in line:
-                    try:
-                        opaque_detected = int(line.split(":")[-1].strip())
-                    except Exception:
-                        pass
-                elif "Control Flow Flattening" in line:
-                    try:
-                        cff_detected = int(line.split(":")[-1].strip())
-                    except Exception:
-                        pass
-                elif "Extracted High P-Code & Full CFG for" in line:
-                    try:
-                        analyzed_funcs = int(line.split("for")[-1].split("/")[0].strip())
-                    except Exception:
-                        pass
+            run_res = GhidraHeadlessRunner.run(
+                binary_path=bin_path,
+                apply=apply_flag,
+                timeout_sec=timeout_sec,
+                delete_project=delete_proj,
+                ghidra_path=args.get("ghidra_path"),
+                post_script=args.get("post_script") or "BintraGhidraBridge.java",
+                project_name=args.get("project_name"),
+                project_dir=args.get("project_dir"),
+                max_cpu=args.get("max_cpu"),
+                script_args=list(args.get("script_args", [])),
+                guard_component="ghidra_headless",
+            )
 
             return {
-                "exit_code": effective_exit,
-                "is_timeout": timed_out,
-                "timeout_seconds": timeout_sec,
-                "script_error_detected": has_script_error,
-                "is_error": effective_exit != 0,
-                "project_name": proj_name,
-                "project_cleaned": project_cleaned,
-                "analyzed_functions_count": analyzed_funcs,
-                "opaque_predicates_detected": opaque_detected,
-                "cff_backbones_detected": cff_detected,
-                "stdout_tail": stdout[-3000:],
-                "stderr_tail": stderr[-2000:],
+                "exit_code": run_res["exit_code"],
+                "is_timeout": run_res["is_timeout"],
+                "timeout_seconds": run_res["timeout_seconds"],
+                "script_error_detected": run_res["script_error_detected"],
+                "is_error": run_res["is_error"],
+                "project_name": run_res["project_name"],
+                "project_cleaned": run_res["project_cleaned"],
+                "analyzed_functions_count": run_res["analyzed_functions_count"],
+                "opaque_predicates_detected": run_res["opaque_predicates_detected"],
+                "cff_backbones_detected": run_res["cff_backbones_detected"],
+                "stdout_tail": run_res["stdout"][-3000:],
+                "stderr_tail": run_res["stderr"][-2000:],
                 "epistemic_classification": "GHIDRA_HEADLESS_BATCH_EXECUTION"
             }
 
@@ -2913,6 +2924,34 @@ class BintraMcpServer:
                     return {"status": "not_found", "function_name": fn_target}
                 return GhidraDeepAnalyzer().slice_data_flow(matched_fn, target_var=args.get("target_var"))
 
+        elif name == "bintra_ghidra_similar_functions":
+            from security import ExecutionGuard, Capability
+            from ghidra_export_store import GhidraExportStore
+            ep = args["export_path"]
+            ExecutionGuard.request_access(
+                component="ghidra_analyzer",
+                operation="search_similar_functions",
+                target=ep,
+                capability=Capability.FILE_READ,
+                access_mode="READ",
+                metadata={"file_path": ep}
+            )
+            ref_fn = args.get("reference_function")
+            ref_pcode = args.get("reference_pcode")
+            if not ref_fn and not ref_pcode:
+                raise ValueError(
+                    "Must provide either 'reference_function' (name/entry in the export) "
+                    "or 'reference_pcode' (external P-code operation stream)."
+                )
+            with GhidraExportStore.from_path(ep) as store:
+                return store.search_similar_functions(
+                    reference_function=ref_fn,
+                    reference_pcode=ref_pcode,
+                    threshold=float(args.get("threshold", 0.75)),
+                    limit=int(args.get("limit", 20)),
+                    min_pcode_ops=int(args.get("min_pcode_ops", 1)),
+                )
+
         elif name == "bintra_fuse_evidence":
             from windows_intelligence.evidence_engine.graph_model import fuse_static_dynamic_ghidra
             pe_res = None
@@ -2920,6 +2959,7 @@ class BintraMcpServer:
             rca_res = None
             cg_res = None
             df_res = None
+            ghidra_provenance = {"status": "NOT_PROVIDED", "verified": False}
             if args.get("binary_path"):
                 from pe_deep_forensics import PeDeepForensicsInspector
                 from windows_intelligence.signature_intelligence import WindowsSignatureIntelligence
@@ -2934,8 +2974,38 @@ class BintraMcpServer:
             if args.get("ghidra_export_path"):
                 from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
                 from ghidra_export_store import GhidraExportStore
+                from analysis_orchestrator import BinaryTriageOrchestrator
                 gp = args["ghidra_export_path"]
                 with GhidraExportStore.from_path(gp) as store:
+                    # Provenance quarantine parity with the triage orchestrator:
+                    # an export whose hash/name does not match the target binary is
+                    # NEVER fused into the evidence graph.
+                    if args.get("binary_path"):
+                        import hashlib
+                        h = hashlib.sha256()
+                        with open(args["binary_path"], "rb") as bf:
+                            while chunk := bf.read(65536):
+                                h.update(chunk)
+                        ghidra_provenance, is_crypto, is_heuristic = (
+                            BinaryTriageOrchestrator.verify_ghidra_export_provenance(
+                                store,
+                                target_sha256=h.hexdigest().lower(),
+                                target_filename=os.path.basename(args["binary_path"]),
+                            )
+                        )
+                        if not (is_crypto or is_heuristic):
+                            return {
+                                "status": "provenance_mismatch",
+                                "epistemic_classification": "MULTI_SIGNAL_EVIDENCE_FUSION",
+                                "ghidra_provenance": ghidra_provenance,
+                                "warning": ghidra_provenance.get("warning", "Ghidra export provenance verification failed."),
+                            }
+                    else:
+                        ghidra_provenance = {
+                            "status": "UNVERIFIED_NO_TARGET_FOR_PROVENANCE",
+                            "verified": False,
+                            "warning": "No binary_path provided; Ghidra export provenance could not be verified.",
+                        }
                     analyzer = GhidraDeepAnalyzer()
                     cg_res = analyzer.build_call_graph_and_xrefs(store, target_function=args.get("function_name"))
                     if args.get("function_name"):
@@ -2948,6 +3018,7 @@ class BintraMcpServer:
                 ghidra_call_graph=cg_res,
                 ghidra_data_flow=df_res,
                 signature_intel=sig_res,
+                ghidra_provenance=ghidra_provenance,
             )
 
         elif name == "bintra_triage_binary":
@@ -2958,6 +3029,8 @@ class BintraMcpServer:
                 ghidra_export_path=args.get("ghidra_export_path"),
                 function_name=args.get("function_name"),
                 include_deobfuscation=bool(args.get("include_deobfuscation", True)),
+                include_sensory=bool(args.get("include_sensory", True)),
+                include_hybrid_scan=bool(args.get("include_hybrid_scan", True)),
                 max_exports=int(args.get("max_exports", 32)),
                 forensics_limit=int(args.get("forensics_limit", 200)),
             )
@@ -2989,7 +3062,7 @@ class BintraMcpServer:
             ghidra_tools = {
                 "bintra_ghidra_headless", "bintra_ghidra_live_bridge", "bintra_match_pcode",
                 "bintra_deobfuscate_pcode", "bintra_ghidra_analyze", "bintra_ghidra_call_graph",
-                "bintra_ghidra_data_flow"
+                "bintra_ghidra_data_flow", "bintra_ghidra_similar_functions"
             }
             entries = []
             for t in TOOLS_REGISTRY:
@@ -3014,8 +3087,8 @@ class BintraMcpServer:
                 "total_tools": len(entries),
                 "tools": entries,
                 "recommended_workflows": {
-                    "static_pe_deep_audit": ["bintra_inspect_binary", "bintra_pe_deep_forensics", "bintra_deobfuscate_binary", "bintra_scan_hybrid"],
-                    "ghidra_deep_re": ["bintra_ghidra_analyze", "bintra_ghidra_call_graph", "bintra_ghidra_data_flow"],
+                    "static_pe_deep_audit": ["bintra_inspect_binary", "bintra_pe_deep_forensics", "bintra_deobfuscate_binary", "bintra_scan_hybrid", "bintra_sensory_audit"],
+                    "ghidra_deep_re": ["bintra_ghidra_analyze", "bintra_ghidra_call_graph", "bintra_ghidra_data_flow", "bintra_ghidra_similar_functions"],
                     "crash_root_cause_fusion": ["bintra_dmp_inspect", "bintra_crash_rca", "bintra_pe_deep_forensics", "bintra_fuse_evidence"],
                     "version_diff": ["bintra_binary_diff"]
                 }

@@ -43,7 +43,7 @@ class TestSecurityRemediation(unittest.TestCase):
         server = BintraMcpServer()
         tools_list = server.handle_tools_list({})["tools"]
         tool_names = [t["name"] for t in tools_list]
-        self.assertEqual(len(tool_names), 50, f"Expected exactly 50 tools, found {len(tool_names)}")
+        self.assertEqual(len(tool_names), 51, f"Expected exactly 51 tools, found {len(tool_names)}")
 
         for t_name in tool_names:
             self.assertIn(t_name, server.TOOL_SECURITY_METADATA, f"Tool '{t_name}' missing from TOOL_SECURITY_METADATA")
@@ -302,7 +302,15 @@ class TestSecurityRemediation(unittest.TestCase):
         self.assertFalse(res["branch_topology_congruent"])
 
     def test_self_update_check_command(self):
-        """Verifies that 'bintra update --check' executes cleanly and verifies remote HEAD."""
+        """Verifies 'bintra update --check' honors its documented outcome contract.
+
+        The command must exit 0 and print one of its documented outcomes:
+        - a fresh clone at origin/main      -> "already at the latest commit"
+        - a clone behind origin/main        -> "New updates available" + "--check" completion
+        - a snapshot/zip without 'origin'   -> graceful "No remote 'origin' configured" skip
+        This contract-based form stays deterministic on zip artifacts, forks, and
+        PR checkouts instead of hard-coding the push-event CI state.
+        """
         import subprocess
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         src_dir = os.path.join(repo_root, "src")
@@ -312,9 +320,18 @@ class TestSecurityRemediation(unittest.TestCase):
         res = subprocess.run([sys.executable, "-m", "cli", "update", "--check"], cwd=repo_root, env=env, capture_output=True, text=True)
         if res.returncode != 0 and ("Git fetch error" in res.stdout or "Could not resolve" in res.stdout or "fatal:" in res.stderr):
             self.skipTest(f"Transient git fetch/network error: {res.stdout.strip()} {res.stderr.strip()}")
-        self.assertEqual(res.returncode, 0)
-        self.assertIn("Checking remote repository for updates", res.stdout)
-        self.assertIn("Bintra is already at the latest commit", res.stdout)
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        documented_outcomes = (
+            "Bintra is already at the latest commit",
+            "New updates available",
+            "No remote 'origin' configured",
+        )
+        self.assertTrue(
+            any(outcome in res.stdout for outcome in documented_outcomes),
+            f"update --check must report a documented outcome, got: {res.stdout.strip()!r}",
+        )
+        if "New updates available" in res.stdout:
+            self.assertIn("Update check completed", res.stdout)
 
     def test_breakout_policy_network_behavioral_rule_consistency(self):
         """Verifies H3 Fix: WeightSpaceCompiler Breakout policy network implements genuine behavioral steering."""

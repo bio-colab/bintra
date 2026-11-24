@@ -3,7 +3,7 @@ name: bintra-etw-telemetry
 description: Inspect Event Tracing for Windows (ETW) sessions/providers and capture process-scoped temporal causality timelines using Bintra native Advapi32 OpenTraceW/ProcessTrace consumer, Event Log polling, and Toolhelp32 module-delta tracking.
 metadata:
   framework: bintra
-  version: "1.0.0"
+  version: "1.1.0"
   tier: runtime-telemetry
 ---
 
@@ -48,7 +48,7 @@ Every captured `EtwEventRecord` carries an explicit `"source"` provenance tag:
   }
 }
 ```
-*(Supports `action`: `"audit"`, `"session"`, `"providers"`, `"instances"` with optional `session_name`, `provider`, `query`, `limit`.)*
+*(Supports `action`: `"audit"`, `"session"`, `"providers"`, `"provider_info"`, `"active_kernel"` with optional `session_name`, `guid`, `query`, `limit`.)*
 
 **CLI Command:**
 ```powershell
@@ -63,7 +63,7 @@ bintra etw-audit --format json
   "name": "bintra_etw_capture",
   "arguments": {
     "session_name": "Bintra_Diagnostic_Trace",
-    "target_pid": 1234,
+    "pid": 1234,
     "duration_seconds": 2.0
   }
 }

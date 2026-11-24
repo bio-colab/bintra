@@ -613,6 +613,82 @@ class GhidraExportStore:
             return int(cur.fetchone()[0])
         return len(self._in_memory.get("functions", [])) if self._in_memory else 0
 
+    def search_similar_functions(
+        self,
+        reference_function: Optional[str] = None,
+        reference_pcode: Optional[List[Dict[str, Any]]] = None,
+        threshold: float = 0.75,
+        limit: int = 20,
+        min_pcode_ops: int = 1,
+    ) -> Dict[str, Any]:
+        """
+        Behavioral nearest-routine search over the whole export.
+
+        Ranks every function in the store against a reference routine using the
+        64-D High P-Code semantic vectorizer (architecture- and
+        optimization-invariant cosine similarity). The reference can be either:
+
+        - ``reference_function``: a function name or entry point that exists in
+          THIS store (self-match is reported but can be excluded), or
+        - ``reference_pcode``: an externally supplied P-code operation stream
+          (e.g. copied from another export, a patched build, or a known-bad sample).
+
+        Returns a ranked match list with cosine similarity, confidence band, and
+        per-match P-code op counts. Functions without P-code data (thunks,
+        externs) are skipped and reported, never silently dropped.
+        """
+        from ghidra_pcode_vectorizer import PcodeSimilarityIndex
+
+        if not reference_function and not reference_pcode:
+            raise ValueError(
+                "Must provide either 'reference_function' (name/entry in this export) "
+                "or 'reference_pcode' (list of P-code operations)."
+            )
+
+        reference_ops: Optional[List[Dict[str, Any]]] = None
+        reference_blocks: Optional[List[Dict[str, Any]]] = None
+        reference_label = None
+        if reference_function:
+            ref_fn = self.get_function(reference_function)
+            if not ref_fn:
+                return {
+                    "status": "not_found",
+                    "reference_function": reference_function,
+                    "matches": [],
+                }
+            reference_ops = PcodeSimilarityIndex._function_pcode_ops(ref_fn)
+            reference_blocks = ref_fn.get("basic_blocks")
+            reference_label = str(ref_fn.get("name") or reference_function)
+            if not reference_ops:
+                return {
+                    "status": "reference_without_pcode",
+                    "reference_function": reference_label,
+                    "matches": [],
+                    "notice": "Reference function carries no P-code operations in this export.",
+                }
+        else:
+            if not isinstance(reference_pcode, list) or not reference_pcode:
+                raise ValueError("'reference_pcode' must be a non-empty list of P-code operations.")
+            reference_ops = reference_pcode
+            reference_label = "<external_pcode_stream>"
+
+        index = PcodeSimilarityIndex(min_pcode_ops=min_pcode_ops)
+        indexed = index.build(self.iter_functions())
+        result = index.search(
+            reference_ops,
+            basic_blocks=reference_blocks,
+            threshold=threshold,
+            limit=limit,
+        )
+        result["status"] = result.get("status", "ok")
+        result["reference"] = {
+            "kind": "export_function" if reference_function else "external_pcode",
+            "label": reference_label,
+        }
+        result["export_path"] = getattr(self, "source_path", None)
+        result["indexed_functions"] = indexed if indexed else result.get("indexed_functions", 0)
+        return result
+
     def iter_functions(self) -> Iterator[Dict[str, Any]]:
         """Streams all functions one-by-one without holding all objects in RAM."""
         if self.is_sqlite:

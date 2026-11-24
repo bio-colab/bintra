@@ -3,7 +3,7 @@ name: bintra-binary-dissection
 description: Inspect, deobfuscate, disassemble, semantically match, and perceptually audit Windows PE32/PE32+ executables (.exe, .dll) or raw machine code hex streams using Bintra. Use when analyzing binary anatomy, ASLR/DEP/CFG mitigations, section entropy, eliminating algebraic opaque predicates and CFF dispatcher loops, matching assembly routines across x86-64 and ARM64, or evaluating the 10 Metaphorical Senses.
 metadata:
   framework: bintra
-  version: "1.0.0"
+  version: "1.1.0"
   tier: binary-analysis
 ---
 
@@ -65,7 +65,7 @@ flowchart TD
 | **Opaque Predicates & CFF** | `bintra_deobfuscate_binary` | `code_hex`: string, `file_path` (opt), `offset` (opt) | Identifies dead conditional jumps, algebraic zeroing, and recovers canonical control flow. |
 | **Raw Bytes at Offset** | `bintra_dump_bytes` | `file_path`: string, `offset`: int\|hex-str, `length`: int (opt, default 64) | Extracts hex preview and ASCII rendering without manual seeking. |
 | **Cross-Arch Matching** | `bintra_match_functions` | `func1_hex`: string, `func2_hex`: string | 16-D opcode/transition histogram matching across x86-64 and ARM64 (heuristic threshold $\ge 0.90$ with scale guard $\ge 0.60$). |
-| **P-Code Semantic Match** | `bintra_match_pcode` | `func1_pcode`: array, `func2_pcode`: array | 64-D Ghidra High P-Code IR cosine matching (`MATCH_THRESHOLD = 0.90`; see `bintra-assessment/EVALUATION.md` for corpus evaluation caveats). |
+| **P-Code Semantic Match** | `bintra_match_pcode` | `func1_pcode`: array, `func2_pcode`: array | 64-D Ghidra High P-Code IR cosine matching (`MATCH_THRESHOLD = 0.90`; empirical accuracy is tracked via repeatable evaluation benchmarks rather than fixed source claims). |
 | **Embedded AI Asset Scan** | `bintra_scan_hybrid` | `file_path`: string | Scans PE `.rsrc`/`.rodata` for embedded DirectML, ONNX, GGUF, or Safetensors. |
 | **10 Senses Cybernetic Audit**| `bintra_sensory_audit` | `file_path`: string (or `code_hex`: string) | Holistic 10-Sense evaluation returning unified telemetry. |
 

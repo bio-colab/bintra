@@ -77,7 +77,7 @@ To unify diverse binary and neural analysis modalities into a cohesive cognitive
 | **4** | **الشم الاستكشافي**<br>`Exploratory Smell` | Detecting distant chemical scents, pheromones, and invisible traces. | Sniffing algebraic opaque predicates, scanning embedded neural inference containers (ONNX, DirectML), and computing Shannon byte entropy. | Opaque predicates detected, embedded AI assets, Shannon entropy (bits/byte). |
 | **5** | **الذوق التمييزي**<br>`Discriminative Taste` | Chemical taste discrimination of nutrients vs. toxic non-food noise. | Discriminating genuine executable machine code from random byte noise, validating x64 REX cross-register zeroing, and P-code semantics. | Signal-to-noise ratio, valid code classification, cross-register false-positive rejection. |
 | **6** | **الحس العميق**<br>`Deep Proprioception` | Internal awareness of body posture, joint angles, and balance. | Instruction-boundary stack frame tracking ($\Delta RSP / RBP$), frame-altering opcode accounting, and pre-surgery amenability awareness. | Cumulative stack delta bytes, frame-altering op count, boundary alignment. |
-| **7** | **حس المكان**<br>`Spatial Sense` | Spatial orientation, mental coordinate projection, and mapping. | Bidirectional virtual coordinate projection ($RVA \leftrightarrow 	ext{File Offset}$), section boundary alignment, and multidimensional tensor slicing. | Coordinate slicing active, RVA-to-Offset spatial mapping accuracy. |
+| **7** | **حس المكان**<br>`Spatial Sense` | Spatial orientation, mental coordinate projection, and mapping. | Bidirectional virtual coordinate projection ($RVA \leftrightarrow        ext{File Offset}$), section boundary alignment, and multidimensional tensor slicing. | Coordinate slicing active, RVA-to-Offset spatial mapping accuracy. |
 | **8** | **التوازن الدهليزي**<br>`Vestibular Balance` | Inner-ear equilibrium, posture maintenance, and upright stability. | PE integrity Checksum recalculation, Frobenius norm equilibrium bounds, and the Keep-on-Improvement rollback gate. | PE Checksum sync engine, Frobenius safety threshold, rollback barrier. |
 | **9** | **الألم المجازي**<br>`Metaphorical Pain (Nociception)` | Protective reflex to noxious stimuli preventing tissue damage. | Pre-mutation hazard reflex that halts execution on stack-destroying patches, DEP section violations, in-place file truncation, or unamenable edits. | Overwrite safety boolean, nociceptive diagnosis, safety reflex triggers. |
 | **10** | **الإحساس بالإيقاع**<br>`Sense of Rhythm (Chronoception)` | Perceiving harmonic cadence, beat intervals, and periodicity. | Measuring dispatcher switch cadence regularity in flattened control flow (CFF), and lag-4 autocorrelation in byte streams. | Dispatcher regularity metric, CFF rhythm detection, byte autocorrelation. |
@@ -150,22 +150,23 @@ bintra/
 ├── src/
 │   ├── cli.py                     # Unified CLI entry point (`bintra`) with self-update
 │   ├── analysis_orchestrator.py   # Unified read-only binary triage & cross-domain evidence orchestrator
-│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`bintra-mcp`, 50 tools, resources, prompts)
+│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`bintra-mcp`, 51 tools, resources, prompts)
 │   ├── binary_neural_engine.py    # PE binary analysis, deobfuscator & patcher
 │   ├── bintra_engine.py       # Weight-space SVD & circuit decompiler
 │   ├── sensory_cortex.py          # 10 Metaphorical Senses evaluation cortex
-│   ├── ghidra_pcode_vectorizer.py # Ghidra P-Code IR continuous vectorizer
+│   ├── ghidra_pcode_vectorizer.py # Ghidra P-Code IR continuous vectorizer & similarity index
 │   ├── ghidra_export_store.py     # Zero-dependency SQLite & JSONL export store & index
+│   ├── ghidra_headless_runner.py  # Shared Ghidra analyzeHeadless execution engine (CLI + MCP)
 │   ├── python_intelligence.py     # Python bytecode & frozen binary forensics
 │   ├── security/                  # ExecutionGuard, AuditLogger & Reference Monitor
 │   └── windows_intelligence/      # Process, Device, Registry & Crash Diagnostics
-├── skills/
-│   └── bintra/ # Agent-native skill specification
+├── skills/                        # 8 agent-native skills (master router + 7 specialists)
 ├── schemas/                       # Agent MCP tool definitions
-├── tests/                         # 252 automated unit, sensory, telemetry & security tests
+├── tests/                         # 440+ automated unit, sensory, telemetry & security tests
 └── docs/                          # Architecture, Roadmap & mathematical foundations
     ├── architecture.md            # Master architecture & formal model
-    └── ROADMAP.md                 # Strategic direction, tech evaluation & roadmap
+    ├── ROADMAP.md                 # Strategic direction, tech evaluation & roadmap
+    └── RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md  # Live memory/ETW/crash pipeline reference
 ```
 
 ---
@@ -238,7 +239,7 @@ bintra sense --hex "55 48 89 e5 90 5d c3"
 
 ## Agent-Native MCP (Model Context Protocol) Integration
 
-`Bintra` ships with a **JSON-RPC 2.0 stdio MCP server** (`bintra-mcp`) offering **50 mediated reverse engineering and Windows intelligence tools** (with MCP tool annotations), **4 live contextual resources** (`bintra://capabilities`, `bintra://security/policy`, `bintra://telemetry/session`, `bintra://workflows/playbooks`), and **4 workflow prompts** (`triage_pe_binary`, `root_cause_crash`, `audit_windows_host`, `diff_binary_versions`) to AI agents (Claude Desktop, Cursor, Antigravity, Windsurf).
+`Bintra` ships with a **JSON-RPC 2.0 stdio MCP server** (`bintra-mcp`) offering **51 mediated reverse engineering and Windows intelligence tools** (with MCP tool annotations and structured `outputSchema` on self-describing tools), **4 live contextual resources** (`bintra://capabilities`, `bintra://security/policy`, `bintra://telemetry/session`, `bintra://workflows/playbooks`), and **5 workflow prompts** (`triage_pe_binary`, `root_cause_crash`, `audit_windows_host`, `diff_binary_versions`, `audit_neural_weights`) to AI agents (Claude Desktop, Cursor, Antigravity, Windsurf). `tools/list` supports MCP 2025-06-18 cursor pagination for token-budgeted agents.
 
 ### 1. Claude Desktop Configuration
 Add the `bintra` server to your `%APPDATA%\Claude\claude_desktop_config.json`:
@@ -370,7 +371,7 @@ bintra update --yes
 
 ### Running the Test Suite
 ```powershell
-# Run the complete test suite (252 unit, sensory, runtime telemetry, and security remediation tests)
+# Run the complete test suite (440+ unit, sensory, runtime telemetry, and security remediation tests)
 python -m unittest discover -s tests -p "test_*.py"
 ```
 

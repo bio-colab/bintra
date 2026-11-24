@@ -3,7 +3,7 @@ name: bintra-live-runtime-analysis
 description: Perform strictly read-only runtime memory inspection (VAD layout, PROCESS_VM_READ value scanning, multi-level pointer path discovery, 4-byte-granularity structure dissection, and MiniDump+VAD crash root-cause analysis) using Bintra Tier-3 tools.
 metadata:
   framework: bintra
-  version: "1.0.0"
+  version: "1.1.0"
   tier: runtime-telemetry
 ---
 
@@ -42,7 +42,7 @@ Use this skill whenever an agent or engineer needs to inspect the virtual memory
 
 ### Modality A: MCP Stateful / Stateless Scanning
 Supported `value_type` values: `int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `int64`, `uint64`, `float`, `double`, `bytes`, `string`.  
-Supported `scan_mode` values: `EXACT_VALUE`, `BETWEEN`, `UNKNOWN_INITIAL`, `INCREASED_VALUE`, `DECREASED_VALUE`, `CHANGED_VALUE`, `UNCHANGED_VALUE`.
+Supported `scan_mode` values: `exact`, `between`, `unknown`, `increased`, `decreased`, `changed`, `unchanged`.
 
 **First Scan:**
 ```json
@@ -51,8 +51,8 @@ Supported `scan_mode` values: `EXACT_VALUE`, `BETWEEN`, `UNKNOWN_INITIAL`, `INCR
   "arguments": {
     "pid": 1234,
     "value_type": "float",
-    "value": "100.0",
-    "scan_mode": "EXACT_VALUE",
+    "target_value": "100.0",
+    "scan_mode": "exact",
     "alignment": 4,
     "writable_only": true,
     "max_results": 200
@@ -67,12 +67,12 @@ Supported `scan_mode` values: `EXACT_VALUE`, `BETWEEN`, `UNKNOWN_INITIAL`, `INCR
   "arguments": {
     "pid": 1234,
     "session_id": "<16-hex-session-id>",
-    "scan_mode": "CHANGED_VALUE",
+    "scan_mode": "changed",
     "value_type": "float"
   }
 }
 ```
-> **Note:** `bytes` and `string` next-scans support `EXACT_VALUE`, `CHANGED_VALUE`, and `UNCHANGED_VALUE` modes cleanly without numeric coercion; ordinal modes (`INCREASED_VALUE`, `DECREASED_VALUE`, `BETWEEN`) are restricted to scalar numeric types.
+> **Note:** `bytes` and `string` next-scans support `exact`, `changed`, and `unchanged` modes cleanly without numeric coercion; ordinal modes (`increased`, `decreased`, `between`) are restricted to scalar numeric types.
 
 ### Modality B: CLI Iterative Scan (Workspace-Confined Session File)
 ```powershell

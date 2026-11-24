@@ -40,7 +40,7 @@ WEIGHT_COMMANDS = {
 }
 ARCHIVED_SCOPE_COMMANDS = {"synthesize-weights"}
 SENSORY_COMMANDS = {"sense", "sensory-audit"}
-GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless", "ghidra-bridge"}
+GHIDRA_COMMANDS = {"match-pcode", "deobfuscate-pcode", "ghidra-plan", "ghidra-analyze", "ghidra-headless", "ghidra-bridge", "ghidra-similar"}
 WIN_INTEL_COMMANDS = {"win-audit", "resolve-deps", "wer-inspect", "diagnose", "win-cmd", "reg-audit", "hw-audit", "port-audit", "hw-tree", "hw-net", "hw-dissect", "net-conns", "driver-audit", "service-audit", "dmp-inspect", "etw-audit", "file-locks", "proc-modules", "dev-match", "vad-inspect", "crash-rca", "etw-capture", "mem-scan", "pointer-scan", "dissect-struct", "evidence-graph", "registry-read", "process-mitigations", "proc-list", "proc-search", "proc-info", "sys-perf", "dev-classes", "dev-list", "dev-search", "dev-info", "reg-read", "reg-search", "reg-export", "reg-import", "sig-verify", "sig-audit", "proc-profile", "process-profile", "leak-audit", "slack-audit", "overlay-inspect", "inspect-slack"}
 
 
@@ -84,6 +84,7 @@ Ghidra P-Code & Symbolic Integration Commands:
   ghidra-analyze    Batch-analyze exported Ghidra P-Code JSON and generate database mutation plan
   ghidra-headless   Launch Ghidra analyzeHeadless with Bintra bridge script to auto-deobfuscate
   ghidra-bridge     Run localhost JSON-RPC 2.0 live bridge daemon connecting to Ghidra
+  ghidra-similar    Behavioral nearest-routine search inside a Ghidra export (64-D P-Code cosine)
 
 Windows System Intelligence & Failure Diagnostic Commands:
   win-audit         Profile host Windows OS build, WOW64 mode, and AppCompatFlags layers
@@ -2380,10 +2381,8 @@ def _dispatch_cli():
             parser.add_argument("--timeout", type=int, default=300, help="Timeout in seconds for headless analysis (default: 300)")
             parser.add_argument("--max-cpu", type=int, default=None, help="Max CPU cores for Ghidra analysis threads")
             parser.add_argument("--keep-project", action="store_true", help="Do not delete temporary Ghidra project files after run")
-            args = parser.parse_args()
+            args = parser.parse_args(sys.argv[2:])
 
-            import subprocess, tempfile, uuid, shutil
-            from pathlib import Path as P
             from security import ExecutionGuard, Capability
 
             ExecutionGuard.request_access(
@@ -2404,106 +2403,43 @@ def _dispatch_cli():
                     metadata={"target": "ghidra_project_database"}
                 )
 
-            ghidra_path_val = args.ghidra_path or os.environ.get("GHIDRA_INSTALL_DIR") or os.environ.get("GHIDRA_HOME")
-            headless_name = "analyzeHeadless.bat" if os.name == "nt" else "analyzeHeadless"
-            alt_name = "analyzeHeadless" if os.name == "nt" else "analyzeHeadless.bat"
-
-            headless_cmd = None
-            if ghidra_path_val:
-                p = P(ghidra_path_val)
-                cand = p / "support" / headless_name
-                if cand.exists():
-                    headless_cmd = cand
-                elif (p / "support" / alt_name).exists():
-                    headless_cmd = p / "support" / alt_name
-
-            if not headless_cmd:
-                candidates = [
-                    P.home() / "tools" / "ghidra",
-                    P.home() / "ghidra",
-                    P(r"C:\ghidra") if os.name == "nt" else P("/opt/ghidra"),
-                    P(r"C:\tools\ghidra"),
-                    P(r"D:\ghidra"),
-                ]
-                for cand_dir in candidates:
-                    cand = cand_dir / "support" / headless_name
-                    if cand.exists():
-                        headless_cmd = cand
-                        break
-                    alt = cand_dir / "support" / alt_name
-                    if alt.exists():
-                        headless_cmd = alt
-                        break
-
-            if not headless_cmd:
-                print(f"Error: {headless_name} not found. Please set GHIDRA_INSTALL_DIR or pass --ghidra-path.")
-                sys.exit(1)
-
-            from security import GhidraProjectGuard
-
-            repo_root = P(__file__).resolve().parent.parent
-            script_dir = repo_root / "ghidra_scripts"
-            proj_name = GhidraProjectGuard.sanitize_project_name(args.project_name)
-            proj_dir = GhidraProjectGuard.resolve_project_dir(args.project_dir)
-            rep_path, gpr_path = GhidraProjectGuard.register_and_prepare_project("cli", proj_dir, proj_name)
-            script_args = ["apply"] if args.apply else []
-
-            cmd_args = [
-                str(headless_cmd),
-                proj_dir,
-                proj_name,
-                "-import", args.binary,
-                "-overwrite",
-                "-scriptPath", str(script_dir),
-                "-postScript", args.post_script
-            ]
-            if args.max_cpu:
-                cmd_args.extend(["-maxCpu", str(args.max_cpu)])
-            cmd_args.extend(script_args)
+            from ghidra_headless_runner import GhidraHeadlessRunner
 
             print(f"[Bintra] Launching Ghidra Headless Analyzer...")
             print(f"[Bintra] Binary: {args.binary}")
-            print(f"[Bintra] Script: {script_dir / args.post_script}")
-            print(f"[Bintra] Project: {proj_name} in {proj_dir}")
+            print(f"[Bintra] Script: {args.post_script}")
 
             try:
-                res = subprocess.run(
-                    cmd_args,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=args.timeout
+                run_res = GhidraHeadlessRunner.run(
+                    binary_path=args.binary,
+                    apply=args.apply,
+                    timeout_sec=args.timeout,
+                    delete_project=not args.keep_project,
+                    ghidra_path=args.ghidra_path,
+                    post_script=args.post_script,
+                    project_name=args.project_name,
+                    project_dir=args.project_dir,
+                    max_cpu=args.max_cpu,
+                    guard_component="cli",
                 )
-                stdout = res.stdout or ""
-                stderr = res.stderr or ""
-                returncode = res.returncode
-            except subprocess.TimeoutExpired as tex:
-                stdout = tex.stdout or "" if isinstance(tex.stdout, str) else ""
-                stderr = tex.stderr or "" if isinstance(tex.stderr, str) else ""
+            except FileNotFoundError as fnf:
+                print(f"Error: {fnf}")
+                sys.exit(1)
+
+            if run_res["is_timeout"]:
                 sys.stderr.write(f"[Bintra] Ghidra Headless Analyzer timed out after {args.timeout}s.\n")
-                returncode = 124
+            if run_res["project_cleaned"]:
+                print(f"[Bintra] Transient Ghidra project '{run_res['project_name']}' safely cleaned.")
 
-            if not args.keep_project:
-                cleaned = GhidraProjectGuard.clean_transient_project("cli", proj_dir, proj_name)
-                if cleaned:
-                    print(f"[Bintra] Transient Ghidra project '{proj_name}' safely cleaned.")
-
-            print(stdout, end="")
-            if stderr:
-                sys.stderr.write(stderr)
-            combined = stdout + "\n" + stderr
-            error_markers = [
-                "SCRIPT ERROR:",
-                "Analysis failed for file:",
-                "GhidraScriptLoadException",
-                "RuntimeException:",
-                "ERROR (GhidraScript)",
-            ]
-            has_script_error = any(m in combined for m in error_markers)
-            if returncode != 0 or has_script_error:
-                sys.stderr.write(f"[Bintra] Ghidra Headless Analyzer failed (rc={returncode}, script_error={has_script_error})\n")
-                sys.exit(returncode if returncode != 0 else 1)
+            print(run_res["stdout"], end="")
+            if run_res["stderr"]:
+                sys.stderr.write(run_res["stderr"])
+            if run_res["is_error"]:
+                sys.stderr.write(
+                    f"[Bintra] Ghidra Headless Analyzer failed (rc={run_res['raw_returncode']}, "
+                    f"script_error={run_res['script_error_detected']})\n"
+                )
+                sys.exit(run_res["raw_returncode"] if run_res["raw_returncode"] != 0 else 1)
             sys.exit(0)
 
         elif cmd == "ghidra-bridge":
@@ -2572,36 +2508,38 @@ def _dispatch_cli():
                     print(json.dumps({"is_running": False, "error": str(e)}, indent=2))
                 return
 
+            def _bridge_rpc(client, method, payload):
+                """Single bridge RPC path: remote client first, active in-process bridge as fallback."""
+                try:
+                    return client.call_rpc(method, payload)
+                except Exception as rpc_exc:
+                    act = get_active_bridge()
+                    if act and act.is_running:
+                        fallback_fn = {
+                            "bintra.inject_crash_rca": act.inject_crash_rca,
+                            "bintra.inject_vad_snapshot": act.inject_vad_snapshot,
+                            "bintra.inject_structure_dissection": act.inject_structure_dissection,
+                            "bintra.inject_pointer_chains": act.inject_pointer_chains,
+                        }.get(method)
+                        if fallback_fn:
+                            return fallback_fn(payload.get("rca_report") or payload.get("vad_snapshot")
+                                               or payload.get("struct_report") or payload.get("pointer_report"))
+                    return {"status": "error", "message": f"Bridge communication error: {rpc_exc}"}
+
             if args.annotate_crash:
                 from windows_intelligence import CrashRootCauseAnalyzer
                 rca = CrashRootCauseAnalyzer.analyze_crash(args.annotate_crash)
                 client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
-                try:
-                    inj = client.call_rpc("bintra.inject_crash_rca", {"rca_report": rca})
-                    print(json.dumps(inj, indent=2, ensure_ascii=False))
-                except Exception as e:
-                    act = get_active_bridge()
-                    if act and act.is_running:
-                        inj = act.inject_crash_rca(rca)
-                        print(json.dumps(inj, indent=2, ensure_ascii=False))
-                    else:
-                        print(json.dumps({"status": "error", "message": f"Bridge communication error: {e}"}, indent=2))
+                inj = _bridge_rpc(client, "bintra.inject_crash_rca", {"rca_report": rca})
+                print(json.dumps(inj, indent=2, ensure_ascii=False))
                 return
 
             if args.annotate_vad:
                 from windows_intelligence import VirtualMemoryInspector
                 snap = VirtualMemoryInspector.inspect_process(args.annotate_vad)
                 client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
-                try:
-                    inj = client.call_rpc("bintra.inject_vad_snapshot", {"vad_snapshot": snap.to_dict()})
-                    print(json.dumps(inj, indent=2, ensure_ascii=False))
-                except Exception as e:
-                    act = get_active_bridge()
-                    if act and act.is_running:
-                        inj = act.inject_vad_snapshot(snap.to_dict())
-                        print(json.dumps(inj, indent=2, ensure_ascii=False))
-                    else:
-                        print(json.dumps({"status": "error", "message": f"Bridge communication error: {e}"}, indent=2))
+                inj = _bridge_rpc(client, "bintra.inject_vad_snapshot", {"vad_snapshot": snap.to_dict()})
+                print(json.dumps(inj, indent=2, ensure_ascii=False))
                 return
 
             if args.annotate_struct:
@@ -2618,16 +2556,8 @@ def _dispatch_cli():
                     struct_rep = StructureDissector.dissect(target_pid, base_addr, size=args.size)
 
                 client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
-                try:
-                    inj = client.call_rpc("bintra.inject_structure_dissection", {"struct_report": struct_rep})
-                    print(json.dumps(inj, indent=2, ensure_ascii=False))
-                except Exception as e:
-                    act = get_active_bridge()
-                    if act and act.is_running:
-                        inj = act.inject_structure_dissection(struct_rep)
-                        print(json.dumps(inj, indent=2, ensure_ascii=False))
-                    else:
-                        print(json.dumps({"status": "error", "message": f"Bridge communication error: {e}"}, indent=2))
+                inj = _bridge_rpc(client, "bintra.inject_structure_dissection", {"struct_report": struct_rep})
+                print(json.dumps(inj, indent=2, ensure_ascii=False))
                 return
 
             if args.annotate_pointers:
@@ -2644,16 +2574,8 @@ def _dispatch_cli():
                     ptr_rep = PointerScanner.find_pointer_paths(target_pid, target_addr, max_depth=args.depth)
 
                 client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
-                try:
-                    inj = client.call_rpc("bintra.inject_pointer_chains", {"pointer_report": ptr_rep})
-                    print(json.dumps(inj, indent=2, ensure_ascii=False))
-                except Exception as e:
-                    act = get_active_bridge()
-                    if act and act.is_running:
-                        inj = act.inject_pointer_chains(ptr_rep)
-                        print(json.dumps(inj, indent=2, ensure_ascii=False))
-                    else:
-                        print(json.dumps({"status": "error", "message": f"Bridge communication error: {e}"}, indent=2))
+                inj = _bridge_rpc(client, "bintra.inject_pointer_chains", {"pointer_report": ptr_rep})
+                print(json.dumps(inj, indent=2, ensure_ascii=False))
                 return
 
             # Default / --start: start bridge server in foreground
@@ -2883,6 +2805,62 @@ def _dispatch_cli():
             sys.exit(1)
         print(json.dumps(GhidraDeepAnalyzer().slice_data_flow(fn_obj, target_var=ns.var), indent=2))
 
+    elif cmd == "ghidra-similar":
+        ap = argparse.ArgumentParser(
+            prog="bintra ghidra-similar",
+            description="Behavioral nearest-routine search: rank all functions in a Ghidra export against a reference (64-D High P-Code cosine similarity)"
+        )
+        ap.add_argument("--input", required=True, help="Path to Ghidra export (.json, .jsonl, or .db)")
+        ap.add_argument("--function", default=None, help="Reference function name or entry address inside the export")
+        ap.add_argument("--pcode-file", default=None, help="Path to a JSON file containing an external P-code operation stream (list of ops or {pcode_ops: [...]})")
+        ap.add_argument("--threshold", type=float, default=0.75, help="Minimum cosine similarity to report (default 0.75)")
+        ap.add_argument("--limit", type=int, default=20, help="Maximum matches to return (default 20)")
+        ap.add_argument("--min-pcode-ops", type=int, default=1, help="Minimum P-code ops for indexed functions (default 1; raise to skip thunks)")
+        ap.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
+        ns = ap.parse_args(sys.argv[2:])
+        if not ns.function and not ns.pcode_file:
+            ap.error("Either --function (in-export reference) or --pcode-file (external P-code stream) is required")
+        from ghidra_export_store import GhidraExportStore
+        ref_pcode = None
+        if ns.pcode_file:
+            with open(ns.pcode_file, "r", encoding="utf-8") as pf:
+                pcode_payload = json.load(pf)
+            if isinstance(pcode_payload, dict):
+                ref_pcode = pcode_payload.get("pcode_ops") or pcode_payload.get("pcode")
+            elif isinstance(pcode_payload, list):
+                ref_pcode = pcode_payload
+            if not isinstance(ref_pcode, list) or not ref_pcode:
+                print(json.dumps({"status": "error", "message": "P-code reference file must contain a non-empty list of operations."}, indent=2))
+                sys.exit(1)
+        store = GhidraExportStore.from_path(ns.input)
+        sim_res = store.search_similar_functions(
+            reference_function=ns.function,
+            reference_pcode=ref_pcode,
+            threshold=ns.threshold,
+            limit=ns.limit,
+            min_pcode_ops=ns.min_pcode_ops,
+        )
+        if ns.format == "md":
+            md_lines = ["# Bintra P-Code Similar Function Search", ""]
+            md_lines.append(f"- **Export:** `{ns.input}`")
+            md_lines.append(f"- **Reference:** `{ns.function or 'external P-code stream'}`")
+            md_lines.append(f"- **Indexed functions:** {sim_res.get('indexed_functions', 0)} (skipped: {sim_res.get('skipped_functions', 0)})")
+            md_lines.append(f"- **Threshold:** {sim_res.get('threshold', ns.threshold)}")
+            md_lines.append("")
+            if sim_res.get("matches"):
+                md_lines.append("| Rank | Similarity | Match | Confidence | Function | Entry | P-Code Ops |")
+                md_lines.append("| :---: | :---: | :---: | :---: | :--- | :--- | :---: |")
+                for rank_i, m in enumerate(sim_res["matches"], 1):
+                    md_lines.append(
+                        f"| {rank_i} | {m['pcode_cosine_similarity']:.4f} | {'YES' if m['is_semantic_match'] else 'no'} "
+                        f"| {m['confidence']} | `{m['function_name']}` | `{m.get('entry_point', 'N/A')}` | {m.get('pcode_op_count', 'N/A')} |"
+                    )
+            else:
+                md_lines.append("_No functions met the similarity threshold._")
+            print("\n".join(md_lines))
+        else:
+            print(json.dumps(sim_res, indent=2))
+
     elif cmd == "fuse-evidence":
         ap = argparse.ArgumentParser(prog="bintra fuse-evidence")
         ap.add_argument("--binary", default=None)
@@ -2911,6 +2889,8 @@ def _dispatch_cli():
         ap.add_argument("--ghidra", default=None, help="Optional Ghidra export (.json, .jsonl, .db)")
         ap.add_argument("--function", default=None, help="Optional target function name for Ghidra slicing")
         ap.add_argument("--skip-deobf", action="store_true", help="Skip entry-point obfuscation analysis")
+        ap.add_argument("--skip-sensory", action="store_true", help="Skip 10-sense Sensory Cortex perception stage")
+        ap.add_argument("--skip-hybrid-scan", action="store_true", help="Skip embedded neural inference asset scan")
         ap.add_argument("--format", choices=["json", "md"], default="json", help="Output format (json or deterministic md report)")
         ap.add_argument("--output", "-o", default=None, help="Optional destination path to write output report")
         ns = ap.parse_args(sys.argv[2:])
@@ -2925,6 +2905,8 @@ def _dispatch_cli():
             ghidra_export_path=ns.ghidra,
             function_name=ns.function,
             include_deobfuscation=not ns.skip_deobf,
+            include_sensory=not ns.skip_sensory,
+            include_hybrid_scan=not ns.skip_hybrid_scan,
         )
         if ns.format == "md":
             out_content = BinaryTriageOrchestrator.generate_markdown_report(res)

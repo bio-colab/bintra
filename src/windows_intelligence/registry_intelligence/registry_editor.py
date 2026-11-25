@@ -17,8 +17,7 @@ import sys
 import re
 import struct
 import time
-import datetime
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Optional
 
 try:
     import winreg

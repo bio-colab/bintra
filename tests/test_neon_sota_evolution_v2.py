@@ -411,7 +411,7 @@ class TestMcpServerEvolution(unittest.TestCase):
         cls.tmp_dir = tempfile.mkdtemp(prefix="bintra_mcp_evo_")
         cls._scope = ExecutionGuard.scoped_session(workspace_dir=cls.tmp_dir)
         cls._scope.__enter__()
-        from mcp_server import BintraMcpServer, TOOLS_REGISTRY
+        from mcp_server import BintraMcpServer
         cls.srv = BintraMcpServer(workspace_root=cls.tmp_dir)
         cls.export_path = os.path.join(cls.tmp_dir, "export.json")
         with open(cls.export_path, "w", encoding="utf-8") as f:
@@ -677,7 +677,6 @@ class TestGhidraHeadlessRunner(unittest.TestCase):
         self.assertTrue(res["is_error"])
 
     def test_timeout_handled_as_124(self):
-        import subprocess as sp
         from ghidra_headless_runner import GhidraHeadlessRunner
         win_script = "@echo off\nping -n 6 127.0.0.1 >nul\n"
         launcher = self._fake_binary(

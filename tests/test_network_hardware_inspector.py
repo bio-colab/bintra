@@ -19,7 +19,6 @@ import sys
 import socket
 import struct
 import ctypes
-from ctypes import wintypes
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch

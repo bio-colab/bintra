@@ -7,7 +7,6 @@ Tests for Bintra Hardware Introspection, Port Diagnostics, and Bus Topology:
 4. MCP Server tool registrations (bintra_port_audit, bintra_hardware_topology).
 """
 
-import os
 import sys
 import unittest
 from pathlib import Path

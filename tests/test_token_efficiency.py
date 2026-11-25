@@ -14,7 +14,6 @@ for p in (SRC_DIR, BENCH_DIR):
 from mcp_server import BintraMcpServer, TOOLS_REGISTRY
 from token_telemetry import (
     TokenSessionTracker,
-    compact_tool_schema,
     estimate_cost_usd,
     estimate_tokens,
     measure_serialization_waste,

@@ -8,7 +8,7 @@ import re
 import csv
 import io
 import sys
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 # Elevate CSV field size limit to handle large truncated telemetry streams
 try:
@@ -68,7 +68,6 @@ class OutputParsers:
         }
 
         current_header = None
-        current_rows = []
 
         for line in lines:
             # Check for header rows

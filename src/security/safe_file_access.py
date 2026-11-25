@@ -7,9 +7,8 @@ and validates open file handle physical paths against authorized targets.
 """
 
 import os
-import sys
 from typing import Optional, Union
-from .execution_guard import ExecutionGuard, SecurityViolationError
+from .execution_guard import ExecutionGuard
 from .capability_registry import Capability
 from .path_identity import PathIdentity
 

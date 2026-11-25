@@ -21,7 +21,6 @@ import urllib.request
 import tempfile
 import subprocess
 import unittest
-from pathlib import Path
 
 SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if SRC_DIR not in sys.path:
@@ -129,7 +128,6 @@ class TestAuditRemediations(unittest.TestCase):
         """F3/F8: Verifies all 34 MCP tools schema, hex offsets, bintra_wsp_audit, bintra_memory_scan, and KeyError formatting."""
         from mcp_server import BintraMcpServer
         import numpy as np
-        from bintra_engine import SafetensorsHandler
 
         srv = BintraMcpServer()
         tools = srv.handle_tools_list({})["tools"]
@@ -300,7 +298,7 @@ class TestAuditRemediations(unittest.TestCase):
     def test_f11_f12_epistemic_honesty_and_truncation(self):
         """F11/F12: Verifies probe-trace steps>=1 + simulation label, amenability column clamping, and deobfuscation truncation."""
         import numpy as np
-        from bintra_engine import ActivationTraceProber, AmenabilityDiagnostic, SafetensorsHandler
+        from bintra_engine import ActivationTraceProber, AmenabilityDiagnostic
         from binary_neural_engine import ContinuousDeobfuscator
 
         with tempfile.TemporaryDirectory() as ws_dir:
@@ -344,7 +342,7 @@ class TestAuditRemediations(unittest.TestCase):
         import unittest.mock as mock
         import numpy as np
         from mcp_server import BintraMcpServer
-        from security import ExecutionGuard, TargetScope, AuditLogger, SafeFileAccess, TargetMutationError
+        from security import ExecutionGuard, TargetScope, SafeFileAccess, TargetMutationError
         from binary_neural_engine import SurgicalBinaryPatcher
         from bintra_engine import SafetensorsHandler, WeightSecurityAuditor
 
@@ -643,7 +641,9 @@ class TestAuditRemediations(unittest.TestCase):
         import mcp_server as mcp_mod
 
         self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 51)
-        dispatch_src = inspect.getsource(mcp_mod.BintraMcpServer.dispatch_tool)
+        # Tool handlers live in per-domain mixins; inspect the handler bound for bintra_memory_scan.
+        from bintra_mcp.tools import TOOL_HANDLERS
+        dispatch_src = inspect.getsource(getattr(mcp_mod.BintraMcpServer, TOOL_HANDLERS["bintra_memory_scan"]))
 
         with tempfile.TemporaryDirectory() as td:
             ws_dir = os.path.join(td, "ws")

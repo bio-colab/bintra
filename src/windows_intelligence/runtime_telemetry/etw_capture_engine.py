@@ -8,17 +8,16 @@ Strictly non-intrusive and read-only; governed by ExecutionGuard and Capability.
 """
 
 import os
-import sys
 import time
 import ctypes
 import threading
 from ctypes import wintypes
-from typing import Dict, Any, List, Optional, Tuple, Callable
+from typing import Dict, Any, List, Optional, Tuple
 from collections import deque, OrderedDict
 
 from security.execution_guard import ExecutionGuard
 from security.capability_registry import Capability
-from .etw_controller import EtwController, WNODE_HEADER, EVENT_TRACE_PROPERTIES
+from .etw_controller import EVENT_TRACE_PROPERTIES
 
 
 # Win32 ETW Control Constants
@@ -928,7 +927,6 @@ class EtwTimelineCorrelator:
                 })
 
         # 2. Look for memory allocation / deallocation churn
-        recent_allocs = [e for e in timeline_events if e.get("event_type") in ("VIRTUAL_ALLOC", "HEAP_ALLOC")]
         recent_frees = [e for e in timeline_events if e.get("event_type") in ("VIRTUAL_FREE", "HEAP_FREE")]
 
         if recent_frees:

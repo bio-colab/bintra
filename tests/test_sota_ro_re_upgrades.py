@@ -11,9 +11,8 @@ from binary_neural_engine import BinaryFormatInspector, SemanticFunctionMatcher,
 from bintra_engine import SafetensorsHandler, SubspaceAnalyzer
 from ghidra_pcode_vectorizer import PcodeFunctionMatcher, PcodeVectorizer
 from security.execution_guard import SecurityViolationError
-from security.safe_file_access import SafeFileAccess
 from security.safe_subprocess import SafeSubprocessBroker
-from windows_intelligence.evidence_engine.graph_model import EvidenceEdge, EvidenceGraph, EvidenceNode
+from windows_intelligence.evidence_engine.graph_model import EvidenceGraph
 from windows_intelligence.runtime_telemetry.minidump_parser import MiniDumpParser
 
 

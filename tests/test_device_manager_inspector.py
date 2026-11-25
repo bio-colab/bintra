@@ -14,8 +14,7 @@ Validates:
 import os
 import sys
 import unittest
-import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 # Ensure src is on sys.path
 SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))

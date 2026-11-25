@@ -15,8 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SRC_DIR = REPO_ROOT / "src"
@@ -30,9 +29,7 @@ from security.audit_logger import AuditLogger  # noqa: E402
 from security.capability_registry import Capability  # noqa: E402
 from security.execution_guard import (  # noqa: E402
     ExecutionGuard,
-    OutOfScopeError,
     SecurityViolationError,
-    TargetMutationError,
 )
 from security.safe_subprocess import SafeSubprocessBroker  # noqa: E402
 

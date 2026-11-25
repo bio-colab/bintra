@@ -6,7 +6,7 @@ Forbids KEY_WRITE, KEY_ALL_ACCESS, and registry mutation APIs.
 """
 
 import sys
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any
 
 if sys.platform == "win32":
     import winreg

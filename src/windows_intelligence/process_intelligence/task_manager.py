@@ -19,7 +19,7 @@ from ctypes import wintypes
 from typing import Dict, Any, List, Optional
 
 
-from .process_inventory import PROCESSENTRY32W, ProcessInventory
+from .process_inventory import ProcessInventory
 from ..system_introspection.process_inspector import PROCESS_MEMORY_COUNTERS, ProcessMitigationInspector
 
 
@@ -182,7 +182,6 @@ class TaskManagerInspector:
         used_phys_gb = round((mem.ullTotalPhys - mem.ullAvailPhys) / (1024 ** 3), 2)
 
         total_page_gb = round(mem.ullTotalPageFile / (1024 ** 3), 2)
-        avail_page_gb = round(mem.ullAvailPageFile / (1024 ** 3), 2)
         committed_gb = round((mem.ullTotalPageFile - mem.ullAvailPageFile) / (1024 ** 3), 2)
         commit_pct = round((committed_gb / total_page_gb * 100.0), 1) if total_page_gb > 0 else 0.0
 
@@ -530,7 +529,6 @@ class TaskManagerInspector:
         psapi = cls._get_psapi()
 
         from .process_inventory import ProcessInventory
-        from ..system_introspection.process_inspector import ProcessMitigationInspector
         from .service_process_mapper import ServiceProcessMapper
         from .module_inventory import ModuleInventory
         from ..system_introspection.network_inspector import NetworkHardwareInspector

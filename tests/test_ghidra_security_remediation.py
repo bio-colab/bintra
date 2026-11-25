@@ -21,10 +21,8 @@ import unittest
 from ghidra_export_store import GhidraExportStore
 from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
 from security import (
-    Capability,
     ExecutionGuard,
     GhidraProjectGuard,
-    SafeFileAccess,
     SecurityViolationError,
     TargetScope,
 )

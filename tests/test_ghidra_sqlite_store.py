@@ -4,7 +4,6 @@ import shutil
 import tempfile
 import unittest
 from ghidra_export_store import GhidraExportStore
-from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
 
 
 class TestGhidraExportStore(unittest.TestCase):

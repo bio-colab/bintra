@@ -10,7 +10,7 @@ and RmGetList, and immediately closes with RmEndSession. NEVER invokes RmShutdow
 import os
 import ctypes
 from ctypes import wintypes
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
 
 CCH_RM_SESSION_KEY = 32

@@ -11,30 +11,19 @@ and Hybrid Binary Dissection (DirectML, WinML, ONNX Runtime, GGUF, TFLite, Safet
 import sys
 import ast
 import os
-import json
 import struct
 import hashlib
-import argparse
 import zipfile
 import mmap
-import math
 import tempfile
 import io
 from typing import Dict, Any, List, Tuple, Optional, Union
 import numpy as np
 try:
-    import capstone
     from capstone import Cs, CS_ARCH_X86, CS_MODE_64, CS_MODE_32, CS_ARCH_ARM64, CS_MODE_ARM
     HAS_CAPSTONE = True
 except ImportError:
     HAS_CAPSTONE = False
-
-try:
-    from ghidra_pcode_vectorizer import (
-        PcodeVectorizer, PcodeFunctionMatcher, PcodeDeobfuscator, GhidraAnnotationPlanner
-    )
-except ImportError:
-    pass
 
 
 def _ensure_utf8_stdio() -> None:
@@ -421,17 +410,6 @@ class BinaryFormatInspector:
             return result
 
     @staticmethod
-    def _read_cstr(f, file_size: int, offset: int, max_len: int = 256) -> str:
-        if offset < 0 or offset >= file_size:
-            return ""
-        f.seek(offset)
-        buf = f.read(min(max_len, file_size - offset))
-        nul = buf.find(b"\x00")
-        if nul != -1:
-            buf = buf[:nul]
-        return buf.decode("latin-1", errors="ignore")
-
-    @staticmethod
     def _parse_pe_rich_header(f, pe_offset: int) -> Dict[str, Any]:
         if pe_offset <= 0x80 or pe_offset > 65536:
             return {"present": False, "entries": []}
@@ -760,7 +738,7 @@ class BinaryFormatInspector:
             # If bit 0 is 0 (legacy MSVC), descriptor fields and thunks are absolute VAs.
             is_rva = bool(attrs & 1)
 
-            def _to_rva(addr_val: int) -> int:
+            def _to_rva(addr_val: int, is_rva: bool = is_rva) -> int:
                 if is_rva or addr_val == 0:
                     return addr_val
                 if image_base > 0 and addr_val >= image_base:
@@ -1596,7 +1574,6 @@ class ContinuousDeobfuscator:
             else:
                 cadence_regularity = 0.0
 
-        all_detected = sorted(list(detected_states if detected_states else set(c["state_value"] for c in state_comparisons)))
 
         return {
             "has_control_flow_flattening": has_cff,
@@ -2410,7 +2387,7 @@ class SurgicalBinaryPatcher:
         out_abs = os.path.abspath(output_path)
 
         try:
-            from security import PathIdentity, TargetMutationError, OutOfScopeError, ExecutionGuard, Capability
+            from security import PathIdentity, TargetMutationError, ExecutionGuard, Capability
             if PathIdentity.is_same_file(src_abs, out_abs):
                 raise TargetMutationError(
                     f"TARGET_WRITE_FORBIDDEN: In-place binary modification is strictly forbidden by Bintra Safety Policy. Destination '{out_abs}' matches source."
@@ -2872,9 +2849,7 @@ class SensoryCortex:
         code_hex: Optional[str] = None
     ) -> Dict[str, Any]:
         from bintra_engine import (
-            SafetensorsHandler, SubspaceAnalyzer, CircuitDecompiler, WeightPatcher,
-            ActivationTraceProber, NeuralBehaviorVerifier, CrossLayerCircuitAnalyzer,
-            AmenabilityDiagnostic, WeightSecurityAuditor
+            SafetensorsHandler, SubspaceAnalyzer, ActivationTraceProber
         )
         if file_path and not os.path.isfile(file_path):
             # Never fabricate a full sensory report for a target that does not exist.
@@ -3094,69 +3069,9 @@ class SensoryCortex:
 
 
 def main():
-    _ensure_utf8_stdio()
-    parser = argparse.ArgumentParser(description="Bintra Binary Reverse Engineering Engine")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    insp_p = subparsers.add_parser("inspect", help="Inspect executable PE/ELF header")
-    insp_p.add_argument("--file", required=True, help="Path to executable binary")
-
-    deob_p = subparsers.add_parser("deobfuscate", help="Detect and prune opaque predicates in code bytes or binary file")
-    deob_p.add_argument("--hex", default=None, help="Hex-encoded machine code bytes")
-    deob_p.add_argument("--file", default=None, help="Path to executable binary")
-    deob_p.add_argument("--offset", default=None, type=lambda x: int(x, 0), help="File offset to analyze (defaults to entry point)")
-    deob_p.add_argument("--size", "--length", dest="size", default=4096, type=lambda x: int(x, 0), help="Number of bytes to analyze (default 4096)")
-
-    dump_p = subparsers.add_parser("dump", help="Extract and preview raw bytes/assembly at an offset")
-    dump_p.add_argument("--file", required=True, help="Path to executable binary")
-    dump_p.add_argument("--offset", required=True, type=lambda x: int(x, 0), help="File offset (e.g. 0x4e0778)")
-    dump_p.add_argument("--length", default=64, type=int, help="Length in bytes (default 64)")
-
-    match_p = subparsers.add_parser("match", help="Match functions across architectures semantically")
-    match_p.add_argument("--func1", required=True, help="First function bytecode hex")
-    match_p.add_argument("--func2", required=True, help="Second function bytecode hex")
-
-    patch_p = subparsers.add_parser("patch", help="Surgically patch binary file on disk")
-    patch_p.add_argument("--source", required=True, help="Source executable")
-    patch_p.add_argument("--output", required=True, help="Patched executable output")
-    patch_p.add_argument("--offset", required=True, type=lambda x: int(x, 0), help="Byte offset (e.g. 0x1A00)")
-    patch_p.add_argument("--patch-hex", required=True, help="Patch hex bytes")
-    patch_p.add_argument("--enforce-nociception", dest="enforce_nociception", action="store_true", default=True, help="Abort patch if nociceptive pain is high (enabled by default)")
-    patch_p.add_argument("--force", "--no-enforce-nociception", dest="enforce_nociception", action="store_false", help="Bypass nociceptive reflex check")
-
-    hyb_p = subparsers.add_parser("scan-hybrid", help="Scan binary for embedded neural logic assets")
-    hyb_p.add_argument("--file", required=True, help="Path to executable binary")
-
-    args = parser.parse_args()
-
-    if args.command == "inspect":
-        res = BinaryFormatInspector.inspect(args.file)
-        print(json.dumps(res, indent=2))
-    elif args.command == "deobfuscate":
-        if args.hex:
-            code = bytes.fromhex(args.hex.replace(" ", ""))
-            res = ContinuousDeobfuscator.deobfuscate_cfg(code)
-        elif args.file:
-            res = ContinuousDeobfuscator.deobfuscate_file(args.file, offset=args.offset, length=args.size)
-        else:
-            print(json.dumps({"error": "Must provide either --hex or --file for deobfuscation."}))
-            sys.exit(1)
-        print(json.dumps(res, indent=2))
-    elif args.command == "dump":
-        res = SurgicalBinaryPatcher.read_bytes(args.file, args.offset, args.length)
-        print(json.dumps(res, indent=2))
-    elif args.command == "match":
-        res = SemanticFunctionMatcher.match_functions(args.func1, args.func2)
-        print(json.dumps(res, indent=2))
-    elif args.command == "patch":
-        res = SurgicalBinaryPatcher.patch_file(
-            args.source, args.output, args.offset, args.patch_hex,
-            enforce_nociception=args.enforce_nociception
-        )
-        print(json.dumps(res, indent=2))
-    elif args.command == "scan-hybrid":
-        res = HybridBinaryDissector.scan_for_embedded_logic(args.file)
-        print(json.dumps(res, indent=2))
+    """Standalone entry point kept for compatibility; the CLI lives in bintra_cli.commands.binary."""
+    from bintra_cli.commands.binary import run_binary_engine
+    run_binary_engine(sys.argv)
 
 
 if __name__ == "__main__":

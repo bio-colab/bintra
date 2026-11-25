@@ -13,8 +13,7 @@ import socket
 import struct
 import ctypes
 from ctypes import wintypes
-from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, Optional
 
 try:
     import winreg

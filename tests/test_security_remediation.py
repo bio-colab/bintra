@@ -11,8 +11,6 @@ import os
 import sys
 import tempfile
 import json
-import shutil
-import pathlib
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SRC_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "src"))
@@ -24,11 +22,8 @@ from security import (
     Capability,
     AuditLogger,
     AuditIntegrityError,
-    AuditPersistenceError,
-    SecurityViolationError,
     TargetMutationError,
-    OutOfScopeError,
-    PathIdentity
+    OutOfScopeError
 )
 from binary_neural_engine import SurgicalBinaryPatcher
 from bintra_engine import SafetensorsHandler

@@ -9,7 +9,7 @@ import os
 import sys
 import ctypes
 from ctypes import wintypes
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
 
 class PROCESS_MITIGATION_DEP_POLICY(ctypes.Structure):

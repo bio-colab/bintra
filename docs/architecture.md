@@ -239,6 +239,20 @@ graph TD
 5. **استقلالية النظام وعدم فرض تبعيات Sysinternals:**
    الاستغناء عن الأدوات الخارجية بالاعتماد التام على دوال Windows الأصلية (مثل `RstrtMgr.dll` لكشف أقفال الملفات بديلاً لـ `handle.exe`).
 
+## Code Organization (Productionization Pass)
+
+The CLI and MCP front-ends were rebuilt as thin layers over per-domain handlers (measured with radon, verified with a behavioural contract snapshot of 142 CLI invocations and 27 MCP requests):
+
+| Component | Before | After |
+|---|---|---|
+| `cli._dispatch_cli` | 1 function, cyclomatic complexity 422, ~2,600 lines | 20-line dispatcher over `bintra_cli.registry` (lazy `name -> module:handler` table) |
+| `BintraMcpServer.dispatch_tool` | complexity 253, ~1,070 lines | 7-line lookup in `bintra_mcp.tools.TOOL_HANDLERS`; handlers are methods of 7 domain mixins |
+| `TOOLS_REGISTRY` | 1,237-line literal inside `mcp_server.py` | `bintra_mcp/tool_schemas.py` |
+| Engine sub-CLIs | argparse `main()` inside `binary_neural_engine` / `bintra_engine`, reached by rewriting `sys.argv` | `bintra_cli.commands.binary/weights`; handlers normalise a local argv copy; engines keep a compat shim |
+| Write-path policy | copied per command | `bintra_cli.commands._common.guard_output_path()` |
+
+Handler modules are imported only when one of their commands runs, so start-up cost does not grow with the command surface (`bintra --version`: 0.41 s -> 0.10 s).
+
 ## Read-Only Reverse Engineering & Hardware Subsystem Upgrades
 - **PE/COFF Directory Coverage (`src/binary_neural_engine.py`):** `BinaryFormatInspector.inspect()` extracts Rich Header, TLS callbacks, Load Config, Authenticode certificates, and CLR/.NET metadata alongside chunked C-string reads and vectorized checksums.
 - **P-Code & Live Bridge (`src/ghidra_pcode_vectorizer.py`, `src/ghidra_live_bridge.py`):** `PcodeVectorizer.vectorize_high_function()` folds `ControlFlowGraphAnalyzer` cyclomatic complexity and back-edge density into 64-D embeddings; `GhidraLiveBridgeServer` exposes `ghidra.query_cached_functions` with lock-protected LRU state and `deque` command buffering.

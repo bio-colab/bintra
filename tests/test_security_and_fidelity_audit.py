@@ -306,6 +306,104 @@ class TestAuditLoggerIntegrityAndAtomicity(unittest.TestCase):
         os.remove(sealed)
         self.assertFalse(AuditLogger.verify_audit_chain(self.log)["is_valid"])
 
+    def test_tampered_log_never_rotated_silently_and_fsync_enforced(self):
+        """Tamper breaks must fail closed even with rotate_on_corrupt=True, and fsync runs on persist."""
+        import subprocess
+        from security.audit_logger import AuditLogger, AuditIntegrityError
+
+        AuditLogger.set_strict_persistence(False)
+        with mock.patch("security.audit_logger.os.fsync", wraps=os.fsync) as fsync_spy:
+            AuditLogger.log_decision("t", "op", "fsync_target", "ALLOW", "ok")
+        self.assertGreaterEqual(fsync_spy.call_count, 1)
+        AuditLogger.log_decision("t", "op", "second_rec", "ALLOW", "ok")
+
+        # Tamper record on disk
+        with open(self.log, "r", encoding="utf-8") as f:
+            raw = f.read()
+        with open(self.log, "w", encoding="utf-8") as f:
+            f.write(raw.replace("second_rec", "tampered_rec"))
+
+        AuditLogger._journal.clear()
+        AuditLogger._sequence = 0
+        AuditLogger._last_hash = "0" * 64
+        AuditLogger._known_disk_state = None
+        with self.assertRaises(AuditIntegrityError):
+            AuditLogger.ensure_chain_continuity(rotate_on_corrupt=True)
+        self.assertTrue(AuditLogger.is_tamper_detected())
+        self.assertTrue(AuditLogger.is_audit_degraded())
+        # Tamper evidence file MUST still exist (not moved to .legacy!)
+        self.assertTrue(os.path.exists(self.log))
+
+        # Test sudden deletion of active file in-process
+        AuditLogger.clear()
+        del_log = os.path.join(self.tmp, "del_audit.jsonl")
+        AuditLogger.set_log_file(del_log)
+        AuditLogger.log_decision("t", "op", "x", "ALLOW", "ok")
+        os.remove(del_log)
+        with self.assertRaises(AuditIntegrityError):
+            AuditLogger.ensure_chain_continuity(rotate_on_corrupt=True)
+        self.assertTrue(AuditLogger.is_tamper_detected())
+
+        # End-to-end CLI & MCP against a home directory whose active audit.jsonl is tampered
+        home_dir = os.path.join(self.tmp, "tampered_home")
+        log_dir = os.path.join(home_dir, ".bintra", "logs")
+        ws_dir = os.path.join(self.tmp, "ws")
+        os.makedirs(log_dir, exist_ok=True)
+        os.makedirs(ws_dir, exist_ok=True)
+        cli_log = os.path.join(log_dir, "audit.jsonl")
+        AuditLogger.clear()
+        AuditLogger.set_log_file(cli_log)
+        AuditLogger.log_decision("cli", "inspect", "bin.exe", "ALLOW", "ok")
+        AuditLogger.log_decision("cli", "patch", "bin.exe", "ALLOW", "ok2")
+        with open(cli_log, "r", encoding="utf-8") as f:
+            cli_raw = f.read()
+        with open(cli_log, "w", encoding="utf-8") as f:
+            f.write(cli_raw.replace("bin.exe", "tampered.exe"))
+
+        target_bin = os.path.join(self.tmp, "sample.exe")
+        with open(target_bin, "wb") as f:
+            f.write(_minimal_pe_with_bss_and_overlay())
+        env = os.environ.copy()
+        env["HOME"] = home_dir
+        env["USERPROFILE"] = home_dir
+
+        cli_py = os.path.join(SRC_DIR, "cli.py")
+        mut = subprocess.run(
+            [sys.executable, cli_py, "patch-binary", "--file", target_bin, "--output", os.path.join(ws_dir, "out.bin"), "--offset", "0x40", "--patch-hex", "90", "--workspace", ws_dir],
+            env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        )
+        self.assertNotEqual(mut.returncode, 0)
+        mut_json = json.loads(mut.stdout)
+        self.assertTrue(mut_json.get("audit_tamper_detected"))
+        self.assertTrue(os.path.exists(cli_log))
+
+        rd = subprocess.run(
+            [sys.executable, cli_py, "slack-audit", "--file", target_bin],
+            env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        )
+        self.assertEqual(rd.returncode, 0, rd.stderr)
+        rd_json = json.loads(rd.stdout)
+        self.assertTrue(rd_json.get("audit_degraded"))
+        self.assertTrue(rd_json.get("audit_tamper_detected"))
+        self.assertTrue(os.path.exists(cli_log))
+
+        # MCP server on tampered audit log blocks mutating tools & keeps read tools flagged
+        from mcp_server import BintraMcpServer
+        AuditLogger.clear()
+        AuditLogger.set_log_file(cli_log)
+        srv = BintraMcpServer(workspace_root=ws_dir)
+        self.assertTrue(AuditLogger.is_tamper_detected())
+        self.assertTrue(os.path.exists(cli_log))
+        mcp_mut = srv.handle_tools_call({
+            "name": "bintra_patch_binary",
+            "arguments": {"file_path": target_bin, "output_path": os.path.join(ws_dir, "mcp_out.bin"), "offset": 64, "patch_hex": "90"},
+        })
+        self.assertTrue(mcp_mut["isError"])
+        self.assertIn("AUDIT_TAMPER_DETECTED", mcp_mut["structuredContent"]["error"])
+        mcp_rd = srv.handle_tools_call({"name": "bintra_inspect_slack_space", "arguments": {"file_path": target_bin}})
+        self.assertFalse(mcp_rd["isError"])
+        self.assertTrue(mcp_rd["structuredContent"].get("audit_tamper_detected"))
+
 
 class TestMcp20260728ComplianceFixes(unittest.TestCase):
     def test_discover_result_and_cache_hints_and_jsonrpc_checks(self):
@@ -320,7 +418,7 @@ class TestMcp20260728ComplianceFixes(unittest.TestCase):
                 "_meta": {
                     "io.modelcontextprotocol/protocolVersion": "2026-07-28",
                     "io.modelcontextprotocol/clientInfo": {"name": "TestClient", "version": "2.0"},
-                    "io.modelcontextprotocol/clientCapabilities": {"roots": {}},
+                    "io.modelcontextprotocol/clientCapabilities": {"roots": {"listChanged": True}},
                 }
             },
         })
@@ -332,20 +430,276 @@ class TestMcp20260728ComplianceFixes(unittest.TestCase):
         self.assertEqual(res["_meta"]["io.modelcontextprotocol/serverInfo"]["name"], "bintra")
         self.assertEqual(srv.current_client_info["name"], "TestClient")
 
+        # Stateless capability isolation: subsequent 2026-07-28 request must not inherit prior capabilities
+        ping_r = srv._handle_single_request({
+            "jsonrpc": "2.0",
+            "id": "p1",
+            "method": "ping",
+            "params": {
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientCapabilities": {},
+                }
+            },
+        })
+        self.assertEqual(ping_r["result"]["resultType"], "complete")
+        self.assertEqual(ping_r["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"], "bintra")
+        self.assertEqual(srv.current_client_capabilities, {})
+
+        # Paginated tools/list MUST keep resultType, ttlMs, and cacheScope per schema/2026-07-28
         tl = srv.handle_tools_list({})
+        self.assertEqual(tl["resultType"], "complete")
         self.assertEqual(tl["cacheScope"], "public")
         self.assertIn("ttlMs", tl)
         tl_page = srv.handle_tools_list({"cursor": "0"})
-        self.assertNotIn("ttlMs", tl_page)
+        self.assertEqual(tl_page["resultType"], "complete")
+        self.assertEqual(tl_page["cacheScope"], "public")
+        self.assertEqual(tl_page["ttlMs"], 3600000)
+        self.assertIn("nextCursor", tl_page)
+
+        rl = srv.handle_resources_list({})
+        self.assertEqual(rl["resultType"], "complete")
+        self.assertEqual(rl["cacheScope"], "public")
+        pl = srv.handle_prompts_list({})
+        self.assertEqual(pl["resultType"], "complete")
+        pg = srv.handle_prompts_get({"name": "audit_windows_host", "arguments": {"focus": "all"}})
+        self.assertEqual(pg["resultType"], "complete")
+        tc_err = srv.handle_tools_call({"name": "bintra_list_capabilities", "arguments": {"platform_filter": "invalid_choice"}})
+        self.assertTrue(tc_err["isError"])
+        self.assertEqual(tc_err["resultType"], "complete")
 
         priv_res = srv.handle_resources_read({"uri": "bintra://security/policy"})
+        self.assertEqual(priv_res["resultType"], "complete")
         self.assertEqual(priv_res["cacheScope"], "private")
         self.assertEqual(priv_res["ttlMs"], 0)
 
+        # JSON-RPC validation: missing jsonrpc, non-object params, invalid 2026 _meta, null id under 2026
+        missing_jsonrpc = srv._handle_single_request({"id": 10, "method": "ping"})
+        self.assertEqual(missing_jsonrpc["error"]["code"], -32600)
         bad_ver = srv._handle_single_request({"jsonrpc": "1.0", "id": 1, "method": "ping"})
         self.assertEqual(bad_ver["error"]["code"], -32600)
         bad_method = srv._handle_single_request({"jsonrpc": "2.0", "id": 2})
         self.assertEqual(bad_method["error"]["code"], -32600)
+        bad_params = srv._handle_single_request({"jsonrpc": "2.0", "id": 3, "method": "ping", "params": "invalid"})
+        self.assertEqual(bad_params["error"]["code"], -32602)
+        missing_caps = srv._handle_single_request({
+            "jsonrpc": "2.0", "id": 4, "method": "ping",
+            "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28"}},
+        })
+        self.assertEqual(missing_caps["error"]["code"], -32602)
+        null_id_2026 = srv._handle_single_request({
+            "jsonrpc": "2.0", "id": None, "method": "ping",
+            "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}}},
+        })
+        self.assertEqual(null_id_2026["error"]["code"], -32600)
+
+
+class TestEndToEndGhidraProvenanceAndRcaSlack(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="bintra_e2e_audit_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_ghidra_dict_varnodes_multi_sink_end_to_end_and_provenance_tamper(self):
+        """Validates real Ghidra dict Varnodes from slice_data_flow through Orchestrator/MCP/Graph and sidecar manifest tampering."""
+        import hashlib
+        from analysis_orchestrator import BinaryTriageOrchestrator
+        from ghidra_export_store import GhidraExportStore
+        from windows_intelligence.evidence_engine.graph_model import evaluate_data_flow_crash_causality
+
+        pe_bytes = _minimal_pe_with_bss_and_overlay()
+        pe_path = os.path.join(self.tmp, "app.exe")
+        with open(pe_path, "wb") as f:
+            f.write(pe_bytes)
+        target_sha = hashlib.sha256(pe_bytes).hexdigest()
+
+        # Real Ghidra dict varnode style with TWO sinks: sinks[0] is unrelated; sinks[1] at 0x140001050 crashes on RAX!
+        export_payload = {
+            "program_name": "app.exe",
+            "image_base": "0x140000000",
+            "sha256": target_sha,
+            "functions": [
+                {
+                    "name": "ProcessFrame",
+                    "entry_point": "0x140001000",
+                    "size": 0x100,
+                    "pcode_ops": [
+                        {
+                            "opcode": "CALL",
+                            "address": "0x140001010",
+                            "inputs": [{"kind": "register", "name": "RCX", "repr": "reg:RCX"}],
+                            "output": {"kind": "register", "name": "RDX", "repr": "reg:RDX", "def_id": "0x140001010:0"},
+                        },
+                        {
+                            "opcode": "STORE",  # First sink: unrelated!
+                            "address": "0x140001020",
+                            "inputs": [
+                                {"kind": "register", "name": "RDX", "repr": "reg:RDX", "def_id": "0x140001010:0"},
+                                {"kind": "register", "name": "RBX", "repr": "reg:RBX"},
+                            ],
+                            "output": None,
+                        },
+                        {
+                            "opcode": "LOAD",  # Source feeding the crashing RAX pointer
+                            "address": "0x140001040",
+                            "inputs": [{"kind": "register", "name": "RSI", "repr": "reg:RSI"}],
+                            "output": {"kind": "register", "name": "RAX", "repr": "reg:RAX", "def_id": "0x140001040:0"},
+                        },
+                        {
+                            "opcode": "STORE",  # Second sink: exact crash location!
+                            "address": "0x140001050",
+                            "inputs": [
+                                {"kind": "register", "name": "RAX", "repr": "reg:RAX", "def_id": "0x140001040:0"},
+                                {"kind": "constant", "repr": "const:0x0"},
+                            ],
+                            "output": None,
+                        },
+                    ],
+                }
+            ],
+        }
+        exp_path = os.path.join(self.tmp, "app_ghidra.json")
+        with open(exp_path, "w", encoding="utf-8") as f:
+            json.dump(export_payload, f)
+        content_sha = BinaryTriageOrchestrator.compute_ghidra_export_content_sha256(export_payload)
+        sidecar = exp_path + ".provenance.json"
+        with open(sidecar, "w", encoding="utf-8") as sf:
+            json.dump({"target_sha256": target_sha, "export_content_sha256": content_sha}, sf)
+
+        # Build valid crash dump dict at 0x140001050 (fault_rva 0x1050) without explicitly naming function
+        from mcp_server import BintraMcpServer
+        dmp_stub = os.path.join(self.tmp, "crash.dmp")
+        # Minimal valid MDMP triggering crash RCA at 0x140001050 (verified via dump memory bytes `48 c7 00 00 00 00 00`)
+        code_mov = b"\x48\xc7\x00\x00\x00\x00\x00"  # mov qword ptr [rax], 0
+        dmp_buf = bytearray(0x900)
+        struct.pack_into("<IIIIII", dmp_buf, 0, 0x504D444D, 0xA793, 5, 0x40, 0, 0)
+        struct.pack_into("<III", dmp_buf, 0x40, 7, 56, 0x80)    # SystemInfo
+        struct.pack_into("<III", dmp_buf, 0x4C, 6, 168, 0xC0)   # Exception
+        struct.pack_into("<III", dmp_buf, 0x58, 4, 112, 0x180)  # ModuleList
+        struct.pack_into("<III", dmp_buf, 0x64, 5, 20, 0x240)   # MemoryList
+        struct.pack_into("<III", dmp_buf, 0x70, 16, 64, 0x280)  # MemoryInfoList (Stream 16 VAD!)
+        # SystemInfo arch=9 (x64)
+        struct.pack_into("<HHHH", dmp_buf, 0x80, 9, 6, 0, 0)
+        # Exception Stream (168B at 0xC0): "<IIIIQQII15QII" -> thread_id=1, code=C0000005, addr=0x140001050, num_params=2, params=[1, 0x200000000], ctx=(1232, 0x300)
+        exc_params = [1, 0x200000000] + [0] * 13
+        struct.pack_into("<IIIIQQII15QII", dmp_buf, 0xC0, 1, 0, 0xC0000005, 0, 0, 0x140001050, 2, 0, *exc_params, 1232, 0x300)
+        # x64 ThreadContext at 0x300: rip at +248, rax=0x200000000 at +120
+        struct.pack_into("<Q", dmp_buf, 0x300 + 248, 0x140001050)
+        struct.pack_into("<Q", dmp_buf, 0x300 + 120, 0x200000000)
+        # Module app.exe base=0x140000000 size=0x10000
+        struct.pack_into("<I", dmp_buf, 0x180, 1)
+        struct.pack_into("<QIIII", dmp_buf, 0x184, 0x140000000, 0x10000, 0, 0, 0x200)
+        name_u = "C:\\t\\app.exe".encode("utf-16-le")
+        struct.pack_into("<I", dmp_buf, 0x200, len(name_u))
+        dmp_buf[0x204:0x204 + len(name_u)] = name_u
+        # MemoryList: capture code bytes at 0x140001050 stored at rva 0x260
+        struct.pack_into("<I", dmp_buf, 0x240, 1)
+        struct.pack_into("<QII", dmp_buf, 0x244, 0x140001050, len(code_mov), 0x260)
+        dmp_buf[0x260:0x260 + len(code_mov)] = code_mov
+        # Stream 16 MemoryInfoList: 1 entry confirming 0x200000000 is MEM_FREE (0x10000)
+        struct.pack_into("<IIQ", dmp_buf, 0x280, 16, 48, 1)
+        struct.pack_into("<QQIIQIII", dmp_buf, 0x290, 0x200000000, 0, 0, 0, 0x1000, 0x10000, 0x1, 0)
+        with open(dmp_stub, "wb") as df:
+            df.write(dmp_buf)
+
+        srv = BintraMcpServer(workspace_root=self.tmp)
+        fused_resp = srv.handle_tools_call({
+            "name": "bintra_fuse_evidence",
+            "arguments": {"binary_path": pe_path, "dmp_path": dmp_stub, "ghidra_export_path": exp_path},
+        })
+        self.assertFalse(fused_resp["isError"], fused_resp)
+        graph = fused_resp["structuredContent"]["fused_graph"]
+        slice_edges = [e for e in graph["edges"] if e["relation"] == "EXPLAINS_DATA_PROVENANCE"]
+        self.assertEqual(len(slice_edges), 1, graph["edges"])
+        self.assertEqual(slice_edges[0]["metadata"]["verification_level"], "CAUSALLY_VALIDATED")
+        self.assertGreaterEqual(slice_edges[0]["metadata"]["epistemic_confidence"], 0.90)
+
+        # Verify BinaryTriageOrchestrator end-to-end auto-locates enclosing function and proves CAUSALLY_VALIDATED
+        triage_res = BinaryTriageOrchestrator.triage_binary(
+            file_path=pe_path, dmp_path=dmp_stub, ghidra_export_path=exp_path, include_deobfuscation=False
+        )
+        triage_edges = [e for e in triage_res["evidence_graph"]["edges"] if e["relation"] == "EXPLAINS_DATA_PROVENANCE"]
+        self.assertEqual(len(triage_edges), 1, triage_res["evidence_graph"]["edges"])
+        self.assertTrue(triage_res["artifacts"]["ghidra_data_flow"]["slice_anchor_matched"])
+        self.assertEqual(triage_res["stage_statuses"]["ghidra_analysis"]["provenance"]["content_integrity"], "VERIFIED_INDEPENDENT_MANIFEST")
+
+        # Direct check: provenance + slice_anchor_matched on wrong sink must NOT give CAUSALLY_VALIDATED
+        bad_df = {
+            "function": "ProcessFrame",
+            "sinks_sample": [{"address": "0x140001050", "inputs": ["reg:RAX"]}],
+            "sources_sample": [],
+            "backward_slice": [{"address": "0x140001010", "output": "reg:RDX", "inputs": ["reg:RCX"]}],
+            "sliced_from_address": "0x140001020",
+        }
+        bad_c = evaluate_data_flow_crash_causality(
+            bad_df,
+            {"fault_virtual_address": "0x140001050", "fault_rva": "0x1050", "culprit_register": "RAX"},
+            provenance={"status": "VERIFIED_CRYPTOGRAPHIC_HASH"},
+        )
+        self.assertEqual(bad_c["level"], "CAUSAL_HYPOTHESIS")
+
+        # Tamper function data in export while leaving target sha256 intact -> must be quarantined via sidecar!
+        export_payload["functions"][0]["name"] = "EvilRenamed"
+        with open(exp_path, "w", encoding="utf-8") as f:
+            json.dump(export_payload, f)
+        with GhidraExportStore.from_path(exp_path) as store:
+            prov, is_crypto, is_heur = BinaryTriageOrchestrator.verify_ghidra_export_provenance(
+                store, target_sha256=target_sha, target_filename="app.exe"
+            )
+        self.assertFalse(is_crypto)
+        self.assertFalse(is_heur)
+        self.assertEqual(prov["status"], "PROVENANCE_CONTENT_TAMPERED")
+
+    def test_crash_rca_stream16_vs_partial_dump_and_truncated_slack(self):
+        """Partial dumps must not claim UNMAPPED/WILD_OR_FREED_POINTER without Stream 16/VAD; truncated docs must not claim CLEAN_EXACT_EOF."""
+        from windows_intelligence.runtime_telemetry.crash_rca_engine import CrashRootCauseAnalyzer
+        from windows_intelligence.evidence_engine.binary_slack_inspector import BinarySlackInspector
+
+        partial_dump = {
+            "status": "success",
+            "modules": [{"name": "m.exe", "base_address": "0x400000", "size": 0x1000}],
+            "memory_ranges": [],
+            "vad_regions": [],
+            "exception_info": {
+                "exception_code": "0xC0000005",
+                "fault_module": "m.exe",
+                "fault_offset": "0x100",
+                "access_violation_details": {"access_type": "READ", "target_virtual_address": "0x55550000"},
+                "thread_registers": {"arch": "x64"},
+            },
+        }
+        rca_partial = CrashRootCauseAnalyzer.analyze_crash(partial_dump)
+        self.assertEqual(rca_partial["memory_spatial_classification"]["status"], "NOT_CAPTURED_IN_PARTIAL_DUMP")
+        self.assertNotEqual(rca_partial["memory_spatial_classification"]["category"], "UNMAPPED_DYNAMIC_MEMORY")
+
+        # With Stream 16 MEM_FREE (0x10000), unmapped pointer IS confirmed!
+        confirmed_free = dict(partial_dump, vad_regions=[{"base_int": 0x55550000, "size": 0x1000, "state": "0x10000", "protect": "0x1"}])
+        rca_free = CrashRootCauseAnalyzer.analyze_crash(confirmed_free)
+        self.assertEqual(rca_free["memory_spatial_classification"]["status"], "CONFIRMED_UNMAPPED_MEMORY")
+
+        # Truncated JSON / XML / RTF / Generic must NEVER return CLEAN_EXACT_EOF
+        j_path = os.path.join(self.tmp, "big.json")
+        x_path = os.path.join(self.tmp, "big.xml")
+        r_path = os.path.join(self.tmp, "big.rtf")
+        g_path = os.path.join(self.tmp, "big.bin")
+        with open(j_path, "wb") as f:
+            f.write(b'{"a":1}' + b" " * 64)
+        with open(x_path, "wb") as f:
+            f.write(b"<root/>" + b" " * 64)
+        with open(r_path, "wb") as f:
+            f.write(b"{\\rtf1 hi}" + b" " * 64)
+        with open(g_path, "wb") as f:
+            f.write(b"\x01\x02" * 64)
+
+        with mock.patch.object(BinarySlackInspector, "MAX_JSON_READ", 8), \
+             mock.patch.object(BinarySlackInspector, "MAX_DOCUMENT_READ", 12), \
+             mock.patch.object(BinarySlackInspector, "MAX_OVERLAY_SAMPLE", 16):
+            for fp in (j_path, x_path, r_path, g_path):
+                res = BinarySlackInspector.inspect_file(fp)
+                self.assertTrue(res["sample_truncated"], (fp, res))
+                self.assertEqual(res["status"], "partial", (fp, res))
+                self.assertNotEqual(res["slack_type"], "CLEAN_EXACT_EOF", (fp, res))
 
 
 if __name__ == "__main__":

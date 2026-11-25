@@ -46,6 +46,27 @@ jobs:
       run: |
         python src/cli.py match --func1 "55 48 89 e5 89 7d fc 8b 45 fc 83 c0 01 5d c3" --func2 "55 48 89 e5 8d 47 01 5d c3"
 
+    - name: Build Wheel & Verify Installed Entrypoints
+      shell: python
+      run: |
+        import glob, json, os, shutil, subprocess, sys, tempfile
+        out_dir = tempfile.mkdtemp(prefix="bintra_whl_")
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "wheel", ".", "--no-deps", "-w", out_dir], check=True)
+            whls = glob.glob(os.path.join(out_dir, "*.whl"))
+            assert whls, "No wheel produced"
+            subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", whls[0]], check=True)
+            subprocess.run(["bintra", "--version"], cwd=tempfile.gettempdir(), check=True)
+            req = json.dumps({
+                "jsonrpc": "2.0", "id": 1, "method": "server/discover",
+                "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}}},
+            }) + "\n"
+            proc = subprocess.run(["bintra-mcp"], input=req, capture_output=True, text=True, cwd=tempfile.gettempdir(), check=True)
+            res = json.loads(proc.stdout)["result"]
+            assert res["resultType"] == "complete" and "2026-07-28" in res["supportedVersions"], res
+        finally:
+            shutil.rmtree(out_dir, ignore_errors=True)
+
   test-linux:
     name: Linux Graceful-Degradation CI (Ubuntu 3.12)
     runs-on: ubuntu-latest
@@ -73,3 +94,24 @@ jobs:
     - name: Run Cross-Platform & Degradation Test Suite
       run: |
         python -m unittest discover -s tests -p "test_*.py" -v
+
+    - name: Build Wheel & Verify Installed Entrypoints
+      shell: python
+      run: |
+        import glob, json, os, shutil, subprocess, sys, tempfile
+        out_dir = tempfile.mkdtemp(prefix="bintra_whl_")
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "wheel", ".", "--no-deps", "-w", out_dir], check=True)
+            whls = glob.glob(os.path.join(out_dir, "*.whl"))
+            assert whls, "No wheel produced"
+            subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", whls[0]], check=True)
+            subprocess.run(["bintra", "--version"], cwd=tempfile.gettempdir(), check=True)
+            req = json.dumps({
+                "jsonrpc": "2.0", "id": 1, "method": "server/discover",
+                "params": {"_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {}}},
+            }) + "\n"
+            proc = subprocess.run(["bintra-mcp"], input=req, capture_output=True, text=True, cwd=tempfile.gettempdir(), check=True)
+            res = json.loads(proc.stdout)["result"]
+            assert res["resultType"] == "complete" and "2026-07-28" in res["supportedVersions"], res
+        finally:
+            shutil.rmtree(out_dir, ignore_errors=True)

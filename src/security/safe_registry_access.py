@@ -6,15 +6,17 @@ Forbids KEY_WRITE, KEY_ALL_ACCESS, and registry mutation APIs.
 """
 
 import sys
-from typing import Dict, Any
+from contextlib import contextmanager
+from typing import Any, Dict, Iterator, Optional, Tuple
 
 if sys.platform == "win32":
     import winreg
 else:
     winreg = None
 
-from .execution_guard import ExecutionGuard
 from .capability_registry import Capability
+from .config import resolve_winreg_hive_map
+from .execution_guard import ExecutionGuard
 
 
 class SafeRegistryAccess:
@@ -22,39 +24,39 @@ class SafeRegistryAccess:
     Authorized read-only Registry query gateway mediated by ExecutionGuard.
     """
 
-    HIVE_MAP = {
-        "HKLM": getattr(winreg, "HKEY_LOCAL_MACHINE", 0x80000002) if winreg else 0x80000002,
-        "HKEY_LOCAL_MACHINE": getattr(winreg, "HKEY_LOCAL_MACHINE", 0x80000002) if winreg else 0x80000002,
-        "HKCU": getattr(winreg, "HKEY_CURRENT_USER", 0x80000001) if winreg else 0x80000001,
-        "HKEY_CURRENT_USER": getattr(winreg, "HKEY_CURRENT_USER", 0x80000001) if winreg else 0x80000001,
-        "HKCR": getattr(winreg, "HKEY_CLASSES_ROOT", 0x80000000) if winreg else 0x80000000,
-        "HKEY_CLASSES_ROOT": getattr(winreg, "HKEY_CLASSES_ROOT", 0x80000000) if winreg else 0x80000000,
-    }
+    HIVE_MAP: Dict[str, int] = resolve_winreg_hive_map()
+
+    @classmethod
+    @contextmanager
+    def _open_readonly_key(cls, root: str, subkey: str) -> Iterator[Tuple[Optional[Any], Optional[Dict[str, Any]]]]:
+        if not winreg:
+            yield None, {"status": "unsupported", "error": "winreg is only available on Windows"}
+            return
+
+        hive = cls.HIVE_MAP.get(str(root).upper())
+        if not hive:
+            yield None, {"status": "error", "error": f"Unknown registry hive '{root}'"}
+            return
+
+        sam = winreg.KEY_READ | getattr(winreg, "KEY_WOW64_64KEY", 0x0100)
+        with winreg.OpenKey(hive, subkey, 0, sam) as key:
+            yield key, None
 
     @classmethod
     def query_value(cls, root: str, subkey: str, value_name: str) -> Dict[str, Any]:
-        """
-        Reads a single registry value safely with KEY_READ rights.
-        """
-        target_repr = f"{root}\\{subkey}\\{value_name}"
+        """Reads a single registry value safely with KEY_READ rights."""
         ExecutionGuard.request_access(
             component="safe_registry_access",
             operation="query_value",
-            target=target_repr,
+            target=f"{root}\\{subkey}\\{value_name}",
             capability=Capability.REGISTRY_READ,
-            access_mode="QUERY"
+            access_mode="QUERY",
         )
 
-        if not winreg:
-            return {"status": "unsupported", "error": "winreg is only available on Windows"}
-
-        hive = cls.HIVE_MAP.get(root.upper())
-        if not hive:
-            return {"status": "error", "error": f"Unknown registry hive '{root}'"}
-
         try:
-            sam = winreg.KEY_READ | getattr(winreg, "KEY_WOW64_64KEY", 0x0100)
-            with winreg.OpenKey(hive, subkey, 0, sam) as key:
+            with cls._open_readonly_key(root, subkey) as (key, err_resp):
+                if err_resp is not None:
+                    return err_resp
                 val, val_type = winreg.QueryValueEx(key, value_name)
                 return {
                     "status": "success",
@@ -62,7 +64,7 @@ class SafeRegistryAccess:
                     "subkey": subkey,
                     "value_name": value_name,
                     "value": val,
-                    "value_type": val_type
+                    "value_type": val_type,
                 }
         except FileNotFoundError:
             return {"status": "not_found", "value": None}
@@ -73,29 +75,20 @@ class SafeRegistryAccess:
 
     @classmethod
     def enumerate_values(cls, root: str, subkey: str) -> Dict[str, Any]:
-        """
-        Enumerates all values under a registry key using KEY_READ.
-        """
-        target_repr = f"{root}\\{subkey}"
+        """Enumerates all values under a registry key using KEY_READ."""
         ExecutionGuard.request_access(
             component="safe_registry_access",
             operation="enumerate_values",
-            target=target_repr,
+            target=f"{root}\\{subkey}",
             capability=Capability.REGISTRY_READ,
-            access_mode="QUERY"
+            access_mode="QUERY",
         )
 
-        if not winreg:
-            return {"status": "unsupported", "error": "winreg is only available on Windows"}
-
-        hive = cls.HIVE_MAP.get(root.upper())
-        if not hive:
-            return {"status": "error", "error": f"Unknown registry hive '{root}'"}
-
-        values = {}
+        values: Dict[str, Any] = {}
         try:
-            sam = winreg.KEY_READ | getattr(winreg, "KEY_WOW64_64KEY", 0x0100)
-            with winreg.OpenKey(hive, subkey, 0, sam) as key:
+            with cls._open_readonly_key(root, subkey) as (key, err_resp):
+                if err_resp is not None:
+                    return err_resp
                 idx = 0
                 while True:
                     try:

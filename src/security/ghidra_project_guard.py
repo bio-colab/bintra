@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import os
 import re
-import tempfile
+import threading
 import uuid
 from typing import Optional, Set, Tuple
 
 from .capability_registry import Capability
+from .config import default_ghidra_projects_dir
 from .execution_guard import ExecutionGuard, SecurityViolationError
 from .path_identity import PathIdentity
 from .safe_file_access import SafeFileAccess
@@ -30,10 +31,11 @@ class GhidraProjectGuard:
     authorized workspace boundaries and cannot perform arbitrary filesystem mutations or deletions.
     """
 
-    _PROJECT_NAME_REGEX = re.compile(r"^[a-zA-Z0-9_\-]+$")
+    _PROJECT_NAME_REGEX = re.compile(r"^[a-zA-Z0-9_\-]+\Z")
     _MAX_NAME_LENGTH = 64
 
-    # Tracks canonical (project_dir, project_name) tuples created within the current session
+    _state_lock = threading.Lock()
+    # Tracks canonical (normcase(project_dir), project_name) tuples created within the current session
     _session_created_projects: Set[Tuple[str, str]] = set()
 
     @classmethod
@@ -70,14 +72,12 @@ class GhidraProjectGuard:
             if scope and getattr(scope, "workspace_dir", None):
                 target_dir = os.path.join(scope.workspace_dir, "ghidra_projects")
             else:
-                user_home = os.environ.get("USERPROFILE") or os.environ.get("HOME") or tempfile.gettempdir()
-                target_dir = os.path.join(user_home, ".bintra", "workspace", "ghidra_projects")
+                target_dir = default_ghidra_projects_dir()
         else:
             target_dir = str(requested_dir).strip()
 
         can_dir = PathIdentity.canonicalize(target_dir)
 
-        # Enforce workspace boundary if an active security scope is registered
         if scope:
             if not scope.is_inside_workspace(can_dir):
                 raise SecurityViolationError(
@@ -95,7 +95,7 @@ class GhidraProjectGuard:
         cls,
         component: str,
         proj_dir: str,
-        proj_name: str
+        proj_name: str,
     ) -> Tuple[str, str]:
         """
         Prepares and registers a Ghidra project directory before execution.
@@ -105,14 +105,13 @@ class GhidraProjectGuard:
         can_proj_dir = PathIdentity.canonicalize(proj_dir)
         clean_name = cls.sanitize_project_name(proj_name)
 
-        # Request write access to create the project directory
         ExecutionGuard.request_access(
             component=component,
             operation="create_ghidra_project",
             target=can_proj_dir,
             capability=Capability.WORKSPACE_WRITE,
             access_mode="WRITE",
-            metadata={"project_name": clean_name}
+            metadata={"project_name": clean_name},
         )
 
         os.makedirs(can_proj_dir, exist_ok=True)
@@ -120,10 +119,9 @@ class GhidraProjectGuard:
         rep_path = os.path.join(can_proj_dir, f"{clean_name}.rep")
         gpr_path = os.path.join(can_proj_dir, f"{clean_name}.gpr")
 
-        # Record in session provenance
-        cls._session_created_projects.add((can_proj_dir.lower(), clean_name))
+        with cls._state_lock:
+            cls._session_created_projects.add((os.path.normcase(can_proj_dir), clean_name))
 
-        # Register paths with TargetScope so SafeFileAccess allows cleanup
         scope = ExecutionGuard.get_current_scope()
         if scope:
             scope.record_session_file(can_proj_dir)
@@ -137,7 +135,7 @@ class GhidraProjectGuard:
         cls,
         component: str,
         proj_dir: str,
-        proj_name: str
+        proj_name: str,
     ) -> bool:
         """
         Safely cleans up a transient Ghidra project (.rep directory and .gpr file).
@@ -149,12 +147,10 @@ class GhidraProjectGuard:
         except Exception:
             return False
 
-        key = (can_proj_dir.lower(), proj_name)
-
-        # Enforce session provenance
-        if key not in cls._session_created_projects:
-            # Not created in this session - refuse deletion
-            return False
+        key = (os.path.normcase(can_proj_dir), proj_name)
+        with cls._state_lock:
+            if key not in cls._session_created_projects:
+                return False
 
         rep_dir = os.path.join(can_proj_dir, f"{proj_name}.rep")
         gpr_file = os.path.join(can_proj_dir, f"{proj_name}.gpr")
@@ -167,12 +163,12 @@ class GhidraProjectGuard:
         except Exception:
             pass
 
-        # Verify true absence on disk
         rep_gone = not os.path.exists(rep_dir)
         gpr_gone = not os.path.exists(gpr_file)
 
         if rep_gone and gpr_gone:
-            cls._session_created_projects.discard(key)
+            with cls._state_lock:
+                cls._session_created_projects.discard(key)
             return True
 
         return False

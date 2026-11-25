@@ -332,6 +332,13 @@ class TestSecurityKernelSmoke(_IsolatedSecurityTestBase):
             data = SafeFileAccess.read_bytes(self.target_file, offset=2, length=4)
             self.assertEqual(data, b"\x90\x00BI")
 
+            with self.assertRaises(ValueError):
+                SafeFileAccess.read_bytes(self.target_file, offset=-1)
+            with self.assertRaises(ValueError):
+                SafeFileAccess.read_bytes(self.target_file, length=-5)
+            with self.assertRaises(IsADirectoryError):
+                SafeFileAccess.read_bytes(self.target_dir)
+
             ws_txt = os.path.join(self.workspace_dir, "notes", "summary.txt")
             written_path = SafeFileAccess.write_workspace_file(ws_txt, "hello smoke")
             self.assertEqual(SafeFileAccess.read_text(written_path), "hello smoke")
@@ -373,16 +380,25 @@ class TestSecurityKernelSmoke(_IsolatedSecurityTestBase):
                 ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(proc_res["handle"])
             img_path = SafeProcessAccess.query_process_image_path(os.getpid())
             self.assertTrue(img_path and os.path.basename(img_path).lower().endswith("python.exe"))
+            bad_pid = SafeProcessAccess.open_process_for_query(-1)
+            self.assertEqual(bad_pid["status"], "error")
+            self.assertIsNone(bad_pid["handle"])
         else:
             reg_res = SafeRegistryAccess.query_value("HKLM", "SOFTWARE", "Test")
             self.assertEqual(reg_res["status"], "error")
 
     def test_safe_subprocess_and_ghidra_guard(self) -> None:
+        denials_before = len(AuditLogger.get_denials())
         with self.assertRaises(SecurityViolationError):
             SafeSubprocessBroker.execute_catalog_command("nonexistent_catalog_cmd")
 
         with self.assertRaises(SecurityViolationError):
-            SafeSubprocessBroker.execute_catalog_command("ipconfig_all", extra_flags=[";whoami"])
+            SafeSubprocessBroker.execute_catalog_command("task_list", extra_flags=[";whoami"])
+
+        self.assertGreaterEqual(len(AuditLogger.get_denials()), denials_before + 2)
+
+        with self.assertRaises(ValueError):
+            SafeSubprocessBroker.run_bounded_process([sys.executable, "-c", "pass"], timeout=0)
 
         proc_ok = SafeSubprocessBroker.run_bounded_process(
             [sys.executable, "-c", "print('smoke_ok')"],
@@ -404,6 +420,8 @@ class TestSecurityKernelSmoke(_IsolatedSecurityTestBase):
         with ExecutionGuard.scoped_session(self.target_file, self.workspace_dir):
             with self.assertRaises(ValueError):
                 GhidraProjectGuard.sanitize_project_name("bad name/..")
+            with self.assertRaises(ValueError):
+                GhidraProjectGuard.sanitize_project_name("proj\nevil")
             self.assertEqual(GhidraProjectGuard.sanitize_project_name("smoke_proj-1"), "smoke_proj-1")
             resolved = GhidraProjectGuard.resolve_project_dir(None)
             self.assertTrue(PathIdentity.is_within_directory(resolved, self.workspace_dir))

@@ -6,11 +6,16 @@ Forbids PROCESS_TERMINATE, PROCESS_VM_WRITE, memory injection, and thread hijack
 """
 
 import sys
-import ctypes
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
-from .execution_guard import ExecutionGuard
+from ._win32 import (
+    PROCESS_QUERY_LIMITED_INFORMATION,
+    close_handle_quiet,
+    open_process_limited,
+    query_process_image_path_from_handle,
+)
 from .capability_registry import Capability
+from .execution_guard import ExecutionGuard
 
 
 class SafeProcessAccess:
@@ -18,22 +23,21 @@ class SafeProcessAccess:
     Authorized read-only Process inspection gateway mediated by ExecutionGuard.
     """
 
-    # Win32 Constants
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    PROCESS_QUERY_LIMITED_INFORMATION = PROCESS_QUERY_LIMITED_INFORMATION
     PROCESS_QUERY_INFORMATION = 0x0400
 
     # Strictly Prohibited Hazardous Access Masks
     FORBIDDEN_PROCESS_RIGHTS = (
-        0x0001 |  # PROCESS_TERMINATE
-        0x0002 |  # PROCESS_CREATE_THREAD
-        0x0008 |  # PROCESS_VM_OPERATION
-        0x0010 |  # PROCESS_VM_READ
-        0x0020 |  # PROCESS_VM_WRITE
-        0x0040 |  # PROCESS_DUP_HANDLE
-        0x0080 |  # PROCESS_CREATE_PROCESS
-        0x0100 |  # PROCESS_SET_QUOTA
-        0x0200 |  # PROCESS_SET_INFORMATION
-        0x001F0FFF  # PROCESS_ALL_ACCESS
+        0x0001  # PROCESS_TERMINATE
+        | 0x0002  # PROCESS_CREATE_THREAD
+        | 0x0008  # PROCESS_VM_OPERATION
+        | 0x0010  # PROCESS_VM_READ
+        | 0x0020  # PROCESS_VM_WRITE
+        | 0x0040  # PROCESS_DUP_HANDLE
+        | 0x0080  # PROCESS_CREATE_PROCESS
+        | 0x0100  # PROCESS_SET_QUOTA
+        | 0x0200  # PROCESS_SET_INFORMATION
+        | 0x001F0FFF  # PROCESS_ALL_ACCESS
     )
 
     @classmethod
@@ -47,37 +51,30 @@ class SafeProcessAccess:
             operation="open_process_for_query",
             target=f"PID:{pid}",
             capability=Capability.PROCESS_QUERY,
-            access_mode="QUERY"
+            access_mode="QUERY",
         )
 
         if sys.platform != "win32":
             return {"status": "unsupported", "error": "Process handle inspection requires Windows"}
 
-        try:
-            from ctypes import wintypes
-            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-            k32.OpenProcess.restype = wintypes.HANDLE
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+            return {"status": "error", "error": f"Invalid process ID: {pid!r}", "handle": None}
 
-            h_proc = k32.OpenProcess(
-                cls.PROCESS_QUERY_LIMITED_INFORMATION,
-                False,
-                pid
-            )
+        try:
+            h_proc, err = open_process_limited(pid)
             if not h_proc:
-                err = ctypes.get_last_error()
                 return {
                     "status": "access_denied" if err == 5 else "error",
                     "error_code": err,
                     "handle": None,
-                    "reason": "ACCESS_DENIED (Protected / System Process)" if err == 5 else "Process not found"
+                    "reason": "ACCESS_DENIED (Protected / System Process)" if err == 5 else "Process not found",
                 }
 
             return {
                 "status": "success",
                 "handle": h_proc,
                 "process_id": pid,
-                "access_mask": hex(cls.PROCESS_QUERY_LIMITED_INFORMATION)
+                "access_mask": hex(cls.PROCESS_QUERY_LIMITED_INFORMATION),
             }
         except Exception as exc:
             return {"status": "error", "error": str(exc), "handle": None}
@@ -89,24 +86,10 @@ class SafeProcessAccess:
         if res.get("status") != "success" or not res.get("handle"):
             return None
 
-        from ctypes import wintypes
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        k32.QueryFullProcessImageNameW.argtypes = [
-            wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)
-        ]
-        k32.QueryFullProcessImageNameW.restype = wintypes.BOOL
-        k32.CloseHandle.argtypes = [wintypes.HANDLE]
-        k32.CloseHandle.restype = wintypes.BOOL
-
         h_proc = res["handle"]
         try:
-            buf = ctypes.create_unicode_buffer(1024)
-            size = wintypes.DWORD(1024)
-            # QueryFullProcessImageNameW (flag 0 = Win32 path format)
-            success = k32.QueryFullProcessImageNameW(h_proc, 0, buf, ctypes.byref(size))
-            if success:
-                return buf.value
+            return query_process_image_path_from_handle(h_proc)
+        except Exception:
+            return None
         finally:
-            k32.CloseHandle(h_proc)
-
-        return None
+            close_handle_quiet(h_proc)

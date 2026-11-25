@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 echo =====================================================================
 echo   Bintra Automated Windows Installer
-echo   Continuous Semantic Reverse Engineering & Binary Analysis
+echo   Continuous Semantic Reverse Engineering ^& Binary Analysis
 echo =====================================================================
 echo.
 
@@ -11,7 +11,8 @@ echo.
 where python >nul 2>nul
 if %ERRORLEVEL% neq 0 (
     where py >nul 2>nul
-    if %ERRORLEVEL% neq 0 (
+    rem NOTE: ERRORLEVEL is expanded at parse time inside blocks, so use "if errorlevel 1" here.
+    if errorlevel 1 (
         echo [ERROR] Python is not found on your system PATH!
         echo Please install Python 3.10 or higher from https://www.python.org/
         echo Make sure to check "Add Python to PATH" during installation.

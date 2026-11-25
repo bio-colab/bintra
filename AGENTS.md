@@ -32,7 +32,10 @@ Exposes **51 type-safe tools** (with MCP `annotations`), **4 MCP resources** (`r
 bintra <command> [options]
 # Or: python -m cli <command> [options]
 ```
-All commands produce machine-readable JSON on `stdout` and exit with code `0` on success.
+Commands produce machine-readable JSON on `stdout` and exit with code `0` on success.
+
+> **Exception — human-oriented defaults:** the Task Manager / Device Manager / Registry Editor style commands default to Markdown (or a text tree). Always pass `--format json` when parsing their output:
+> `proc-list`, `proc-search`, `proc-info`, `sys-perf`, `dev-classes`, `dev-list`, `dev-search`, `dev-info`, `reg-read` / `registry-read`, `reg-search`, `reg-import` (default `md`) and `hw-tree` (default `tree`).
 
 ### Modality 3: Pure Python API -- Recommended for In-Process Scripts
 ```python

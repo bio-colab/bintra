@@ -219,7 +219,7 @@ class TestSotaBinaryTriageOrchestrator(unittest.TestCase):
         cli_proc = subprocess.run(
             [sys.executable, os.path.join(SRC_DIR, "cli.py"), "triage", "--file", self.pe_path, "--skip-deobf"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=15,
         )
         self.assertEqual(cli_proc.returncode, 0, cli_proc.stderr)

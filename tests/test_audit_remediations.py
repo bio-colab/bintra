@@ -577,7 +577,7 @@ class TestAuditRemediations(unittest.TestCase):
         # F-20 / F-16 / F-14: CLI --version, guarded ghidra-analyze --output, non-NT md formatters
         ver_proc = subprocess.run(
             [sys.executable, os.path.join(SRC_DIR, "cli.py"), "--version"],
-            capture_output=True, text=True
+            capture_output=True, text=True, encoding="utf-8", errors="replace"
         )
         self.assertEqual(ver_proc.returncode, 0)
         self.assertTrue("1.1.0" in ver_proc.stdout or "1.0.0" in ver_proc.stdout)
@@ -603,7 +603,7 @@ class TestAuditRemediations(unittest.TestCase):
         # F-14: binary_neural_engine.py standalone CLI defaults --enforce-nociception to True
         bne_help = subprocess.run(
             [sys.executable, os.path.join(SRC_DIR, "binary_neural_engine.py"), "patch", "-h"],
-            capture_output=True, text=True
+            capture_output=True, text=True, encoding="utf-8", errors="replace"
         )
         self.assertEqual(bne_help.returncode, 0)
         bne_norm = " ".join(bne_help.stdout.split())
@@ -613,7 +613,7 @@ class TestAuditRemediations(unittest.TestCase):
         # F-8: update CLI exposes --yes confirmation and --ref flags
         upd_help = subprocess.run(
             [sys.executable, os.path.join(SRC_DIR, "cli.py"), "update", "-h"],
-            capture_output=True, text=True
+            capture_output=True, text=True, encoding="utf-8", errors="replace"
         )
         self.assertEqual(upd_help.returncode, 0)
         self.assertIn("--yes", upd_help.stdout)
@@ -813,7 +813,7 @@ class TestAuditRemediations(unittest.TestCase):
                     "--offset", "0x10", "--patch-hex", "90",
                     "--workspace", ws_dir,
                 ],
-                env=env, capture_output=True, text=True
+                env=env, capture_output=True, text=True, encoding="utf-8", errors="replace"
             )
             self.assertNotEqual(mut_proc.returncode, 0, mut_proc.stdout + mut_proc.stderr)
             mut_payload = json.loads(mut_proc.stdout)
@@ -826,7 +826,7 @@ class TestAuditRemediations(unittest.TestCase):
                     sys.executable, cli_path, "resolve-deps",
                     "--binary", dummy_pe, "--workspace", ws_dir,
                 ],
-                env=env, capture_output=True, text=True
+                env=env, capture_output=True, text=True, encoding="utf-8", errors="replace"
             )
             self.assertEqual(read_proc.returncode, 0, read_proc.stdout + read_proc.stderr)
             read_payload = json.loads(read_proc.stdout)

@@ -379,11 +379,12 @@ def _dispatch_cli():
                 access_mode="READ",
             )
             from windows_intelligence.evidence_engine import CausalitySynthesizer
-            dossier = CausalitySynthesizer.synthesize_dossier(target_path=args.target)
+            dossier = CausalitySynthesizer.synthesize_dossier(binary_path=args.target)
             if args.format == "mermaid":
-                print(dossier.get("evidence_graph", {}).get("mermaid", "flowchart TD"))
+                print(dossier.get("mermaid_diagram") or "flowchart TD")
             else:
                 print(json.dumps(dossier, indent=2, default=str))
+            return
 
         elif cmd in ("registry-read", "reg-read"):
             parser = argparse.ArgumentParser(prog=f"bintra {cmd}", description="Read-only Windows Registry key and value inspection")
@@ -647,8 +648,9 @@ def _dispatch_cli():
                 capability=Capability.PROCESS_QUERY,
                 access_mode="QUERY",
             )
-            res = ProcessMitigationInspector.inspect_process_mitigations(args.pid)
+            res = ProcessMitigationInspector.inspect_process(pid=args.pid)
             print(json.dumps(res, indent=2, default=str))
+            return
 
         elif cmd == "resolve-deps":
             parser = argparse.ArgumentParser(prog="bintra resolve-deps", description="Audit Windows dynamic link library dependencies")
@@ -2157,7 +2159,9 @@ def _dispatch_cli():
                 operation=cmd,
                 target=f"pid:{target_pid}",
                 capability=Capability.PROCESS_QUERY,
-                access_mode="READ",
+                # QUERY (not READ): READ triggers filesystem path canonicalization,
+                # which rejects "pid:N" on Windows as an Alternate Data Stream.
+                access_mode="QUERY",
                 metadata={"command": cmd, "pid": target_pid}
             )
 
@@ -2968,7 +2972,7 @@ def _handle_update() -> None:
                 ["git", "remote"],
                 cwd=repo_dir,
                 capture_output=True,
-                text=True
+                text=True, encoding="utf-8", errors="replace"
             )
             remotes = [r.strip() for r in remotes_res.stdout.splitlines() if r.strip()] if remotes_res.returncode == 0 else []
             if not remotes or "origin" not in remotes:
@@ -2980,25 +2984,25 @@ def _handle_update() -> None:
                 ["git", "fetch", "--tags", "origin", "--", args.branch],
                 cwd=repo_dir,
                 capture_output=True,
-                text=True
+                text=True, encoding="utf-8", errors="replace"
             )
             if fetch_res.returncode != 0:
                 print(f"[-] Git fetch error: {fetch_res.stderr.strip()}")
                 sys.exit(1)
 
             target_rev = args.ref or f"origin/{args.branch}"
-            local_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_dir, text=True).strip()
-            remote_hash = subprocess.check_output(["git", "rev-parse", "--verify", target_rev], cwd=repo_dir, text=True).strip()
+            local_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_dir, text=True, encoding="utf-8", errors="replace").strip()
+            remote_hash = subprocess.check_output(["git", "rev-parse", "--verify", target_rev], cwd=repo_dir, text=True, encoding="utf-8", errors="replace").strip()
 
             if local_hash == remote_hash:
-                commit_title = subprocess.check_output(["git", "log", "-1", "--format=%s"], cwd=repo_dir, text=True).strip()
+                commit_title = subprocess.check_output(["git", "log", "-1", "--format=%s"], cwd=repo_dir, text=True, encoding="utf-8", errors="replace").strip()
                 print(f"[+] Bintra is already at the latest commit: {local_hash[:7]} (\"{commit_title}\")")
                 return
 
             incoming_commits = subprocess.check_output(
                 ["git", "log", f"HEAD..{remote_hash}", "--oneline"],
                 cwd=repo_dir,
-                text=True
+                text=True, encoding="utf-8", errors="replace"
             ).strip()
             print(f"[!] New updates available ({local_hash[:7]} -> {remote_hash[:7]}):\n")
             for c_line in incoming_commits.splitlines():
@@ -3023,8 +3027,8 @@ def _handle_update() -> None:
             print("[*] Refreshing package entry points and dependencies...")
             subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "-e", "."], cwd=repo_dir, check=True)
 
-            new_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_dir, text=True).strip()
-            new_title = subprocess.check_output(["git", "log", "-1", "--format=%s"], cwd=repo_dir, text=True).strip()
+            new_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_dir, text=True, encoding="utf-8", errors="replace").strip()
+            new_title = subprocess.check_output(["git", "log", "-1", "--format=%s"], cwd=repo_dir, text=True, encoding="utf-8", errors="replace").strip()
             print(f"[+] Successfully updated Bintra to latest commit: {new_hash[:7]} (\"{new_title}\")")
         except Exception as e:
             print(f"[-] Automatic update failed: {e}")

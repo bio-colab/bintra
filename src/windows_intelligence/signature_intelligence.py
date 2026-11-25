@@ -1266,18 +1266,19 @@ class WindowsSignatureIntelligence:
         devices = []
         try:
             from windows_intelligence.device_intelligence.device_manager import DeviceManagerInspector
-            dev_rep = DeviceManagerInspector.get_device_list(max_devices=200)
+            # list_devices() is the real API (get_device_list never existed, so the
+            # AttributeError was silently swallowed and correlation was always empty).
+            dev_rep = DeviceManagerInspector.list_devices(limit=0)
             for d in dev_rep.get("devices", []):
-                svc = str(d.get("service", "")).lower()
-                desc = str(d.get("description", "")).lower()
-                cls_name = str(d.get("device_class", "")).lower()
-                if (svc and driver_basename.startswith(svc)) or (device_name and device_name.lower() in desc):
+                svc = str(d.get("service") or "").lower()
+                desc = str(d.get("friendly_name") or d.get("description") or "").lower()
+                if (svc and os.path.splitext(driver_basename)[0] == svc) or (device_name and device_name.lower() in desc):
                     devices.append({
-                        "device_id": d.get("device_id"),
-                        "description": d.get("description"),
-                        "device_class": d.get("device_class"),
+                        "device_id": d.get("device_instance_id"),
+                        "description": d.get("friendly_name") or d.get("description"),
+                        "device_class": d.get("class"),
                         "service": d.get("service"),
-                        "status": d.get("status")
+                        "status": d.get("problem_name")
                     })
         except Exception:
             pass

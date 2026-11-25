@@ -447,7 +447,7 @@ class TestSotaAuditEnhancements(unittest.TestCase):
             res_flag = subprocess.run(
                 [sys.executable, os.path.join(SRC_DIR, "cli.py"), "sig-verify", "--file", mspaint],
                 capture_output=True,
-                text=True
+                text=True, encoding="utf-8", errors="replace"
             )
             self.assertEqual(res_flag.returncode, 0)
             self.assertIn("WINDOWS_SIGNATURE_INTELLIGENCE", res_flag.stdout)
@@ -456,7 +456,7 @@ class TestSotaAuditEnhancements(unittest.TestCase):
             res_pos = subprocess.run(
                 [sys.executable, os.path.join(SRC_DIR, "cli.py"), "sig-verify", mspaint],
                 capture_output=True,
-                text=True
+                text=True, encoding="utf-8", errors="replace"
             )
             self.assertEqual(res_pos.returncode, 0)
             self.assertIn("WINDOWS_SIGNATURE_INTELLIGENCE", res_pos.stdout)
@@ -465,7 +465,7 @@ class TestSotaAuditEnhancements(unittest.TestCase):
             res_rd_flag = subprocess.run(
                 [sys.executable, os.path.join(SRC_DIR, "cli.py"), "resolve-deps", "--file", mspaint],
                 capture_output=True,
-                text=True
+                text=True, encoding="utf-8", errors="replace"
             )
             self.assertEqual(res_rd_flag.returncode, 0)
             self.assertIn("STATIC_HEURISTIC_AUDIT", res_rd_flag.stdout)

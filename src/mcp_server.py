@@ -3197,12 +3197,15 @@ class BintraMcpServer:
 
     def run_stdio(self):
         """Standard JSON-RPC 2.0 loop reading from stdin and writing to stdout."""
-        # Ensure utf-8 stdio
-        for stream_name in ("stdout", "stderr"):
+        # Ensure utf-8 stdio. stdin MUST be reconfigured too: on Windows a piped
+        # stdin defaults to the ANSI code page (e.g. cp1252), which silently
+        # mangles non-ASCII file paths sent by MCP clients (JSON-RPC is UTF-8).
+        # stdout uses newline="\n" so frames are not rewritten to CRLF.
+        for stream_name, extra in (("stdin", {}), ("stdout", {"newline": "\n"}), ("stderr", {})):
             s = getattr(sys, stream_name, None)
             if s and hasattr(s, "reconfigure"):
                 try:
-                    s.reconfigure(encoding="utf-8", errors="replace")
+                    s.reconfigure(encoding="utf-8", errors="replace", **extra)
                 except Exception:
                     pass
 

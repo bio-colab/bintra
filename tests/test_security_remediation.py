@@ -317,7 +317,7 @@ class TestSecurityRemediation(unittest.TestCase):
         env = os.environ.copy()
         existing_pythonpath = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else src_dir
-        res = subprocess.run([sys.executable, "-m", "cli", "update", "--check"], cwd=repo_root, env=env, capture_output=True, text=True)
+        res = subprocess.run([sys.executable, "-m", "cli", "update", "--check"], cwd=repo_root, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if res.returncode != 0 and ("Git fetch error" in res.stdout or "Could not resolve" in res.stdout or "fatal:" in res.stderr):
             self.skipTest(f"Transient git fetch/network error: {res.stdout.strip()} {res.stderr.strip()}")
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)

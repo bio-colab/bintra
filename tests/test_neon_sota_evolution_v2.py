@@ -736,7 +736,7 @@ class TestCliGhidraSimilarCommand(unittest.TestCase):
             res_json = subprocess.run(
                 [sys.executable, cli_entry, "ghidra-similar", "--input", export_path,
                  "--function", "fn_alpha", "--threshold", "0.5"],
-                cwd=REPO_ROOT, capture_output=True, text=True, env=env, timeout=120,
+                cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=120,
             )
             self.assertEqual(res_json.returncode, 0, res_json.stderr[-500:])
             payload = json.loads(res_json.stdout)
@@ -746,7 +746,7 @@ class TestCliGhidraSimilarCommand(unittest.TestCase):
             res_md = subprocess.run(
                 [sys.executable, cli_entry, "ghidra-similar", "--input", export_path,
                  "--pcode-file", pcode_ref, "--threshold", "0.5", "--format", "md"],
-                cwd=REPO_ROOT, capture_output=True, text=True, env=env, timeout=120,
+                cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=120,
             )
             self.assertEqual(res_md.returncode, 0, res_md.stderr[-500:])
             self.assertIn("fn_alpha", res_md.stdout)
@@ -754,7 +754,7 @@ class TestCliGhidraSimilarCommand(unittest.TestCase):
 
             res_missing_ref = subprocess.run(
                 [sys.executable, cli_entry, "ghidra-similar", "--input", export_path],
-                cwd=REPO_ROOT, capture_output=True, text=True, env=env, timeout=120,
+                cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=120,
             )
             self.assertNotEqual(res_missing_ref.returncode, 0)
         finally:

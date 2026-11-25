@@ -937,7 +937,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
         import subprocess, sys
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cli_path = os.path.join(repo_root, "src", "cli.py")
-        res = subprocess.run([sys.executable, cli_path, "synthesize-weights"], capture_output=True, text=True)
+        res = subprocess.run([sys.executable, cli_path, "synthesize-weights"], capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(res.returncode, 0)
         self.assertIn("decoupled_from_active_scope", res.stdout)
         self.assertIn("SCOPE.md", res.stdout)
@@ -2318,7 +2318,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
         # Test help outputs
         for subcmd in ("file-locks", "proc-modules", "dev-match"):
-            p = subprocess.run([sys.executable, cli_path, subcmd, "--help"], capture_output=True, text=True, check=True)
+            p = subprocess.run([sys.executable, cli_path, subcmd, "--help"], capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
             self.assertEqual(p.returncode, 0)
             self.assertIn(subcmd, p.stdout)
 

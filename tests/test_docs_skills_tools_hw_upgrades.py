@@ -78,7 +78,7 @@ class TestDocsSkillsToolsHwUpgrades(unittest.TestCase):
         env = dict(os.environ, PYTHONPATH=str(repo_root / "src"))
         proc = subprocess.run(
             [sys.executable, str(repo_root / "src" / "cli.py"), "evidence-graph", "--help"],
-            capture_output=True, text=True, env=env, timeout=10
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=10
         )
         self.assertEqual(proc.returncode, 0)
         self.assertIn("--format", proc.stdout)

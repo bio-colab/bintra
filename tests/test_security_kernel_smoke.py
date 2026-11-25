@@ -385,7 +385,9 @@ class TestSecurityKernelSmoke(_IsolatedSecurityTestBase):
             self.assertIsNone(bad_pid["handle"])
         else:
             reg_res = SafeRegistryAccess.query_value("HKLM", "SOFTWARE", "Test")
-            self.assertEqual(reg_res["status"], "error")
+            self.assertEqual(reg_res["status"], "unsupported")
+            proc_res = SafeProcessAccess.open_process_for_query(os.getpid())
+            self.assertEqual(proc_res["status"], "unsupported")
 
     def test_safe_subprocess_and_ghidra_guard(self) -> None:
         denials_before = len(AuditLogger.get_denials())

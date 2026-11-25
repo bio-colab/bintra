@@ -8,8 +8,9 @@ Provides deterministic root cause attribution and access violation parameter ana
 (Read / Write / DEP execution, NULL pointer dereferences).
 """
 
-import os
 import glob
+import ntpath
+import os
 import struct
 from typing import Dict, Any, List, Optional
 
@@ -343,7 +344,7 @@ class MiniDumpParser:
             f.seek(cur_pos)
 
             mod_entry = {
-                "name": os.path.basename(mod_path),
+                "name": ntpath.basename(mod_path),
                 "path": mod_path,
                 "base_address": hex(base_img),
                 "base_int": base_img,

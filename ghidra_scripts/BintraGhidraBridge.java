@@ -169,8 +169,19 @@ public class BintraGhidraBridge extends GhidraScript {
 
         // 3. Serialize to JSON
         Map<String, Object> payload = new HashMap<>();
+        String targetSha256 = null;
+        try {
+            java.lang.reflect.Method m = currentProgram.getClass().getMethod("getExecutableSHA256");
+            Object shaObj = m.invoke(currentProgram);
+            if (shaObj != null && !shaObj.toString().isEmpty()) {
+                targetSha256 = shaObj.toString().toLowerCase();
+            }
+        } catch (Exception ignored) {}
         payload.put("program_name", currentProgram.getName());
         payload.put("image_base", "0x" + currentProgram.getImageBase().toString());
+        if (targetSha256 != null) {
+            payload.put("sha256", targetSha256);
+        }
         payload.put("functions_count", functionsList.size());
         payload.put("functions", functionsList);
 

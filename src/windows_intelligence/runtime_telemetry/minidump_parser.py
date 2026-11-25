@@ -442,7 +442,7 @@ class MiniDumpParser:
             rec = f.read(entry_size)
             if len(rec) < 48:
                 break
-            base_addr, alloc_base, alloc_prot, _, reg_size, state, protect, mem_type = struct.unpack("<QQIIQIII", rec[:48])
+            base_addr, alloc_base, alloc_prot, _, reg_size, state, protect, mem_type = struct.unpack("<QQIIQIII4x", rec[:48])
             regions.append({
                 "base_address": hex(base_addr),
                 "base_int": base_addr,

@@ -226,15 +226,30 @@ def evaluate_data_flow_crash_causality(
                 return None
         return None
 
-    def _token_contains_register(tok: str, reg_set: Set[str]) -> bool:
+    def _tok_words(tok: Any) -> Set[str]:
+        if tok is None:
+            return set()
+        if isinstance(tok, dict):
+            words: Set[str] = set()
+            for k in ("name", "repr", "def_id", "offset"):
+                v = tok.get(k)
+                if v is not None:
+                    words.update(re.findall(r"[A-Za-z0-9_]+", str(v).upper()))
+            return words
+        return set(re.findall(r"[A-Za-z0-9_]+", str(tok).upper())) if tok else set()
+
+    def _token_contains_register(tok: Any, reg_set: Set[str]) -> bool:
         if not tok or not reg_set:
             return False
         # Exact word token matching to eliminate substring false-positives (e.g. 'AX' in 'TAX')
-        words = set(re.findall(r"[A-Za-z0-9_]+", tok.upper()))
-        return bool(words & reg_set)
+        return bool(_tok_words(tok) & reg_set)
 
-    def _tok_words(tok: str) -> Set[str]:
-        return set(re.findall(r"[A-Za-z0-9_]+", tok.upper())) if tok else set()
+    def _flatten_tok(tok: Any) -> str:
+        if tok is None:
+            return ""
+        if isinstance(tok, dict):
+            return str(tok.get("repr") or tok.get("name") or tok.get("def_id") or "")
+        return str(tok)
 
     # Check cryptographic provenance upfront
     if not provenance and isinstance(ghidra_data_flow, dict):
@@ -281,19 +296,29 @@ def evaluate_data_flow_crash_causality(
     target_reg_set = reg_families.get(culprit_reg, {culprit_reg}) if culprit_reg else set()
 
     sink_addrs = set()
-    sink_tokens = set()
+    sink_tokens: Set[str] = set()
     colocated_sink_tokens: Optional[Set[str]] = None
+    colocated_sink_addrs: Set[int] = set()
     has_exact_sink = False
     has_colocated_sink_reg = False
 
-    for s in ghidra_data_flow.get("sinks", []):
+    sinks_list = ghidra_data_flow.get("sinks")
+    if sinks_list is None:
+        sinks_list = ghidra_data_flow.get("sinks_sample") or []
+
+    for s in sinks_list:
         if isinstance(s, dict):
             a = _parse_addr(s.get("address"))
             entry_tokens: Set[str] = set()
-            if s.get("var"):
-                entry_tokens.add(str(s["var"]))
-            for inp in s.get("inputs", []):
-                entry_tokens.add(str(inp))
+            for field in ("var", "output"):
+                if s.get(field) is not None:
+                    ft = _flatten_tok(s[field])
+                    if ft:
+                        entry_tokens.add(ft)
+            for inp in s.get("inputs", []) or []:
+                ft = _flatten_tok(inp)
+                if ft:
+                    entry_tokens.add(ft)
             sink_tokens.update(entry_tokens)
             if a is not None:
                 sink_addrs.add(a)
@@ -303,6 +328,7 @@ def evaluate_data_flow_crash_causality(
                 )
                 if addr_matches:
                     has_exact_sink = True
+                    colocated_sink_addrs.add(a)
                     if any(_token_contains_register(tok, target_reg_set) for tok in entry_tokens):
                         has_colocated_sink_reg = True
                         if colocated_sink_tokens is None:
@@ -313,34 +339,50 @@ def evaluate_data_flow_crash_causality(
 
     slice_op_addrs = set()
     slice_tokens = set(sink_tokens)
-    backward_slice = ghidra_data_flow.get("backward_slice", [])
+    slice_chain_words: Set[str] = set()
+    backward_slice = ghidra_data_flow.get("backward_slice") or []
     for op in backward_slice:
         if isinstance(op, dict):
             a = _parse_addr(op.get("address"))
             if a is not None:
                 slice_op_addrs.add(a)
-            if op.get("output"):
-                slice_tokens.add(str(op["output"]))
-            for inp in op.get("inputs", []):
-                slice_tokens.add(str(inp))
+            for out_k in ("output", "var"):
+                if op.get(out_k) is not None:
+                    ft = _flatten_tok(op[out_k])
+                    if ft:
+                        slice_tokens.add(ft)
+                        slice_chain_words.update(_tok_words(ft))
+            for ot in op.get("output_tokens", []) or []:
+                slice_chain_words.update(_tok_words(ot))
+            for inp in op.get("inputs", []) or []:
+                ft = _flatten_tok(inp)
+                if ft:
+                    slice_tokens.add(ft)
+                    slice_chain_words.update(_tok_words(ft))
         elif isinstance(op, str):
             slice_tokens.add(op)
+            slice_chain_words.update(_tok_words(op))
 
-    sources = ghidra_data_flow.get("sources", [])
+    sources = ghidra_data_flow.get("sources")
+    if sources is None:
+        sources = ghidra_data_flow.get("sources_sample") or []
     source_words: Set[str] = set()
     for s in sources:
         if isinstance(s, dict):
             a = _parse_addr(s.get("address"))
             if a is not None:
                 slice_op_addrs.add(a)
-            if s.get("var"):
-                v_str = str(s["var"])
-                slice_tokens.add(v_str)
-                source_words.update(_tok_words(v_str))
-            for inp in s.get("inputs", []):
-                i_str = str(inp)
-                slice_tokens.add(i_str)
-                source_words.update(_tok_words(i_str))
+            for v_k in ("var", "output"):
+                if s.get(v_k) is not None:
+                    v_str = _flatten_tok(s[v_k])
+                    if v_str:
+                        slice_tokens.add(v_str)
+                        source_words.update(_tok_words(v_str))
+            for inp in s.get("inputs", []) or []:
+                i_str = _flatten_tok(inp)
+                if i_str:
+                    slice_tokens.add(i_str)
+                    source_words.update(_tok_words(i_str))
         elif isinstance(s, str):
             slice_tokens.add(s)
             source_words.update(_tok_words(s))
@@ -361,14 +403,29 @@ def evaluate_data_flow_crash_causality(
     has_sink_register_match = any(_token_contains_register(tok, target_reg_set) for tok in sink_tokens)
     has_slice_register_match = any(_token_contains_register(tok, target_reg_set) for tok in slice_tokens)
 
-    # Continuous def-use lineage requires either a non-empty backward_slice or sources connected to the fault sink
+    # Continuous def-use lineage requires either:
+    #   (a) a backward_slice actually anchored to the faulting sink (not a separate sink) & sharing tokens with the co-located sink/register, OR
+    #   (b) verified sources connecting directly into the co-located sink / culprit register when backward_slice is empty.
     sink_words: Set[str] = set()
     if colocated_sink_tokens:
         for tok in colocated_sink_tokens:
             sink_words.update(_tok_words(tok))
-    has_connected_slice = bool(backward_slice) or (
-        bool(sources) and bool(source_words & (sink_words | target_reg_set))
+    sliced_from_addr = _parse_addr(ghidra_data_flow.get("sliced_from_address"))
+    slice_from_mismatch = (
+        sliced_from_addr is not None
+        and (fault_rva is None or sliced_from_addr != fault_rva)
+        and (fault_va is None or sliced_from_addr != fault_va)
     )
+    backward_slice_connects = (
+        bool(backward_slice)
+        and not slice_from_mismatch
+        and (
+            bool(slice_chain_words & (sink_words | target_reg_set))
+            or bool(slice_op_addrs & colocated_sink_addrs)
+        )
+    )
+    source_connects = bool(sources) and bool(source_words & (sink_words | target_reg_set))
+    has_connected_slice = backward_slice_connects or source_connects
 
     fn_name = str(ghidra_data_flow.get("function") or "").lower()
     fault_mod = str(crash_rca.get("fault_module") or "").lower()
@@ -591,7 +648,7 @@ def fuse_static_dynamic_ghidra(
                     },
                 )
 
-    if crash_rca:
+    if crash_rca and isinstance(crash_rca, dict) and crash_rca.get("status") != "error":
         exc_code = crash_rca.get("exception_code", "UNKNOWN_EXCEPTION")
         crash_id = f"crash:{exc_code}"
         graph.add_node(
@@ -712,7 +769,7 @@ def fuse_static_dynamic_ghidra(
                     "confidence_rationale": df_rationale,
                 },
             )
-        if crash_rca:
+        if crash_rca and isinstance(crash_rca, dict) and crash_rca.get("status") != "error":
             exc_code = crash_rca.get("exception_code", "UNKNOWN_EXCEPTION")
             causality = evaluate_data_flow_crash_causality(ghidra_data_flow, crash_rca, provenance=ghidra_provenance)
             graph.add_edge(

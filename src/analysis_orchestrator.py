@@ -16,6 +16,8 @@ Design invariants:
 from __future__ import annotations
 
 import hashlib
+import hmac
+import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -237,18 +239,53 @@ class BinaryTriageOrchestrator:
                         ghidra_cg_res = analyzer.build_call_graph_and_xrefs(
                             store, target_function=function_name
                         )
+                        fault_addrs: List[int] = []
+                        culprit_reg: Optional[str] = None
+                        if isinstance(crash_rca_res, dict) and crash_rca_res.get("status") == "success":
+                            culprit_reg = crash_rca_res.get("culprit_register")
+                            for key in ("fault_virtual_address", "fault_rva"):
+                                raw_a = crash_rca_res.get(key)
+                                if isinstance(raw_a, str) and raw_a.strip().lower().startswith("0x"):
+                                    try:
+                                        fault_addrs.append(int(raw_a, 16))
+                                    except ValueError:
+                                        pass
+                                elif isinstance(raw_a, int):
+                                    fault_addrs.append(raw_a)
+                            raw_ib = store.get("image_base")
+                            if isinstance(raw_ib, str) and raw_ib.strip().lower().startswith("0x"):
+                                try:
+                                    ib_val = int(raw_ib, 16)
+                                    for a in list(fault_addrs):
+                                        if a < ib_val:
+                                            fault_addrs.append(ib_val + a)
+                                except ValueError:
+                                    pass
+                        fn_match = None
                         if function_name:
                             fn_match = store.get_function(function_name)
-                            if fn_match:
-                                ghidra_df_res = analyzer.slice_data_flow(fn_match)
+                        elif fault_addrs:
+                            fn_match = store.get_function_containing_address(fault_addrs)
+                        if fn_match:
+                            ghidra_df_res = analyzer.slice_data_flow(
+                                fn_match,
+                                target_address=fault_addrs or None,
+                                target_register=culprit_reg,
+                                image_base=store.get("image_base"),
+                            )
                     else:
                         # STRICT ENFORCEMENT: Mismatched or alien export is quarantined from evidence fusion
                         ghidra_cg_res = None
                         ghidra_df_res = None
 
                 if not is_cryptographically_proven and not is_heuristic_match:
+                    status_code = (
+                        "provenance_tampered"
+                        if ghidra_provenance.get("status") == "PROVENANCE_CONTENT_TAMPERED"
+                        else "provenance_mismatch"
+                    )
                     stages["ghidra_analysis"] = {
-                        "status": "provenance_mismatch",
+                        "status": status_code,
                         "provenance": ghidra_provenance,
                         "error": ghidra_provenance.get("warning", "Ghidra export provenance verification failed.")
                     }
@@ -303,7 +340,7 @@ class BinaryTriageOrchestrator:
             hybrid_res=hybrid_res,
         )
 
-        failed_stages = [name for name, st in stages.items() if st.get("status") in ("error", "failed", "provenance_mismatch")]
+        failed_stages = [name for name, st in stages.items() if st.get("status") in ("error", "failed", "provenance_mismatch", "provenance_tampered")]
         partial_stages = [name for name, st in stages.items() if st.get("status") in ("partial", "partial_success", "verification_error", "untrusted", "untrusted_revoked", "heuristic_unverified")]
         active_stages = [name for name, st in stages.items() if st.get("status") != "skipped"]
 
@@ -340,7 +377,34 @@ class BinaryTriageOrchestrator:
         }
 
     @staticmethod
+    def compute_ghidra_export_content_sha256(store_or_payload: Any) -> str:
+        """Computes a canonical SHA-256 digest of exported Ghidra program metadata and functions."""
+        if isinstance(store_or_payload, dict):
+            prog_name = str(store_or_payload.get("program_name") or "")
+            img_base = str(store_or_payload.get("image_base") or "")
+            target_sha = str(store_or_payload.get("sha256") or "").lower()
+            funcs = store_or_payload.get("functions") or []
+        else:
+            prog_name = str(store_or_payload.get("program_name") or "")
+            img_base = str(store_or_payload.get("image_base") or "")
+            target_sha = str(store_or_payload.get("sha256") or "").lower()
+            funcs = list(store_or_payload.iter_functions()) if hasattr(store_or_payload, "iter_functions") else (store_or_payload.get("functions") or [])
+        canonical = json.dumps(
+            {
+                "program_name": prog_name,
+                "image_base": img_base,
+                "sha256": target_sha,
+                "functions": funcs,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @classmethod
     def verify_ghidra_export_provenance(
+        cls,
         store: Any,
         target_sha256: str,
         target_filename: str,
@@ -351,6 +415,10 @@ class BinaryTriageOrchestrator:
         the MCP ``bintra_fuse_evidence`` tool so that provenance quarantine rules
         cannot drift between entry points.
 
+        Validates optional independent export-content manifests (``<export>.provenance.json``
+        or ``provenance_manifest`` / ``export_content_sha256`` with optional HMAC signature)
+        so post-export tampering with function/P-Code records is detected and quarantined.
+
         Returns ``(provenance_dict, is_cryptographically_proven, is_heuristic_match)``.
         """
         gh_prog_name = str(store.get("program_name") or "")
@@ -359,6 +427,87 @@ class BinaryTriageOrchestrator:
         is_cryptographically_proven = False
         is_heuristic_match = False
 
+        # Inspect independent sidecar or embedded content manifest if present
+        manifest: Optional[Dict[str, Any]] = None
+        manifest_source: Optional[str] = None
+        embedded_manifest = store.get("provenance_manifest")
+        if isinstance(embedded_manifest, dict):
+            manifest = embedded_manifest
+            manifest_source = "embedded_manifest"
+        declared_content_sha = str(store.get("export_content_sha256") or "").lower()
+
+        source_path = getattr(store, "source_path", None)
+        if isinstance(source_path, str) and source_path:
+            sidecar_path = f"{source_path}.provenance.json"
+            if os.path.isfile(sidecar_path):
+                try:
+                    with open(sidecar_path, "r", encoding="utf-8") as mf:
+                        loaded = json.load(mf)
+                    if isinstance(loaded, dict):
+                        manifest = loaded
+                        manifest_source = sidecar_path
+                except Exception as exc:
+                    return (
+                        {
+                            "status": "PROVENANCE_CONTENT_TAMPERED",
+                            "verified": False,
+                            "content_integrity": "CORRUPT_SIDECAR_MANIFEST",
+                            "warning": f"Ghidra provenance sidecar '{sidecar_path}' could not be parsed ({exc}). Quarantined.",
+                        },
+                        False,
+                        False,
+                    )
+
+        expected_content_sha = str((manifest or {}).get("export_content_sha256") or declared_content_sha or "").lower()
+        manifest_target_sha = str((manifest or {}).get("target_sha256") or "").lower()
+        if manifest_target_sha and manifest_target_sha != target_sha256:
+            return (
+                {
+                    "status": "PROVENANCE_HASH_MISMATCH",
+                    "verified": False,
+                    "export_sha256": manifest_target_sha,
+                    "target_sha256": target_sha256,
+                    "warning": f"Ghidra provenance manifest target SHA-256 ({manifest_target_sha}) does not match target ({target_sha256}). Quarantined.",
+                },
+                False,
+                False,
+            )
+
+        independent_verified = False
+        if expected_content_sha:
+            actual_content_sha = cls.compute_ghidra_export_content_sha256(store)
+            if actual_content_sha != expected_content_sha:
+                return (
+                    {
+                        "status": "PROVENANCE_CONTENT_TAMPERED",
+                        "verified": False,
+                        "content_integrity": "CONTENT_SHA256_MISMATCH",
+                        "expected_content_sha256": expected_content_sha,
+                        "actual_content_sha256": actual_content_sha,
+                        "manifest_source": manifest_source,
+                        "warning": "Ghidra export content digest mismatches declared/sidecar manifest (post-export tampering suspected). Quarantined.",
+                    },
+                    False,
+                    False,
+                )
+            hmac_sig = str((manifest or {}).get("hmac_sha256") or "").lower()
+            hmac_key = os.environ.get("BINTRA_PROVENANCE_HMAC_KEY")
+            if hmac_sig and hmac_key:
+                msg = f"{manifest_target_sha or gh_sha256}:{actual_content_sha}".encode("utf-8")
+                expected_hmac = hmac.new(hmac_key.encode("utf-8"), msg, hashlib.sha256).hexdigest().lower()
+                if not hmac.compare_digest(hmac_sig, expected_hmac):
+                    return (
+                        {
+                            "status": "PROVENANCE_CONTENT_TAMPERED",
+                            "verified": False,
+                            "content_integrity": "HMAC_SIGNATURE_MISMATCH",
+                            "warning": "Ghidra provenance HMAC signature verification failed. Quarantined.",
+                        },
+                        False,
+                        False,
+                    )
+            independent_verified = True
+
         if gh_sha256:
             if gh_sha256 == target_sha256:
                 provenance = {
@@ -366,7 +515,18 @@ class BinaryTriageOrchestrator:
                     "verified": True,
                     "matched_sha256": gh_sha256,
                     "program_name": gh_prog_name,
+                    "independent_integrity_verified": independent_verified,
+                    "content_integrity": (
+                        "VERIFIED_INDEPENDENT_MANIFEST" if independent_verified else "SELF_ASSERTED_TARGET_HASH_ONLY"
+                    ),
                 }
+                if manifest_source:
+                    provenance["manifest_source"] = manifest_source
+                if not independent_verified:
+                    provenance["caveat"] = (
+                        "Target SHA-256 matches, but export lacks an independent .provenance.json content digest; "
+                        "post-export edits to function records cannot be independently ruled out."
+                    )
                 is_cryptographically_proven = True
             else:
                 provenance = {
@@ -385,6 +545,7 @@ class BinaryTriageOrchestrator:
                     "verified": False,
                     "is_heuristic": True,
                     "program_name": gh_prog_name,
+                    "independent_integrity_verified": independent_verified,
                     "warning": f"Matched by filename heuristic '{gh_prog_name}' only; cryptographic hash unavailable."
                 }
                 is_heuristic_match = True
@@ -518,9 +679,11 @@ class BinaryTriageOrchestrator:
             p_stat = ghidra_prov.get("status", "UNVERIFIED")
             if p_stat == "VERIFIED_CRYPTOGRAPHIC_HASH":
                 observed_facts.append(f"Ghidra export provenance cryptographically verified: {p_stat}")
+                if not ghidra_prov.get("independent_integrity_verified"):
+                    heuristic_indicators.append("GHIDRA_EXPORT_SELF_ASSERTED_HASH_ONLY")
             elif p_stat == "HEURISTIC_NAME_MATCH":
                 heuristic_indicators.append("GHIDRA_EXPORT_MATCHED_BY_HEURISTIC_FILENAME_ONLY")
-            elif p_stat in ("PROVENANCE_HASH_MISMATCH", "PROVENANCE_NAME_MISMATCH", "UNVERIFIED_NO_METADATA"):
+            elif p_stat in ("PROVENANCE_HASH_MISMATCH", "PROVENANCE_NAME_MISMATCH", "PROVENANCE_CONTENT_TAMPERED", "UNVERIFIED_NO_METADATA"):
                 heuristic_indicators.append(f"GHIDRA_PROVENANCE_MISMATCH_QUARANTINED:{p_stat}")
 
         if ghidra_cg and ghidra_cg.get("status") == "ok":

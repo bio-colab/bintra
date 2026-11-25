@@ -377,9 +377,11 @@ class BinarySlackInspector:
             root_brace_idx = last_brace_idx
 
         trailing_data = data[root_brace_idx + 1:]
-        has_trailing = len(trailing_data) > 0
+        actual_trailing_bytes = max(len(trailing_data), file_size - (root_brace_idx + 1))
+        has_trailing = actual_trailing_bytes > 0
         entropy = cls.calculate_entropy(trailing_data)
 
+        status_val = "warning" if malformed_unbalanced else "ok"
         slack_type = "CLEAN_EXACT_EOF"
         diagnostic_note = "Document terminates cleanly at root closing brace."
         if malformed_unbalanced:
@@ -387,36 +389,50 @@ class BinarySlackInspector:
                 "RTF group braces are unbalanced; evaluated trailing bytes relative to last '}'."
             )
 
-        if has_trailing:
-            if trailing_data in (b"\x00", b"\r\n\x00", b"\n\x00"):
+        if len(trailing_data) > 0:
+            if trailing_data in (b"\x00", b"\r\n\x00", b"\n\x00") and not sample_truncated:
                 slack_type = "MFC_STREAM_NULL_TERMINATOR"
                 diagnostic_note = (
                     "Document terminates with standard MFC/RichEdit trailing NUL (0x00) byte. "
                     "Characteristic of WordPad/MFC CRichEditDoc stream serialization."
                 )
-            elif all(b in (0x00, 0x20, 0x09, 0x0D, 0x0A) for b in trailing_data):
+            elif not sample_truncated and all(b in (0x00, 0x20, 0x09, 0x0D, 0x0A) for b in trailing_data):
                 if 0x00 in trailing_data:
                     slack_type = "TRAILING_NUL_AND_WHITESPACE"
                     diagnostic_note = "Document contains trailing NUL (0x00) alongside whitespace/newlines."
                 else:
                     slack_type = "TRAILING_WHITESPACE"
                     diagnostic_note = "Document contains benign trailing whitespace/newlines."
-            else:
+            elif any(b not in (0x00, 0x20, 0x09, 0x0D, 0x0A) for b in trailing_data):
                 slack_type = "SUSPICIOUS_UNMAPPED_DOCUMENT_SLACK"
                 diagnostic_note = (
                     f"Unexpected unmapped data detected after root closing brace "
-                    f"({len(trailing_data)} bytes, entropy={entropy})."
+                    f"({actual_trailing_bytes} bytes, entropy={entropy})."
                 )
+            else:
+                status_val = "partial"
+                slack_type = "SCAN_INCOMPLETE_TRUNCATED_SAMPLE"
+                diagnostic_note = (
+                    f"Sample truncated at {len(data)} of {file_size} bytes; "
+                    f"{actual_trailing_bytes} trailing bytes remain beyond root closing brace."
+                )
+        elif sample_truncated:
+            status_val = "partial"
+            slack_type = "SCAN_INCOMPLETE_TRUNCATED_SAMPLE"
+            diagnostic_note = (
+                f"Sample truncated at {len(data)} of {file_size} bytes; "
+                f"{actual_trailing_bytes} bytes after root closing brace could not be fully scanned."
+            )
 
         return {
-            "status": "warning" if malformed_unbalanced else "ok",
+            "status": status_val,
             "format": "RTF",
             "file_size": file_size,
             "sample_truncated": sample_truncated,
             "malformed_unbalanced_braces": malformed_unbalanced,
             "root_closing_brace_offset": root_brace_idx,
             "has_trailing_slack": has_trailing,
-            "slack_bytes_count": len(trailing_data),
+            "slack_bytes_count": actual_trailing_bytes,
             "slack_entropy": entropy,
             "slack_tail_hex": [hex(b) for b in trailing_data[:16]],
             "slack_type": slack_type,
@@ -446,31 +462,39 @@ class BinarySlackInspector:
             root_end_byte_offset = len(text[:root_end_pos].encode("utf-8"))
             trailing_text = text[root_end_pos:]
             trailing_bytes = trailing_text.encode("utf-8")
-            has_trailing = len(trailing_bytes) > 0
+            actual_trailing_bytes = max(len(trailing_bytes), file_size - root_end_byte_offset)
+            has_trailing = actual_trailing_bytes > 0
             entropy = cls.calculate_entropy(trailing_bytes)
 
+            status_val = "ok"
             slack_type = "CLEAN_EXACT_EOF"
             diagnostic_note = "JSON document terminates cleanly at root object/array boundary."
-            if has_trailing:
-                if trailing_text.strip() == "":
-                    slack_type = "TRAILING_WHITESPACE"
-                    diagnostic_note = "Document contains benign trailing whitespace/newlines."
-                else:
-                    slack_type = "SUSPICIOUS_UNMAPPED_DOCUMENT_SLACK"
-                    diagnostic_note = (
-                        f"Unexpected trailing data detected after JSON root "
-                        f"({len(trailing_bytes)} bytes, entropy={entropy})."
-                    )
+            if trailing_text.strip() != "":
+                slack_type = "SUSPICIOUS_UNMAPPED_DOCUMENT_SLACK"
+                diagnostic_note = (
+                    f"Unexpected trailing data detected after JSON root "
+                    f"({actual_trailing_bytes} bytes, entropy={entropy})."
+                )
+            elif sample_truncated:
+                status_val = "partial"
+                slack_type = "SCAN_INCOMPLETE_TRUNCATED_SAMPLE"
+                diagnostic_note = (
+                    f"JSON scan truncated at {len(raw_bytes)} of {file_size} bytes; "
+                    f"{actual_trailing_bytes} unscanned bytes remain after root JSON boundary."
+                )
+            elif has_trailing:
+                slack_type = "TRAILING_WHITESPACE"
+                diagnostic_note = "Document contains benign trailing whitespace/newlines."
 
             return {
-                "status": "ok",
+                "status": status_val,
                 "format": "JSON",
                 "file_size": file_size,
                 "sample_truncated": sample_truncated,
                 "root_end_offset": root_end_pos,
                 "root_end_byte_offset": root_end_byte_offset,
                 "has_trailing_slack": has_trailing,
-                "slack_bytes_count": len(trailing_bytes),
+                "slack_bytes_count": actual_trailing_bytes,
                 "slack_entropy": entropy,
                 "slack_tail_hex": [hex(b) for b in trailing_bytes[:16]],
                 "slack_type": slack_type,
@@ -478,14 +502,18 @@ class BinarySlackInspector:
             }
         except Exception as e:
             return {
-                "status": "warning",
+                "status": "partial" if sample_truncated else "warning",
                 "format": "JSON",
                 "file_size": file_size,
                 "sample_truncated": sample_truncated,
                 "has_trailing_slack": False,
                 "slack_bytes_count": 0,
-                "slack_type": "MALFORMED_JSON_PARSE_ERROR",
-                "diagnostic_note": f"JSON syntax parse error: {e}"
+                "slack_type": "SCAN_INCOMPLETE_TRUNCATED_DOCUMENT" if sample_truncated else "MALFORMED_JSON_PARSE_ERROR",
+                "diagnostic_note": (
+                    f"JSON root incomplete within {len(raw_bytes)}-byte read limit (file_size={file_size}): {e}"
+                    if sample_truncated
+                    else f"JSON syntax parse error: {e}"
+                ),
             }
 
     @classmethod
@@ -521,14 +549,18 @@ class BinarySlackInspector:
 
         if root_end_cb_idx is None:
             return {
-                "status": "warning",
+                "status": "partial" if sample_truncated else "warning",
                 "format": "XML",
                 "file_size": file_size,
                 "sample_truncated": sample_truncated,
                 "has_trailing_slack": False,
                 "slack_bytes_count": 0,
-                "slack_type": "MALFORMED_XML_PARSE_ERROR",
-                "diagnostic_note": f"XML syntax parse error before root element completion: {parse_err}" if parse_err else "Document lacks complete XML root element.",
+                "slack_type": "SCAN_INCOMPLETE_TRUNCATED_DOCUMENT" if sample_truncated else "MALFORMED_XML_PARSE_ERROR",
+                "diagnostic_note": (
+                    f"XML root incomplete within {len(data)}-byte read limit (file_size={file_size})."
+                    if sample_truncated
+                    else (f"XML syntax parse error before root element completion: {parse_err}" if parse_err else "Document lacks complete XML root element.")
+                ),
             }
 
         # For </tag>, Expat reports start of closing tag; for <tag/>, index already points past '/>'.
@@ -539,31 +571,47 @@ class BinarySlackInspector:
             root_close_end = root_end_cb_idx
 
         trailing = data[root_close_end:]
-        has_trailing = len(trailing) > 0
+        actual_trailing_bytes = max(len(trailing), file_size - root_close_end)
+        has_trailing = actual_trailing_bytes > 0
         entropy = cls.calculate_entropy(trailing)
+        status_val = "ok"
         slack_type = "CLEAN_EXACT_EOF"
         diagnostic_note = "XML terminates cleanly at root element."
 
-        if has_trailing:
-            if all(b in (0x20, 0x09, 0x0D, 0x0A) for b in trailing):
+        if len(trailing) > 0:
+            if not sample_truncated and all(b in (0x20, 0x09, 0x0D, 0x0A) for b in trailing):
                 slack_type = "TRAILING_WHITESPACE"
                 diagnostic_note = "Benign trailing whitespace after XML root tag."
-            elif parse_err is None and trailing.lstrip().startswith(b"<!--"):
+            elif not sample_truncated and parse_err is None and trailing.lstrip().startswith(b"<!--"):
                 slack_type = "TRAILING_XML_EPILOG"
                 diagnostic_note = f"Valid trailing XML comment/processing-instruction epilog ({len(trailing)} bytes)."
-            else:
+            elif any(b not in (0x20, 0x09, 0x0D, 0x0A) for b in trailing):
                 slack_type = "SUSPICIOUS_UNMAPPED_DOCUMENT_SLACK"
-                diagnostic_note = f"Unexpected data detected after XML root element ({len(trailing)} bytes, entropy={entropy})."
+                diagnostic_note = f"Unexpected data detected after XML root element ({actual_trailing_bytes} bytes, entropy={entropy})."
+            else:
+                status_val = "partial"
+                slack_type = "SCAN_INCOMPLETE_TRUNCATED_SAMPLE"
+                diagnostic_note = (
+                    f"XML scan truncated at {len(data)} of {file_size} bytes; "
+                    f"{actual_trailing_bytes} bytes remain after XML root element."
+                )
+        elif sample_truncated:
+            status_val = "partial"
+            slack_type = "SCAN_INCOMPLETE_TRUNCATED_SAMPLE"
+            diagnostic_note = (
+                f"XML scan truncated at {len(data)} of {file_size} bytes; "
+                f"{actual_trailing_bytes} unscanned bytes remain after XML root element."
+            )
 
         return {
-            "status": "ok",
+            "status": status_val,
             "format": "XML",
             "file_size": file_size,
             "sample_truncated": sample_truncated,
             "root_closing_tag_offset": root_close_end - 1 if root_close_end > 0 else 0,
             "root_end_byte_offset": root_close_end,
             "has_trailing_slack": has_trailing,
-            "slack_bytes_count": len(trailing),
+            "slack_bytes_count": actual_trailing_bytes,
             "slack_entropy": entropy,
             "slack_tail_hex": [hex(b) for b in trailing[:16]],
             "slack_type": slack_type,
@@ -578,15 +626,20 @@ class BinarySlackInspector:
         with open(file_path, "rb") as f:
             data = f.read(cls.MAX_OVERLAY_SAMPLE)
 
+        sample_truncated = file_size > len(data)
         entropy = cls.calculate_entropy(data)
         return {
-            "status": "ok",
+            "status": "partial" if sample_truncated else "ok",
             "format": "GENERIC_BINARY",
             "file_size": file_size,
-            "sample_truncated": file_size > len(data),
+            "sample_truncated": sample_truncated,
             "has_trailing_slack": False,
             "slack_bytes_count": 0,
             "slack_entropy": entropy,
-            "slack_type": "CLEAN_EXACT_EOF",
-            "diagnostic_note": f"Generic binary stream analyzed ({file_size} bytes, entropy={entropy})."
+            "slack_type": "SCAN_INCOMPLETE_TRUNCATED_SAMPLE" if sample_truncated else "CLEAN_EXACT_EOF",
+            "diagnostic_note": (
+                f"Generic binary stream sample truncated at {len(data)} of {file_size} bytes (entropy={entropy})."
+                if sample_truncated
+                else f"Generic binary stream analyzed ({file_size} bytes, entropy={entropy})."
+            ),
         }

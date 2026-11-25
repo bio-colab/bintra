@@ -115,10 +115,40 @@ class ForensicsToolsMixin:
                     }
                 analyzer = GhidraDeepAnalyzer()
                 cg_res = analyzer.build_call_graph_and_xrefs(store, target_function=args.get("function_name"))
+                fault_addrs = []
+                culprit_reg = None
+                if isinstance(rca_res, dict) and rca_res.get("status") == "success":
+                    culprit_reg = rca_res.get("culprit_register")
+                    for key in ("fault_virtual_address", "fault_rva"):
+                        raw_a = rca_res.get(key)
+                        if isinstance(raw_a, str) and raw_a.strip().lower().startswith("0x"):
+                            try:
+                                fault_addrs.append(int(raw_a, 16))
+                            except ValueError:
+                                pass
+                        elif isinstance(raw_a, int):
+                            fault_addrs.append(raw_a)
+                    raw_ib = store.get("image_base")
+                    if isinstance(raw_ib, str) and raw_ib.strip().lower().startswith("0x"):
+                        try:
+                            ib_val = int(raw_ib, 16)
+                            for a in list(fault_addrs):
+                                if a < ib_val:
+                                    fault_addrs.append(ib_val + a)
+                        except ValueError:
+                            pass
+                fn_match = None
                 if args.get("function_name"):
                     fn_match = store.get_function(args["function_name"])
-                    if fn_match:
-                        df_res = analyzer.slice_data_flow(fn_match)
+                elif fault_addrs:
+                    fn_match = store.get_function_containing_address(fault_addrs)
+                if fn_match:
+                    df_res = analyzer.slice_data_flow(
+                        fn_match,
+                        target_address=fault_addrs or None,
+                        target_register=culprit_reg,
+                        image_base=store.get("image_base"),
+                    )
         return fuse_static_dynamic_ghidra(
             pe_forensics=pe_res,
             crash_rca=rca_res,

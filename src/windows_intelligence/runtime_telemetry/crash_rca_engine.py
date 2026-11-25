@@ -266,6 +266,44 @@ class CrashRootCauseAnalyzer:
                     "description": f"Target address resides within loaded module {mod.get('name')}."
                 }
 
+        # Offline MemoryInfoListStream (Stream 16) provides authoritative crash-time VAD states
+        for reg in parsed_dump.get("vad_regions", []) or []:
+            r_base = cls._to_int(reg.get("base_int", reg.get("base_address", 0)))
+            r_size = cls._to_int(reg.get("size", 0))
+            if r_size > 0 and r_base <= target_vaddr < r_base + r_size:
+                state = cls._to_int(reg.get("state", 0))
+                protect = cls._to_int(reg.get("protect", 0))
+                if state == 0x1000:  # MEM_COMMIT
+                    if protect & 0x100:  # PAGE_GUARD
+                        return {
+                            "category": "STACK_GUARD",
+                            "status": "VALID_MAPPED_SEGMENT",
+                            "region_base": f"0x{r_base:X}",
+                            "protect": hex(protect),
+                            "description": f"Target address hits a committed guard page (PAGE_GUARD) at 0x{r_base:X} in MiniDump Stream 16.",
+                        }
+                    return {
+                        "category": "COMMITTED_DUMP_VAD_REGION",
+                        "status": "VALID_MAPPED_SEGMENT",
+                        "region_base": f"0x{r_base:X}",
+                        "protect": hex(protect),
+                        "description": f"Target address is in committed VAD memory (0x{r_base:X}, protect={hex(protect)}) recorded in MiniDump Stream 16.",
+                    }
+                if state == 0x2000:  # MEM_RESERVE
+                    return {
+                        "category": "RESERVED_UNCOMMITTED_MEMORY",
+                        "status": "RESERVED_NOT_COMMITTED",
+                        "region_base": f"0x{r_base:X}",
+                        "description": f"Target address resides in MEM_RESERVE (uncommitted) region 0x{r_base:X} recorded in MiniDump Stream 16.",
+                    }
+                if state == 0x10000:  # MEM_FREE
+                    return {
+                        "category": "UNMAPPED_DYNAMIC_MEMORY",
+                        "status": "CONFIRMED_UNMAPPED_MEMORY",
+                        "region_base": f"0x{r_base:X}",
+                        "description": f"Target address is explicitly recorded as MEM_FREE (unallocated) in MiniDump Stream 16 at 0x{r_base:X}.",
+                    }
+
         # Cross-query live VAD only if PID is recorded in dump (Stream 15), live, and target_vaddr is known
         pid = parsed_dump.get("process_id")
         if pid and pid > 0 and target_vaddr is not None:
@@ -273,19 +311,30 @@ class CrashRootCauseAnalyzer:
                 snap = VirtualMemoryInspector.inspect_process(pid)
                 if not getattr(snap, "is_simulated", False):
                     cls_info = snap.classify_address(target_vaddr)
-                    if cls_info.get("status") == "COMMITTED":
+                    live_stat = str(cls_info.get("status") or "").upper()
+                    if live_stat == "COMMITTED":
                         enriched = dict(cls_info)
                         enriched["vad_live_pid_reuse_caveat"] = (
                             f"Live VAD state queried from PID {pid}; verify process start time against dump timestamp to rule out PID reuse."
                         )
                         return enriched
+                    if live_stat in ("UNMAPPED", "FREE", "MEM_FREE"):
+                        return {
+                            "category": "UNMAPPED_DYNAMIC_MEMORY",
+                            "status": "CONFIRMED_UNMAPPED_MEMORY",
+                            "vad_live_pid_reuse_caveat": f"Live VAD state from PID {pid} reports UNMAPPED/MEM_FREE; verify PID reuse.",
+                            "description": f"Live process PID {pid} VAD shows target address 0x{target_vaddr:X} is unmapped (MEM_FREE).",
+                        }
             except Exception:
                 pass
 
         return {
-            "category": "UNMAPPED_DYNAMIC_MEMORY",
-            "status": "WILD_OR_FREED_POINTER",
-            "description": "Target address does not belong to any mapped PE module or thread stack (likely unallocated heap or dangling pointer)."
+            "category": "UNCAPTURED_OR_UNMAPPED_ADDRESS",
+            "status": "NOT_CAPTURED_IN_PARTIAL_DUMP",
+            "description": (
+                "Target address is absent from captured MiniDump memory ranges, loaded modules, and thread stacks; "
+                "without MemoryInfoListStream (Stream 16) or a verified live VAD query, absence in a partial dump does not prove unallocated memory."
+            ),
         }
 
     @staticmethod
@@ -825,10 +874,27 @@ class CrashRootCauseAnalyzer:
                 "details": f"[{mem_expr}] = 0x{computed_addr:X} points into memory that was mapped at crash time; the {str(access_type).lower()} violated its page protection (e.g. writing read-only/shared data, or a stale pointer into a reused region)."
             })
 
+        if spatial_verdict.get("status") == "RESERVED_NOT_COMMITTED":
+            return dict(common, **{
+                "root_cause": f"RESERVED_UNCOMMITTED_ACCESS_{access_type}",
+                "confidence": confidence,
+                "details": f"Register {culprit.upper()} points into MEM_RESERVE (uncommitted) memory at 0x{computed_addr:X}; backing physical/pagefile pages are not committed."
+            })
+
+        if spatial_verdict.get("status") == "NOT_CAPTURED_IN_PARTIAL_DUMP":
+            return dict(common, **{
+                "root_cause": f"UNCAPTURED_MEMORY_ACCESS_VIOLATION_{access_type}",
+                "confidence": confidence if verified_code else "MEDIUM_HEURISTIC",
+                "details": (
+                    f"Register {culprit.upper()} holds 0x{culprit_val:X}; [{mem_expr}] = 0x{computed_addr:X} triggered an access violation, "
+                    "but the page is not captured in this partial MiniDump (cannot distinguish unallocated/freed vs omitted committed memory without Stream 16 or live VAD)."
+                ),
+            })
+
         return dict(common, **{
             "root_cause": f"WILD_POINTER_DEREFERENCE_{access_type}",
             "confidence": confidence if verified_code else "MEDIUM_HEURISTIC",
-            "details": f"Register {culprit.upper()} holds an invalid pointer (0x{culprit_val:X}); [{mem_expr}] = 0x{computed_addr:X} is unmapped or protected."
+            "details": f"Register {culprit.upper()} holds an invalid/unallocated pointer (0x{culprit_val:X}); [{mem_expr}] = 0x{computed_addr:X} is confirmed unmapped or protected."
         })
 
     FAST_FAIL_CODES = {

@@ -2,6 +2,7 @@
 # @category Bintra
 # @menupath Tools.Bintra.Run Python Semantic Deobfuscation Bridge
 
+import hashlib
 import os
 import sys
 import json
@@ -166,12 +167,44 @@ def run():
             "pcode_ops": pcode_ops
         })
 
+    target_sha256 = None
+    try:
+        if hasattr(currentProgram, "getExecutableSHA256") and currentProgram.getExecutableSHA256():
+            target_sha256 = str(currentProgram.getExecutableSHA256()).lower()
+    except Exception:
+        target_sha256 = None
+    if not target_sha256:
+        try:
+            exe_path = currentProgram.getExecutablePath()
+            if exe_path and os.path.isfile(exe_path):
+                h = hashlib.sha256()
+                with open(exe_path, "rb") as ef:
+                    for chunk in iter(lambda: ef.read(65536), b""):
+                        h.update(chunk)
+                target_sha256 = h.hexdigest().lower()
+        except Exception:
+            pass
+
     payload = {
         "program_name": currentProgram.getName(),
         "image_base": "0x" + currentProgram.getImageBase().toString(),
+        "sha256": target_sha256,
         "functions_count": len(funcs_data),
         "functions": funcs_data
     }
+    content_canon = json.dumps(
+        {
+            "program_name": payload["program_name"],
+            "image_base": payload["image_base"],
+            "sha256": payload["sha256"] or "",
+            "functions": payload["functions"],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    export_content_sha256 = hashlib.sha256(content_canon.encode("utf-8")).hexdigest()
+    payload["export_content_sha256"] = export_content_sha256
 
     # Write export JSON inside authorized Bintra workspace
     ws_dir = os.path.join(os.path.expanduser("~"), ".bintra", "workspace")
@@ -188,6 +221,16 @@ def run():
 
     with open(export_path, "w") as f:
         json.dump(payload, f, indent=2)
+    with open(export_path + ".provenance.json", "w") as pf:
+        json.dump(
+            {
+                "program_name": payload["program_name"],
+                "target_sha256": target_sha256,
+                "export_content_sha256": export_content_sha256,
+            },
+            pf,
+            indent=2,
+        )
 
     # Invoke Bintra
     python_exe = os.environ.get("PYTHON_EXE", "python")

@@ -438,7 +438,8 @@ class GhidraExportStore:
                         if "program_name" in obj or "image_base" in obj:
                             for k, v in obj.items():
                                 if k != "functions":
-                                    cur.execute("INSERT OR REPLACE INTO program_metadata VALUES (?, ?)", (str(k), str(v)))
+                                    serialized_v = json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v)
+                                    cur.execute("INSERT OR REPLACE INTO program_metadata VALUES (?, ?)", (str(k), serialized_v))
                         if "functions" in obj and isinstance(obj["functions"], list):
                             for fn in obj["functions"]:
                                 _process_function(fn)
@@ -450,7 +451,8 @@ class GhidraExportStore:
                 if isinstance(payload, dict):
                     for k, v in payload.items():
                         if k != "functions":
-                            cur.execute("INSERT OR REPLACE INTO program_metadata VALUES (?, ?)", (str(k), str(v)))
+                            serialized_v = json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v)
+                            cur.execute("INSERT OR REPLACE INTO program_metadata VALUES (?, ?)", (str(k), serialized_v))
                     for fn in payload.get("functions", []):
                         _process_function(fn)
                 elif isinstance(payload, list):
@@ -545,8 +547,55 @@ class GhidraExportStore:
         cur.execute("SELECT value FROM program_metadata WHERE key = ?", (key,))
         row = cur.fetchone()
         if row:
-            return row["value"]
+            val = row["value"]
+            if isinstance(val, str) and ((val.startswith("{") and val.endswith("}")) or (val.startswith("[") and val.endswith("]"))):
+                try:
+                    return json.loads(val)
+                except ValueError:
+                    pass
+            return val
         return default
+
+    def get_function_containing_address(self, candidate_addrs: List[int]) -> Optional[Dict[str, Any]]:
+        """Locates the function enclosing any of `candidate_addrs` by entry_point + size."""
+        valid_addrs = [a for a in candidate_addrs if isinstance(a, int) and a > 0]
+        if not valid_addrs:
+            return None
+
+        def _parse_addr(val: Any) -> Optional[int]:
+            if isinstance(val, int):
+                return val
+            if isinstance(val, str):
+                s = val.strip().lower()
+                try:
+                    return int(s, 16) if s.startswith("0x") else int(s)
+                except ValueError:
+                    return None
+            return None
+
+        best_exact: Optional[Dict[str, Any]] = None
+        best_range: Optional[Dict[str, Any]] = None
+        best_span: Optional[int] = None
+
+        for fn in self.iter_functions():
+            entry = _parse_addr(fn.get("entry_point") or fn.get("address"))
+            if entry is None:
+                continue
+            size = int(fn.get("size") or 0)
+            for addr in valid_addrs:
+                if addr == entry:
+                    return fn
+                if size > 0 and entry <= addr < entry + size:
+                    if best_range is None or (best_span is None or size < best_span):
+                        best_range = fn
+                        best_span = size
+                if best_exact is None:
+                    for op in fn.get("pcode_ops") or []:
+                        op_a = _parse_addr(op.get("address"))
+                        if op_a is not None and op_a == addr:
+                            best_exact = fn
+                            break
+        return best_exact or best_range
 
     def get_function(self, name_or_addr: str) -> Optional[Dict[str, Any]]:
         """

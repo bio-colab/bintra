@@ -1429,75 +1429,275 @@ class GhidraDeepAnalyzer:
             "epistemic_classification": "GHIDRA_STATIC_TOPOLOGY_PARSE",
         }
 
+    @staticmethod
+    def _parse_hex_or_int(val: Any) -> Optional[int]:
+        if isinstance(val, int) and not isinstance(val, bool):
+            return val
+        if isinstance(val, str):
+            s = val.strip().lower()
+            if s.startswith("0x"):
+                try:
+                    return int(s, 16)
+                except ValueError:
+                    return None
+            try:
+                return int(s)
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _varnode_key_and_tokens(vn: Any) -> Tuple[str, List[str]]:
+        """Normalizes string or Ghidra Varnode dict into `(ssa_key, token_strings)`."""
+        if vn is None:
+            return "", []
+        if isinstance(vn, dict):
+            tokens: List[str] = []
+            for k in ("name", "repr", "def_id", "offset"):
+                val = vn.get(k)
+                if val is not None and str(val):
+                    tokens.append(str(val))
+            kind = str(vn.get("kind") or "")
+            if vn.get("def_id"):
+                ssa_key = str(vn["def_id"])
+            elif kind == "unique" and vn.get("unique_id") is not None:
+                ssa_key = f"u:{vn['unique_id']}"
+            elif kind == "register" and vn.get("name"):
+                ssa_key = f"reg:{vn['name']}"
+            elif vn.get("repr"):
+                ssa_key = str(vn["repr"])
+            elif vn.get("name"):
+                ssa_key = str(vn["name"])
+            else:
+                ssa_key = json.dumps(vn, sort_keys=True, ensure_ascii=False)
+            return ssa_key, tokens
+        s = str(vn)
+        return s, ([s] if s else [])
+
+    @classmethod
+    def _reg_family_for(cls, reg: Optional[str]) -> Set[str]:
+        if not reg:
+            return set()
+        r = str(reg).upper().strip()
+        fams = [
+            {"EAX", "RAX", "AX", "AL", "AH"},
+            {"EBX", "RBX", "BX", "BL", "BH"},
+            {"ECX", "RCX", "CX", "CL", "CH"},
+            {"EDX", "RDX", "DX", "DL", "DH"},
+            {"ESI", "RSI", "SI", "SIL"},
+            {"EDI", "RDI", "DI", "DIL"},
+            {"ESP", "RSP", "SP", "SPL"},
+            {"EBP", "RBP", "BP", "BPL"},
+            {"EIP", "RIP", "IP"},
+            {"R8", "R8D", "R8W", "R8B"}, {"R9", "R9D", "R9W", "R9B"},
+            {"R10", "R10D", "R10W", "R10B"}, {"R11", "R11D", "R11W", "R11B"},
+            {"R12", "R12D", "R12W", "R12B"}, {"R13", "R13D", "R13W", "R13B"},
+            {"R14", "R14D", "R14W", "R14B"}, {"R15", "R15D", "R15W", "R15B"},
+        ]
+        for fam in fams:
+            if r in fam:
+                return fam
+        return {r}
+
     def slice_data_flow(
-        self, func_data: Dict[str, Any], target_var: Optional[str] = None
+        self,
+        func_data: Dict[str, Any],
+        target_var: Optional[str] = None,
+        target_address: Optional[Union[int, str, List[Any], Tuple[Any, ...]]] = None,
+        target_register: Optional[str] = None,
+        image_base: Optional[Union[int, str]] = None,
     ) -> Dict[str, Any]:
         """
         Intra-procedural High P-Code SSA backward/forward def-use slice & taint summary.
         Tracks where pointers/values originate (PARAM/LOAD/CALL) and where they flow (STORE/CALL/CBRANCH/RETURN).
+        When `target_address` (fault VA or RVA) and/or `target_register` are supplied, seeds
+        the backward slice directly from the sink/operation matching that crash instruction.
         """
+        import re as _re
         ops = func_data.get("pcode_ops", [])
         fn_name = str(func_data.get("name", func_data.get("entry_point", "unknown")))
+        base_int = self._parse_hex_or_int(image_base)
+
+        candidate_addrs: Set[int] = set()
+        raw_targets = target_address if isinstance(target_address, (list, tuple, set)) else [target_address]
+        for t_a in raw_targets:
+            parsed = self._parse_hex_or_int(t_a)
+            if parsed is not None:
+                candidate_addrs.add(parsed)
+                if base_int and parsed < base_int:
+                    candidate_addrs.add(base_int + parsed)
+                elif base_int and parsed >= base_int:
+                    candidate_addrs.add(parsed - base_int)
+
+        reg_set = self._reg_family_for(target_register)
 
         defs: Dict[str, Dict[str, Any]] = {}
         uses: Dict[str, List[int]] = {}
         sinks: List[Dict[str, Any]] = []
         sources: List[Dict[str, Any]] = []
+        op_records: List[Dict[str, Any]] = []
 
         for idx, op in enumerate(ops):
             opcode = str(op.get("opcode", "")).upper()
             out_v = op.get("output")
-            in_vs = [str(v) for v in op.get("inputs", [])]
+            raw_inputs = op.get("inputs", []) or []
+            in_keys: List[str] = []
+            in_tokens: List[str] = []
+            for v in raw_inputs:
+                k, toks = self._varnode_key_and_tokens(v)
+                in_keys.append(k)
+                in_tokens.extend(toks if toks else ([k] if k else []))
 
-            if out_v is not None:
-                out_s = str(out_v)
-                defs[out_s] = {"op_index": idx, "opcode": opcode, "inputs": in_vs, "address": op.get("address")}
-                if opcode in ("LOAD", "CALL", "CALLIND") or "param" in out_s.lower():
-                    sources.append({"var": out_s, "op_index": idx, "opcode": opcode, "address": op.get("address")})
+            out_key, out_tokens = self._varnode_key_and_tokens(out_v)
+            op_addr = op.get("address")
 
-            for iv in in_vs:
-                uses.setdefault(iv, []).append(idx)
+            op_rec = {
+                "op_index": idx,
+                "opcode": opcode,
+                "address": op_addr,
+                "inputs": in_tokens if in_tokens else in_keys,
+                "input_keys": in_keys,
+                "output": out_tokens[0] if out_tokens else out_key,
+                "output_key": out_key,
+                "output_tokens": out_tokens,
+            }
+            op_records.append(op_rec)
 
-            if opcode in ("STORE", "CALL", "CALLIND", "CBRANCH", "RETURN"):
-                sinks.append({
+            if out_v is not None and out_key:
+                def_entry = {
                     "op_index": idx,
                     "opcode": opcode,
-                    "address": op.get("address"),
-                    "inputs": in_vs,
-                    "target": op.get("target_name") or op.get("target_address"),
-                })
+                    "inputs": in_tokens if in_tokens else in_keys,
+                    "input_keys": in_keys,
+                    "output": op_rec["output"],
+                    "output_tokens": out_tokens,
+                    "address": op_addr,
+                }
+                defs[out_key] = def_entry
+                for alt_t in out_tokens:
+                    if alt_t not in defs:
+                        defs[alt_t] = def_entry
+                if opcode in ("LOAD", "CALL", "CALLIND") or "param" in out_key.lower():
+                    sources.append({
+                        "var": op_rec["output"],
+                        "var_key": out_key,
+                        "inputs": op_rec["inputs"],
+                        "op_index": idx,
+                        "opcode": opcode,
+                        "address": op_addr,
+                    })
 
-        # Backward slice from target_var (or first sink input if target_var is omitted)
+            for iv_key, iv_disp in zip(in_keys, op_rec["inputs"]):
+                if iv_key:
+                    uses.setdefault(iv_key, []).append(idx)
+                if iv_disp and iv_disp != iv_key:
+                    uses.setdefault(iv_disp, []).append(idx)
+
+            if opcode in ("STORE", "CALL", "CALLIND", "CBRANCH", "RETURN"):
+                sink_rec = {
+                    "op_index": idx,
+                    "opcode": opcode,
+                    "address": op_addr,
+                    "inputs": op_rec["inputs"],
+                    "input_keys": in_keys,
+                    "output": op_rec["output"] if out_v is not None else None,
+                    "target": op.get("target_name") or op.get("target_address"),
+                }
+                sinks.append(sink_rec)
+
+        def _tokens_match_reg(tokens: List[str]) -> bool:
+            if not reg_set:
+                return False
+            for t in tokens:
+                words = set(_re.findall(r"[A-Za-z0-9_]+", str(t).upper()))
+                if words & reg_set:
+                    return True
+            return False
+
+        # Select slice seed: explicit target_var > sink/op matching target_address (+ register) > fallback sinks[0]
         seed_vars: List[str] = []
+        sliced_from_addr = None
+        sliced_from_op_idx = None
+        slice_anchor_matched = False
+
         if target_var:
             seed_vars.append(target_var)
-        elif sinks:
-            seed_vars.extend(sinks[0].get("inputs", [])[:2])
+            slice_anchor_matched = True
+        elif candidate_addrs:
+            matching_sinks = [
+                s for s in sinks
+                if (self._parse_hex_or_int(s.get("address")) in candidate_addrs)
+            ]
+            chosen_sink = None
+            if matching_sinks:
+                reg_hits = [s for s in matching_sinks if _tokens_match_reg(s.get("inputs", []) + ([s["output"]] if s.get("output") else []))]
+                chosen_sink = reg_hits[0] if reg_hits else matching_sinks[0]
+            if chosen_sink:
+                seed_vars.extend([k for k in (chosen_sink.get("input_keys") or chosen_sink.get("inputs", [])) if k])
+                sliced_from_addr = chosen_sink.get("address")
+                sliced_from_op_idx = chosen_sink.get("op_index")
+                slice_anchor_matched = True
+            else:
+                matching_ops = [
+                    r for r in op_records
+                    if (self._parse_hex_or_int(r.get("address")) in candidate_addrs)
+                ]
+                chosen_op = None
+                if matching_ops:
+                    reg_hits = [r for r in matching_ops if _tokens_match_reg(r.get("inputs", []) + r.get("output_tokens", []))]
+                    chosen_op = reg_hits[0] if reg_hits else matching_ops[0]
+                if chosen_op:
+                    seed_vars.extend([k for k in (chosen_op.get("input_keys") or chosen_op.get("inputs", [])) if k])
+                    sliced_from_addr = chosen_op.get("address")
+                    sliced_from_op_idx = chosen_op.get("op_index")
+                    slice_anchor_matched = True
+
+        if not seed_vars and sinks and not target_var:
+            fallback = sinks[0]
+            seed_vars.extend([k for k in (fallback.get("input_keys") or fallback.get("inputs", []))[:2] if k])
+            sliced_from_addr = fallback.get("address")
+            sliced_from_op_idx = fallback.get("op_index")
 
         slice_chain: List[Dict[str, Any]] = []
-        visited_vars = set()
+        visited_vars: Set[str] = set()
         worklist = _deque(seed_vars)
         while worklist and len(slice_chain) < 100:
             v = worklist.popleft()
-            if v in visited_vars:
+            if not v or v in visited_vars:
                 continue
             visited_vars.add(v)
             d = defs.get(v)
             if d:
-                slice_chain.append({"var": v, **d})
-                for iv in d.get("inputs", []):
-                    if iv not in visited_vars:
+                slice_chain.append({
+                    "var": d.get("output") or v,
+                    "var_key": v,
+                    "output": d.get("output") or v,
+                    "op_index": d.get("op_index"),
+                    "opcode": d.get("opcode"),
+                    "inputs": d.get("inputs", []),
+                    "address": d.get("address"),
+                })
+                for iv in (d.get("input_keys") or d.get("inputs", [])):
+                    if iv and iv not in visited_vars:
                         worklist.append(iv)
 
+        sources_out = sources[:25]
+        sinks_out = sinks[:25]
         return {
             "status": "ok",
             "function": fn_name,
+            "entry_point": func_data.get("entry_point") or func_data.get("address"),
             "total_pcode_ops": len(ops),
             "tracked_seed_vars": seed_vars,
+            "sliced_from_address": sliced_from_addr,
+            "sliced_from_op_index": sliced_from_op_idx,
+            "slice_anchor_matched": slice_anchor_matched,
             "sources_count": len(sources),
             "sinks_count": len(sinks),
-            "sources_sample": sources[:25],
-            "sinks_sample": sinks[:25],
+            "sources": sources_out,
+            "sinks": sinks_out,
+            "sources_sample": sources_out,
+            "sinks_sample": sinks_out,
             "backward_slice": slice_chain,
             "decompiler_summary": self.correlate_decompiler_ast(func_data),
             "epistemic_classification": "HIGH_PCODE_SSA_DEF_USE_SLICE",

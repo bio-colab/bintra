@@ -11,10 +11,8 @@ and Hybrid Binary Dissection (DirectML, WinML, ONNX Runtime, GGUF, TFLite, Safet
 import sys
 import ast
 import os
-import json
 import struct
 import hashlib
-import argparse
 import zipfile
 import mmap
 import tempfile
@@ -3071,69 +3069,9 @@ class SensoryCortex:
 
 
 def main():
-    _ensure_utf8_stdio()
-    parser = argparse.ArgumentParser(description="Bintra Binary Reverse Engineering Engine")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    insp_p = subparsers.add_parser("inspect", help="Inspect executable PE/ELF header")
-    insp_p.add_argument("--file", required=True, help="Path to executable binary")
-
-    deob_p = subparsers.add_parser("deobfuscate", help="Detect and prune opaque predicates in code bytes or binary file")
-    deob_p.add_argument("--hex", default=None, help="Hex-encoded machine code bytes")
-    deob_p.add_argument("--file", default=None, help="Path to executable binary")
-    deob_p.add_argument("--offset", default=None, type=lambda x: int(x, 0), help="File offset to analyze (defaults to entry point)")
-    deob_p.add_argument("--size", "--length", dest="size", default=4096, type=lambda x: int(x, 0), help="Number of bytes to analyze (default 4096)")
-
-    dump_p = subparsers.add_parser("dump", help="Extract and preview raw bytes/assembly at an offset")
-    dump_p.add_argument("--file", required=True, help="Path to executable binary")
-    dump_p.add_argument("--offset", required=True, type=lambda x: int(x, 0), help="File offset (e.g. 0x4e0778)")
-    dump_p.add_argument("--length", default=64, type=int, help="Length in bytes (default 64)")
-
-    match_p = subparsers.add_parser("match", help="Match functions across architectures semantically")
-    match_p.add_argument("--func1", required=True, help="First function bytecode hex")
-    match_p.add_argument("--func2", required=True, help="Second function bytecode hex")
-
-    patch_p = subparsers.add_parser("patch", help="Surgically patch binary file on disk")
-    patch_p.add_argument("--source", required=True, help="Source executable")
-    patch_p.add_argument("--output", required=True, help="Patched executable output")
-    patch_p.add_argument("--offset", required=True, type=lambda x: int(x, 0), help="Byte offset (e.g. 0x1A00)")
-    patch_p.add_argument("--patch-hex", required=True, help="Patch hex bytes")
-    patch_p.add_argument("--enforce-nociception", dest="enforce_nociception", action="store_true", default=True, help="Abort patch if nociceptive pain is high (enabled by default)")
-    patch_p.add_argument("--force", "--no-enforce-nociception", dest="enforce_nociception", action="store_false", help="Bypass nociceptive reflex check")
-
-    hyb_p = subparsers.add_parser("scan-hybrid", help="Scan binary for embedded neural logic assets")
-    hyb_p.add_argument("--file", required=True, help="Path to executable binary")
-
-    args = parser.parse_args()
-
-    if args.command == "inspect":
-        res = BinaryFormatInspector.inspect(args.file)
-        print(json.dumps(res, indent=2))
-    elif args.command == "deobfuscate":
-        if args.hex:
-            code = bytes.fromhex(args.hex.replace(" ", ""))
-            res = ContinuousDeobfuscator.deobfuscate_cfg(code)
-        elif args.file:
-            res = ContinuousDeobfuscator.deobfuscate_file(args.file, offset=args.offset, length=args.size)
-        else:
-            print(json.dumps({"error": "Must provide either --hex or --file for deobfuscation."}))
-            sys.exit(1)
-        print(json.dumps(res, indent=2))
-    elif args.command == "dump":
-        res = SurgicalBinaryPatcher.read_bytes(args.file, args.offset, args.length)
-        print(json.dumps(res, indent=2))
-    elif args.command == "match":
-        res = SemanticFunctionMatcher.match_functions(args.func1, args.func2)
-        print(json.dumps(res, indent=2))
-    elif args.command == "patch":
-        res = SurgicalBinaryPatcher.patch_file(
-            args.source, args.output, args.offset, args.patch_hex,
-            enforce_nociception=args.enforce_nociception
-        )
-        print(json.dumps(res, indent=2))
-    elif args.command == "scan-hybrid":
-        res = HybridBinaryDissector.scan_for_embedded_logic(args.file)
-        print(json.dumps(res, indent=2))
+    """Standalone entry point kept for compatibility; the CLI lives in bintra_cli.commands.binary."""
+    from bintra_cli.commands.binary import run_binary_engine
+    run_binary_engine(sys.argv)
 
 
 if __name__ == "__main__":

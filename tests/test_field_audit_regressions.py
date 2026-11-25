@@ -88,8 +88,10 @@ class TestFieldAuditRegressions(unittest.TestCase):
         from ghidra_headless_runner import GhidraHeadlessRunner
 
         with tempfile.TemporaryDirectory() as tmp:
-            fake_bin = Path(tmp) / "analyzeHeadless.bat"
-            fake_bin.write_text("@echo off\n", encoding="utf-8")
+            support_dir = Path(tmp) / "support"
+            support_dir.mkdir(parents=True, exist_ok=True)
+            (support_dir / "analyzeHeadless.bat").write_text("@echo off\n", encoding="utf-8")
+            (support_dir / "analyzeHeadless").write_text("#!/bin/sh\n", encoding="utf-8")
             fake_exe = Path(tmp) / "dummy.exe"
             fake_exe.write_bytes(_build_minimal_pe32())
 
@@ -101,7 +103,7 @@ class TestFieldAuditRegressions(unittest.TestCase):
             with mock.patch("subprocess.run", return_value=fake_proc) as m_sub:
                 res = GhidraHeadlessRunner.run(
                     binary_path=str(fake_exe),
-                    ghidra_path=str(fake_bin),
+                    ghidra_path=str(tmp),
                     project_name="test_jdk_err_proj",
                     delete_project=True,
                 )
@@ -209,8 +211,9 @@ class TestFieldAuditRegressions(unittest.TestCase):
                 "is_microsoft_system_binary": False,
                 "is_whql_certified": False,
             }
-            with mock.patch.object(WindowsSignatureIntelligence, "_verify_win32_signature", return_value=fake_rep):
-                audit = WindowsSignatureIntelligence.audit_directory(tmp, pattern="*.cleo")
+            with mock.patch("windows_intelligence.signature_intelligence.platform.system", return_value="Windows"):
+                with mock.patch.object(WindowsSignatureIntelligence, "_verify_win32_signature", return_value=fake_rep):
+                    audit = WindowsSignatureIntelligence.audit_directory(tmp, pattern="*.cleo")
             self.assertEqual(audit["metrics"]["unsupported_format"], 1)
             self.assertEqual(audit["metrics"]["untrusted_or_expired"], 0)
             self.assertIn("NON_AUTHENTICODE_FILE_FORMAT", audit["files"][0]["risk_flags"])

@@ -52,6 +52,8 @@ class GhidraHeadlessRunner:
 
         if ghidra_path_val:
             p = Path(ghidra_path_val)
+            if p.is_file() and p.name in (headless_name, alt_name):
+                return p
             cand = p / "support" / headless_name
             if cand.exists():
                 return cand

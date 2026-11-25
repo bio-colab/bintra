@@ -643,7 +643,9 @@ class TestAuditRemediations(unittest.TestCase):
         import mcp_server as mcp_mod
 
         self.assertEqual(len(mcp_mod.TOOLS_REGISTRY), 51)
-        dispatch_src = inspect.getsource(mcp_mod.BintraMcpServer.dispatch_tool)
+        # Tool handlers live in per-domain mixins; inspect the handler bound for bintra_memory_scan.
+        from bintra_mcp.tools import TOOL_HANDLERS
+        dispatch_src = inspect.getsource(getattr(mcp_mod.BintraMcpServer, TOOL_HANDLERS["bintra_memory_scan"]))
 
         with tempfile.TemporaryDirectory() as td:
             ws_dir = os.path.join(td, "ws")

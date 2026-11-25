@@ -124,6 +124,8 @@ class AuditLogger:
     _explicitly_cleared: bool = False
     _audit_degraded: bool = False
     _degraded_reason: Optional[str] = None
+    _tamper_detected: bool = False
+    _tamper_reason: Optional[str] = None
     # (path, size, mtime_ns) of the journal right after this process's last append. If the file
     # still matches, no other process has appended and the tail re-read (an extra file open per
     # decision, several ms each on Windows) can be skipped.
@@ -168,6 +170,45 @@ class AuditLogger:
         with cls._lock:
             cls._audit_degraded = True
             cls._degraded_reason = str(reason)
+
+    @classmethod
+    def mark_tampered(cls, reason: str) -> None:
+        """Permanently flags tamper detection for this session so downstream gates fail closed."""
+        with cls._lock:
+            cls._tamper_detected = True
+            cls._tamper_reason = str(reason)
+            cls._audit_degraded = True
+            cls._degraded_reason = str(reason)
+
+    @classmethod
+    def is_tamper_detected(cls) -> bool:
+        """Returns True if cryptographic audit tampering or log deletion was detected."""
+        with cls._lock:
+            return cls._tamper_detected
+
+    @classmethod
+    def get_tamper_reason(cls) -> Optional[str]:
+        """Returns the recorded audit tamper/integrity violation message, if any."""
+        with cls._lock:
+            return cls._tamper_reason
+
+    @staticmethod
+    def _is_tamper_integrity_error(err: AuditIntegrityError) -> bool:
+        """True when an AuditIntegrityError indicates active hash/sequence tampering rather than an unchained legacy format."""
+        msg = str(err).lower()
+        tamper_markers = (
+            "tamper detected",
+            "hash mismatch",
+            "hash break",
+            "hash chain broken",
+            "sequence discontinuity",
+            "bounds",
+            "missing or truncated",
+            "empty or has no readable",
+            "corrupt json",
+            "invalid json",
+        )
+        return any(m in msg for m in tamper_markers)
 
     @classmethod
     def is_audit_degraded(cls) -> bool:
@@ -549,18 +590,27 @@ class AuditLogger:
                         st = os.stat(target_file)
                         disk_matches_mem = cls._known_disk_state == (target_file, st.st_size, st.st_mtime_ns)
                     except OSError:
+                        if cls._known_disk_state[0] == target_file:
+                            reason = f"Audit log tamper/deletion detected: previously verified file '{target_file}' vanished from disk"
+                            cls.mark_tampered(reason)
+                            raise AuditIntegrityError(reason)
                         disk_matches_mem = False
 
-                if cls._sequence > 0 and cls._journal and (disk_matches_mem or not target_file or not os.path.exists(target_file)):
+                if cls._sequence > 0 and cls._journal and (disk_matches_mem or not target_file):
                     res = {"recovered": True, "records_count": len(cls._journal), "head_hash": cls._last_hash}
                 else:
                     try:
                         res = cls._recover_chain_locked(target_file, allow_seal=plock.acquired, use_cache=True)
                     except AuditIntegrityError as err:
-                        sealed_segs = cls._sealed_segments(target_file) if target_file else []
-                        if not rotate_on_corrupt or (not os.path.exists(target_file) and not sealed_segs):
+                        is_tamper = cls._is_tamper_integrity_error(err)
+                        if is_tamper:
+                            cls.mark_tampered(str(err))
+                        else:
                             cls._audit_degraded = True
                             cls._degraded_reason = str(err)
+                        sealed_segs = cls._sealed_segments(target_file) if target_file else []
+                        # Never rotate away tamper evidence (hash/sequence violations); only pre-chain legacy logs may rotate.
+                        if is_tamper or not rotate_on_corrupt or (not os.path.exists(target_file) and not sealed_segs):
                             raise
                         ts_tag = int(time.time())
                         rotated = f"{target_file}.legacy.{ts_tag}.jsonl"
@@ -586,8 +636,10 @@ class AuditLogger:
                         cls._last_hash = "0" * 64
                         cls._known_disk_state = None
                         cls._journal.clear()
-                        print(f"[Bintra][AuditLogger] Warning: rotated legacy/broken audit log ({err}) -> {rotated}", file=sys.stderr)
-                        res = {"recovered": False, "records_count": 0, "rotated_legacy_log": rotated, "head_hash": cls._last_hash}
+                        cls._audit_degraded = True
+                        cls._degraded_reason = str(err)
+                        print(f"[Bintra][AuditLogger] Warning: rotated legacy unchained audit log ({err}) -> {rotated}", file=sys.stderr)
+                        res = {"recovered": False, "records_count": 0, "rotated_legacy_log": rotated, "audit_degraded": True, "head_hash": cls._last_hash}
                     except OSError as io_err:
                         cls._audit_degraded = True
                         cls._degraded_reason = str(io_err)
@@ -649,6 +701,18 @@ class AuditLogger:
         with cls._lock:
             lock_path = (cls._log_file or "") + ".lock"
             with _ProcessFileLock(lock_path) as plock:
+                if cls._log_file and cls._tamper_detected and not cls._explicitly_cleared:
+                    if cls._strict_persistence:
+                        raise AuditIntegrityError(
+                            f"CRITICAL: Refusing to append to tampered audit log: {cls._tamper_reason or 'integrity violation'}"
+                        )
+                    return {
+                        "sequence": None, "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "component": clean_component, "operation": clean_op, "target": clean_target,
+                        "requested_capability": requested_capability, "decision": decision.upper(),
+                        "reason": clean_reason, "side_effects": side_effects or [], "result": result.upper(),
+                        "metadata": clean_meta, "persisted": False, "tamper_detected": True,
+                    }
                 if cls._log_file and not plock.acquired and not cls._explicitly_cleared:
                     # Never append without the inter-process lock: two writers would emit the
                     # same sequence number and silently break the hash chain on disk. The
@@ -739,6 +803,13 @@ class AuditLogger:
                 try:
                     f.write(encoded)
                     f.flush()
+                    if hasattr(f, "fileno"):
+                        try:
+                            fd = f.fileno()
+                        except (OSError, ValueError):
+                            fd = None
+                        if isinstance(fd, int):
+                            os.fsync(fd)
                 except Exception:
                     try:
                         f.truncate(pre_size)
@@ -924,3 +995,5 @@ class AuditLogger:
             cls._explicitly_cleared = True
             cls._audit_degraded = False
             cls._degraded_reason = None
+            cls._tamper_detected = False
+            cls._tamper_reason = None

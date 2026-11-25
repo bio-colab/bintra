@@ -164,18 +164,23 @@ def main():
             if isinstance(init_res, dict) and init_res.get("audit_degraded") and strict_audit:
                 raise AuditPersistenceError(init_res.get("audit_degraded_reason") or "Audit persistence degraded")
         except Exception as audit_err:
+            is_tamper_err = isinstance(audit_err, __import__("security").AuditIntegrityError) and AuditLogger.is_tamper_detected()
             if strict_audit:
                 print(json.dumps({
                     "status": "error",
                     "command": cmd_lower,
                     "error_type": type(audit_err).__name__,
-                    "error": f"AUDIT_INIT_FAILED: {audit_err}",
-                    "message": f"Fail-closed refusal for mutation command '{cmd_lower}': audit log initialization/persistence failed ({audit_err}).",
+                    "error": f"{'AUDIT_TAMPER_DETECTED' if is_tamper_err else 'AUDIT_INIT_FAILED'}: {audit_err}",
+                    "message": f"Fail-closed refusal for mutation command '{cmd_lower}': audit log integrity/persistence failed ({audit_err}).",
                     "audit_degraded": True,
+                    "audit_tamper_detected": bool(is_tamper_err),
                     "audit_degraded_reason": str(audit_err),
                 }, indent=2, ensure_ascii=False))
                 sys.exit(1)
-            AuditLogger.mark_degraded(str(audit_err))
+            if is_tamper_err:
+                AuditLogger.mark_tampered(str(audit_err))
+            else:
+                AuditLogger.mark_degraded(str(audit_err))
             sys.stderr.write(f"[AUDIT DEGRADATION WARNING] Audit log degraded for '{cmd_lower}': {audit_err}\n")
 
         # Establish isolated target scope and authorized workspace for CLI execution
@@ -255,6 +260,8 @@ def main():
                                 parsed = json.loads(raw_out)
                                 if isinstance(parsed, dict):
                                     parsed["audit_degraded"] = True
+                                    if AuditLogger.is_tamper_detected():
+                                        parsed["audit_tamper_detected"] = True
                                     parsed["audit_degraded_reason"] = AuditLogger.get_degraded_reason()
                                     if compact_mode:
                                         final_out = json.dumps(parsed, separators=(",", ":"), ensure_ascii=False) + "\n"
@@ -304,6 +311,8 @@ def main():
             }
             if AuditLogger.is_audit_degraded() or isinstance(e, AuditPersistenceError):
                 err_payload["audit_degraded"] = True
+                if AuditLogger.is_tamper_detected():
+                    err_payload["audit_tamper_detected"] = True
                 err_payload["audit_degraded_reason"] = AuditLogger.get_degraded_reason() or str(e)
             if os.environ.get("BINTRA_DEBUG") == "1":
                 import traceback

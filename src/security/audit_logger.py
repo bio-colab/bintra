@@ -15,7 +15,7 @@ import time
 import hashlib
 import threading
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 
 class _ProcessFileLock:
@@ -222,15 +222,72 @@ class AuditLogger:
         return sorted((p for p in segs if _first_seq(p) >= 0), key=_first_seq)
 
     @classmethod
+    def _verify_segment_file(
+        cls,
+        file_path: str,
+        start_seq: int,
+        start_prev: str,
+        collect: Optional[List[Dict[str, Any]]] = None,
+    ) -> Tuple[int, str, Optional[Dict[str, Any]]]:
+        """
+        Streams and cryptographically verifies every JSONL record in `file_path`
+        starting at `start_seq` and `start_prev`.
+        Returns `(next_seq, head_hash, last_record)`.
+        """
+        expected_seq = start_seq
+        expected_prev = start_prev
+        last_rec: Optional[Dict[str, Any]] = None
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError as jde:
+                    raise AuditIntegrityError(
+                        f"Audit log '{file_path}' has invalid JSON at line {line_num}: {jde}"
+                    ) from jde
+                if rec.get("sequence") != expected_seq:
+                    raise AuditIntegrityError(
+                        f"Audit log sequence discontinuity on disk in '{file_path}' at index {expected_seq}: got {rec.get('sequence')}"
+                    )
+                if rec.get("prev_hash") != expected_prev:
+                    raise AuditIntegrityError(
+                        f"Audit log hash break on disk in '{file_path}' at sequence {expected_seq}: expected {expected_prev}, got {rec.get('prev_hash')}"
+                    )
+                payload = {k: v for k, v in rec.items() if k not in ("prev_hash", "record_hash")}
+                computed = cls._compute_hash(payload, expected_prev)
+                if computed != rec.get("record_hash"):
+                    raise AuditIntegrityError(
+                        f"Audit log tamper detected on disk in '{file_path}' at sequence {expected_seq}: hash mismatch"
+                    )
+                expected_prev = rec.get("record_hash")
+                expected_seq += 1
+                last_rec = rec
+                if collect is not None:
+                    collect.append(rec)
+        return expected_seq, expected_prev, last_rec
+
+    @classmethod
     def _sealed_anchor(cls, target_file: str) -> Optional[Dict[str, Any]]:
-        """The last record of the newest sealed segment: the chain anchor for the active segment."""
+        """
+        Cryptographically verifies every sealed archive segment in chronological order
+        from genesis (seq 0, prev_hash '0'*64) and returns the tail record of the newest segment.
+        """
         segs = cls._sealed_segments(target_file)
         if not segs:
             return None
-        tail = cls._read_disk_tail(segs[-1])
-        if not tail or "record_hash" not in tail or "sequence" not in tail:
-            raise AuditIntegrityError(f"Sealed audit segment '{segs[-1]}' has no readable tail record.")
-        return tail
+        next_seq = 0
+        head_hash = "0" * 64
+        last_rec: Optional[Dict[str, Any]] = None
+        for seg_path in segs:
+            prev_seq = next_seq
+            next_seq, head_hash, seg_tail = cls._verify_segment_file(seg_path, next_seq, head_hash)
+            if next_seq == prev_seq or not seg_tail:
+                raise AuditIntegrityError(f"Sealed audit segment '{seg_path}' is empty or has no readable records.")
+            last_rec = seg_tail
+        return last_rec
 
     @classmethod
     def _seal_active_segment_locked(cls, target_file: str) -> Optional[str]:
@@ -266,31 +323,13 @@ class AuditLogger:
                 res["sealed_anchor_sequence"] = anchor["sequence"]
             return res
 
-        records = []
-        with open(target_file, "r", encoding="utf-8") as f:
-            for line_num, line in enumerate(f, 1):
-                line = line.strip()
-                if line:
-                    try:
-                        records.append(json.loads(line))
-                    except json.JSONDecodeError as jde:
-                        raise AuditIntegrityError(f"Audit log on disk has invalid JSON at line {line_num}: {jde}")
-
-        # Verify the active segment, chained from the sealed anchor (or genesis)
-        expected_prev = start_hash
-        for idx, rec in enumerate(records, start_seq):
-            if rec.get("sequence") != idx:
-                raise AuditIntegrityError(f"Audit log sequence discontinuity on disk at index {idx}: got {rec.get('sequence')}")
-            if rec.get("prev_hash") != expected_prev:
-                raise AuditIntegrityError(f"Audit log hash break on disk at sequence {idx}: expected {expected_prev}, got {rec.get('prev_hash')}")
-            payload = {k: v for k, v in rec.items() if k not in ("prev_hash", "record_hash")}
-            computed = cls._compute_hash(payload, expected_prev)
-            if computed != rec.get("record_hash"):
-                raise AuditIntegrityError(f"Audit log tamper detected on disk at sequence {idx}: hash mismatch")
-            expected_prev = rec.get("record_hash")
+        records: List[Dict[str, Any]] = []
+        next_seq, expected_prev, _ = cls._verify_segment_file(
+            target_file, start_seq, start_hash, collect=records
+        )
 
         cls._journal = records
-        cls._sequence = start_seq + len(records)
+        cls._sequence = next_seq
         cls._last_hash = expected_prev
         cls._explicitly_cleared = False
         res = {"recovered": True, "records_count": len(records), "head_hash": expected_prev}
@@ -354,13 +393,21 @@ class AuditLogger:
                     try:
                         res = cls._recover_chain_locked(target_file)
                     except AuditIntegrityError as err:
-                        if not rotate_on_corrupt or not os.path.exists(target_file):
+                        sealed_segs = cls._sealed_segments(target_file) if target_file else []
+                        if not rotate_on_corrupt or (not os.path.exists(target_file) and not sealed_segs):
                             cls._audit_degraded = True
                             cls._degraded_reason = str(err)
                             raise
-                        rotated = f"{target_file}.legacy.{int(time.time())}.jsonl"
+                        ts_tag = int(time.time())
+                        rotated = f"{target_file}.legacy.{ts_tag}.jsonl"
+                        rotated_any = False
                         try:
-                            os.replace(target_file, rotated)
+                            if os.path.exists(target_file):
+                                os.replace(target_file, rotated)
+                                rotated_any = True
+                            for s_idx, seg_path in enumerate(sealed_segs):
+                                os.replace(seg_path, f"{seg_path}.legacy.{ts_tag}.{s_idx}.jsonl")
+                                rotated_any = True
                         except OSError as rot_err:
                             rotated = None
                             if cls._strict_persistence:
@@ -369,6 +416,8 @@ class AuditLogger:
                                 raise AuditPersistenceError(
                                     f"CRITICAL: Cannot rotate corrupt audit log '{target_file}': {rot_err}"
                                 ) from rot_err
+                        if not rotated_any:
+                            rotated = None
                         cls._sequence = 0
                         cls._last_hash = "0" * 64
                         cls._journal.clear()
@@ -511,20 +560,48 @@ class AuditLogger:
     def verify_audit_chain(cls, log_path: Optional[str] = None) -> Dict[str, Any]:
         """
         Cryptographically verifies the hash chain of audit records to prove zero tampering.
-        If log_path is provided, verifies that file. Otherwise verifies in-memory journal
-        and asserts synchronization with on-disk log if present.
+        Verifies all sealed archive segments plus the active journal on disk in chronological
+        order, or falls back to the in-memory journal when no disk log exists.
         """
-        records = []
         target = log_path or (cls._log_file if not cls._explicitly_cleared else None)
-        if target and os.path.exists(target) and os.path.getsize(target) > 0:
-            with open(target, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        records.append(json.loads(line))
-        else:
-            with cls._lock:
-                records = [dict(r) for r in cls._journal]
+        segs = cls._sealed_segments(target) if target else []
+        active_has_data = bool(target and os.path.exists(target) and os.path.getsize(target) > 0)
+
+        if segs or active_has_data:
+            next_seq = 0
+            head_hash = "0" * 64
+            try:
+                for seg_path in segs:
+                    prev_seq = next_seq
+                    next_seq, head_hash, _ = cls._verify_segment_file(seg_path, next_seq, head_hash)
+                    if next_seq == prev_seq:
+                        return {
+                            "is_valid": False,
+                            "error": f"Sealed audit segment '{seg_path}' is empty",
+                            "failed_sequence": next_seq,
+                        }
+                if active_has_data:
+                    next_seq, head_hash, _ = cls._verify_segment_file(target, next_seq, head_hash)
+            except AuditIntegrityError as err:
+                msg = str(err)
+                failed_seq = next_seq
+                m = re.search(r"(?:index|sequence)\s+(\d+)", msg)
+                if m:
+                    failed_seq = int(m.group(1))
+                return {
+                    "is_valid": False,
+                    "error": msg,
+                    "failed_sequence": failed_seq,
+                }
+            return {
+                "is_valid": True,
+                "records_verified": next_seq,
+                "segments_verified": len(segs) + (1 if active_has_data else 0),
+                "head_hash": head_hash,
+            }
+
+        with cls._lock:
+            records = [dict(r) for r in cls._journal]
 
         expected_prev = "0" * 64
         for idx, rec in enumerate(records):

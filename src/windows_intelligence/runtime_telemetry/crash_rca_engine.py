@@ -316,8 +316,8 @@ class CrashRootCauseAnalyzer:
         return None
 
     @staticmethod
-    def _read_pe_identity(path: str) -> Optional[Tuple[int, int]]:
-        """Returns (TimeDateStamp, SizeOfImage) from a PE header, or None."""
+    def _read_pe_identity(path: str) -> Optional[Tuple[int, int, int]]:
+        """Returns (TimeDateStamp, SizeOfImage, CheckSum) from a PE header, or None."""
         import struct
         try:
             with open(path, "rb") as fh:
@@ -325,17 +325,28 @@ class CrashRootCauseAnalyzer:
             if hdr[:2] != b"MZ":
                 return None
             e_lfanew = struct.unpack_from("<I", hdr, 0x3C)[0]
-            if e_lfanew + 24 + 60 > len(hdr) or hdr[e_lfanew:e_lfanew + 4] != b"PE\0\0":
+            if e_lfanew + 24 + 68 > len(hdr) or hdr[e_lfanew:e_lfanew + 4] != b"PE\0\0":
                 return None
             timestamp = struct.unpack_from("<I", hdr, e_lfanew + 8)[0]
             size_of_image = struct.unpack_from("<I", hdr, e_lfanew + 24 + 56)[0]
-            return timestamp, size_of_image
+            checksum = struct.unpack_from("<I", hdr, e_lfanew + 24 + 64)[0]
+            return timestamp, size_of_image, checksum
         except (OSError, struct.error):
             return None
 
     @classmethod
-    def _verify_module_image(cls, path: str, mod_rec: Optional[Dict[str, Any]]) -> Tuple[str, str]:
-        """Compares an on-disk image against the module record captured in the dump."""
+    def _verify_module_image(
+        cls,
+        path: str,
+        mod_rec: Optional[Dict[str, Any]],
+        pe_info: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[str, str]:
+        """
+        Compares an on-disk image against the module record captured in the dump.
+        Requires strong build identity (CodeView RSDS GUID+Age or non-zero CheckSum +
+        TimeDateStamp + SizeOfImage) before returning 'VERIFIED'. Timestamp+SizeOfImage
+        alone returns 'HEADER_MATCH_ONLY' (treated as unverified for deterministic blame).
+        """
         if not mod_rec:
             return "UNVERIFIABLE", "No module record in the dump to compare against."
         ident = cls._read_pe_identity(path)
@@ -343,17 +354,50 @@ class CrashRootCauseAnalyzer:
             return "UNVERIFIABLE", f"'{path}' has no readable PE header."
         exp_ts = mod_rec.get("timestamp")
         exp_size = mod_rec.get("size")
-        if exp_ts in (None, 0) and exp_size in (None, 0):
-            return "UNVERIFIABLE", "Dump module record carries no TimeDateStamp/SizeOfImage."
-        disk_ts, disk_size = ident
+        exp_csum = cls._to_int(mod_rec.get("checksum"), 0)
+        exp_pdb = mod_rec.get("pdb") if isinstance(mod_rec.get("pdb"), dict) else None
+        if exp_ts in (None, 0) and exp_size in (None, 0) and exp_csum == 0 and not exp_pdb:
+            return "UNVERIFIABLE", "Dump module record carries no PE identity metadata."
+        disk_ts, disk_size, disk_csum = ident
         mismatches = []
         if exp_ts not in (None, 0) and cls._to_int(exp_ts) != disk_ts:
             mismatches.append(f"TimeDateStamp dump=0x{cls._to_int(exp_ts):08X} disk=0x{disk_ts:08X}")
         if exp_size not in (None, 0) and cls._to_int(exp_size) != disk_size:
             mismatches.append(f"SizeOfImage dump=0x{cls._to_int(exp_size):X} disk=0x{disk_size:X}")
+        if exp_csum != 0 and disk_csum != exp_csum:
+            mismatches.append(f"CheckSum dump=0x{exp_csum:08X} disk=0x{disk_csum:08X}")
+
+        pdb_verified = False
+        if exp_pdb and exp_pdb.get("signature") == "RSDS" and exp_pdb.get("guid"):
+            if pe_info is None:
+                try:
+                    from binary_neural_engine import BinaryFormatInspector
+                    pe_info = BinaryFormatInspector.inspect(path)
+                except Exception:
+                    pe_info = None
+            dbg = pe_info.get("debug_directory", {}) if isinstance(pe_info, dict) else {}
+            disk_guid = str(dbg.get("pdb_guid") or "").strip("{}").lower()
+            disk_age = dbg.get("pdb_age")
+            exp_guid = str(exp_pdb.get("guid") or "").strip("{}").lower()
+            exp_age = exp_pdb.get("age")
+            if disk_guid:
+                if (exp_guid, exp_age) != (disk_guid, disk_age):
+                    mismatches.append(f"CodeView RSDS dump={exp_guid}:{exp_age} disk={disk_guid}:{disk_age}")
+                else:
+                    pdb_verified = True
+
         if mismatches:
             return "MISMATCH", "On-disk image differs from the image loaded at crash time: " + "; ".join(mismatches)
-        return "VERIFIED", "TimeDateStamp and SizeOfImage match the module loaded at crash time."
+
+        checksum_verified = bool(exp_csum != 0 and disk_csum == exp_csum)
+        if pdb_verified or checksum_verified:
+            evidence = "CodeView RSDS GUID/Age" if pdb_verified else "non-zero PE CheckSum + TimeDateStamp + SizeOfImage"
+            return "VERIFIED", f"Strong build identity verified via {evidence}."
+
+        return (
+            "HEADER_MATCH_ONLY",
+            "TimeDateStamp and SizeOfImage match, but no stronger build identity (CodeView RSDS GUID/Age or non-zero CheckSum) could be verified; treating disassembly as unverified.",
+        )
 
     @staticmethod
     def _fmt_insn(i, faulting: bool) -> Dict[str, Any]:

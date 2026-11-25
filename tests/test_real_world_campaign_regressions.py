@@ -80,12 +80,28 @@ class TestCrashRcaNeverFabricatesBlame(unittest.TestCase):
             hdr[0x80:0x84] = b"PE\0\0"
             struct.pack_into("<I", hdr, 0x80 + 8, 0x11111111)        # TimeDateStamp on disk
             struct.pack_into("<I", hdr, 0x80 + 24 + 56, 0x5000)      # SizeOfImage on disk
+            struct.pack_into("<I", hdr, 0x80 + 24 + 64, 0xAABBCCDD)  # Non-zero PE CheckSum
             with open(dll, "wb") as f:
                 f.write(hdr)
             verdict, _ = CrashRootCauseAnalyzer._verify_module_image(dll, {"timestamp": 0x22222222, "size": 0x5000})
             self.assertEqual(verdict, "MISMATCH")
             verdict, _ = CrashRootCauseAnalyzer._verify_module_image(dll, {"timestamp": 0x11111111, "size": 0x5000})
+            self.assertEqual(verdict, "HEADER_MATCH_ONLY")
+            verdict, _ = CrashRootCauseAnalyzer._verify_module_image(
+                dll, {"timestamp": 0x11111111, "size": 0x5000, "checksum": "0x99999999"}
+            )
+            self.assertEqual(verdict, "MISMATCH")
+            verdict, _ = CrashRootCauseAnalyzer._verify_module_image(
+                dll, {"timestamp": 0x11111111, "size": 0x5000, "checksum": "0xAABBCCDD"}
+            )
             self.assertEqual(verdict, "VERIFIED")
+            # HEADER_MATCH_ONLY must not produce CONFIDENT_DETERMINISTIC blame
+            blame = CrashRootCauseAnalyzer._attribute_culprit_register(
+                {"available": True, "code_source": "ON_DISK_IMAGE", "image_identity": "HEADER_MATCH_ONLY",
+                 "offending_instruction": {"mnemonic": "mov", "op_str": "eax, dword ptr [rcx]"}},
+                {"arch": "x64", "rcx": "0x0"}, target_vaddr=0, access_type="READ",
+                spatial_verdict={"category": "NULL_PAGE_TRAP"})
+            self.assertNotEqual(blame["confidence"], "CONFIDENT_DETERMINISTIC")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -262,23 +278,59 @@ class TestAuditSegmentSealing(unittest.TestCase):
             AuditLogger._sequence = 0
             res = AuditLogger.ensure_chain_continuity()
             self.assertIn("sealed_segment", res)
+            sealed_path = res["sealed_segment"]
             self.assertEqual(os.path.getsize(log) if os.path.exists(log) else 0, 0)
+            # Chain verification right after sealing must still verify all 12 sealed records
+            v_post_seal = AuditLogger.verify_audit_chain(log)
+            self.assertTrue(v_post_seal["is_valid"], v_post_seal)
+            self.assertEqual(v_post_seal["records_verified"], 12)
+
             AuditLogger.log_decision("t", "op", "after-seal", "ALLOW", "r")
             with open(log, encoding="utf-8") as f:
                 first_new = json.loads(f.readline())
             self.assertEqual(first_new["sequence"], 12)
+            v_after_append = AuditLogger.verify_audit_chain(log)
+            self.assertTrue(v_after_append["is_valid"], v_after_append)
+            self.assertEqual(v_after_append["records_verified"], 13)
+
             # Fresh process view: the active segment verifies against the sealed anchor.
             AuditLogger._journal.clear()
             AuditLogger._sequence = 0
             rec = AuditLogger.recover_chain_from_disk(log)
             self.assertEqual(rec["sealed_anchor_sequence"], 11)
             self.assertEqual(rec["records_count"], 1)
+
+            # Tampering with a MIDDLE record inside the sealed segment must fail recovery and verify_audit_chain.
+            with open(sealed_path, "r", encoding="utf-8") as f:
+                sealed_orig = f.read()
+            try:
+                with open(sealed_path, "w", encoding="utf-8") as f:
+                    f.write(sealed_orig.replace("target3", "forged3"))
+                v_sealed_tamper = AuditLogger.verify_audit_chain(log)
+                self.assertFalse(v_sealed_tamper["is_valid"])
+                AuditLogger._journal.clear()
+                AuditLogger._sequence = 0
+                with self.assertRaises(Exception):
+                    AuditLogger.recover_chain_from_disk(log)
+            finally:
+                with open(sealed_path, "w", encoding="utf-8") as f:
+                    f.write(sealed_orig)
+
             # Tampering with the active segment is still detected.
             with open(log, "r+", encoding="utf-8") as f:
                 data = f.read().replace("after-seal", "forged-target")
                 f.seek(0)
                 f.write(data)
                 f.truncate()
+            v_active_tamper = AuditLogger.verify_audit_chain(log)
+            self.assertFalse(v_active_tamper["is_valid"])
+            with self.assertRaises(Exception):
+                AuditLogger.recover_chain_from_disk(log)
+
+            # Deleting an older sealed segment (leaving non-zero start sequence) must be rejected.
+            os.remove(sealed_path)
+            v_missing_seg = AuditLogger.verify_audit_chain(log)
+            self.assertFalse(v_missing_seg["is_valid"])
             with self.assertRaises(Exception):
                 AuditLogger.recover_chain_from_disk(log)
         finally:

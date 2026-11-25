@@ -496,6 +496,37 @@ class TestSecurityKernelSmoke(_IsolatedSecurityTestBase):
         self.assertTrue(verify_cached_second["is_valid"])
         self.assertEqual(verify_cached_second["records_verified"], 7)
 
+        # Malformed non-legacy sealed segment filename must fail closed, never be silently skipped
+        malformed_seg = f"{self.log_file}.sealed.corrupt_name.jsonl"
+        with open(malformed_seg, "w", encoding="utf-8") as fh:
+            fh.write("{}\n")
+        try:
+            verify_malformed = AuditLogger.verify_audit_chain(self.log_file, full_verify=False)
+            self.assertFalse(verify_malformed["is_valid"])
+            self.assertIn("Malformed sealed", verify_malformed["error"])
+        finally:
+            if os.path.exists(malformed_seg):
+                os.remove(malformed_seg)
+
+        # Lock timeout must close file handle cleanly even when fail_closed=True raises
+        import unittest.mock as mock
+
+        held_lock_path = os.path.join(self.log_dir, "fd_leak_check.lock")
+        holder = audit_mod._ProcessFileLock(held_lock_path, timeout=0.5, fail_closed=True)
+        with holder:
+            self.assertTrue(holder.acquired)
+            contender = audit_mod._ProcessFileLock(held_lock_path, timeout=0.05, fail_closed=True)
+            with self.assertRaises(AuditPersistenceError):
+                with contender:
+                    pass
+            self.assertIsNone(contender._fd)
+
+        # Mocking os.name='posix' on Windows must not misroute _ProcessFileLock into missing fcntl
+        if sys.platform == "win32":
+            with mock.patch.object(os, "name", "posix"):
+                with audit_mod._ProcessFileLock(os.path.join(self.log_dir, "posix_mock.lock")) as pl:
+                    self.assertTrue(pl.acquired)
+
 
 if __name__ == "__main__":
     unittest.main()

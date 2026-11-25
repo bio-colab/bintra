@@ -18,6 +18,7 @@ import os
 import math
 import struct
 import json
+import xml.parsers.expat as _expat
 from typing import Dict, Any, Optional
 
 
@@ -28,6 +29,19 @@ class BinarySlackInspector:
 
     MAX_HEADER_READ = 65536  # 64KB bounded header read
     MAX_OVERLAY_SAMPLE = 4 * 1024 * 1024  # 4MB sample limit for overlay analysis
+    MAX_DOCUMENT_READ = 50 * 1024 * 1024
+    MAX_JSON_READ = 25 * 1024 * 1024
+
+    @classmethod
+    def _authorize_read(cls, file_path: str) -> None:
+        from security import ExecutionGuard, Capability
+        ExecutionGuard.request_access(
+            component="evidence_engine",
+            operation="inspect_slack_space",
+            target=file_path,
+            capability=Capability.FILE_READ,
+            access_mode="READ",
+        )
 
     @classmethod
     def calculate_entropy(cls, data: bytes) -> float:
@@ -51,6 +65,7 @@ class BinarySlackInspector:
         Inspects any file on disk for slack space, overlays, or trailing bytes.
         Automatically detects file format (PE, RTF, XML, JSON, or Generic).
         """
+        cls._authorize_read(file_path)
         if not os.path.exists(file_path):
             return {"status": "error", "error": f"File not found: {file_path}"}
 
@@ -69,10 +84,11 @@ class BinarySlackInspector:
         with open(file_path, "rb") as f:
             head = f.read(1024)
 
-        stripped = head.lstrip()
+        head_no_bom = head[3:] if head.startswith(b"\xef\xbb\xbf") else head
+        stripped = head_no_bom.lstrip()
         if head.startswith(b"MZ"):
             return cls.inspect_pe_file(file_path)
-        elif head.startswith(b"{\\rtf") or head.startswith(b"{ \\rtf"):
+        elif head_no_bom.startswith(b"{\\rtf") or head_no_bom.startswith(b"{ \\rtf"):
             return cls.inspect_rtf_file(file_path)
         elif stripped.startswith(b"<?xml") or (stripped.startswith(b"<") and b">" in stripped):
             return cls.inspect_xml_file(file_path)
@@ -87,6 +103,7 @@ class BinarySlackInspector:
         Dissects a PE executable to determine whether data resides beyond the last section
         or if the file is truncated/corrupt. Reads headers in bounded 64KB blocks.
         """
+        cls._authorize_read(file_path)
         file_size = os.path.getsize(file_path)
         with open(file_path, "rb") as f:
             hdr_bytes = f.read(cls.MAX_HEADER_READ)
@@ -124,7 +141,7 @@ class BinarySlackInspector:
                 break
             sec_name = hdr_bytes[sec_hdr:sec_hdr+8].rstrip(b"\x00").decode("latin1", errors="replace")
             vsize, vaddr, raw_size, raw_ptr = struct.unpack_from("<IIII", hdr_bytes, sec_hdr + 8)
-            sec_end = raw_ptr + raw_size
+            sec_end = (raw_ptr + raw_size) if raw_size > 0 else 0
             if sec_end > max_section_end:
                 max_section_end = sec_end
             sections_info.append({
@@ -133,6 +150,8 @@ class BinarySlackInspector:
                 "raw_size": raw_size,
                 "raw_end": sec_end
             })
+
+        section_table_truncated = len(sections_info) < num_sections
 
         # The section table itself is cut off by EOF: the headers are truncated, so no
         # "clean" verdict can be given regardless of the (partial) section bounds parsed.
@@ -144,6 +163,7 @@ class BinarySlackInspector:
                 "file_size": file_size,
                 "sections_count": num_sections,
                 "sections_parsed": len(sections_info),
+                "section_table_truncated": section_table_truncated,
                 "max_section_end_offset": max_section_end,
                 "has_trailing_slack": False,
                 "is_truncated": True,
@@ -167,6 +187,7 @@ class BinarySlackInspector:
                 "format": "PE32+" if is_64bit else "PE32",
                 "file_size": file_size,
                 "sections_count": num_sections,
+                "section_table_truncated": section_table_truncated,
                 "max_section_end_offset": max_section_end,
                 "has_trailing_slack": False,
                 "is_truncated": True,
@@ -191,29 +212,43 @@ class BinarySlackInspector:
                 f.seek(max_section_end)
                 overlay_bytes = f.read(cls.MAX_OVERLAY_SAMPLE)
 
+        overlay_sample_truncated = overlay_size > len(overlay_bytes)
         entropy = cls.calculate_entropy(overlay_bytes)
         slack_type = "CLEAN_EXACT_EOF"
         diagnostic_note = "File ends precisely at last section boundary."
+        extra_pe_fields: Dict[str, Any] = {}
 
         if has_overlay:
             # Check if overlay matches Security Directory region (Certificate Table)
-            if sec_dir_size > 0 and sec_dir_rva == max_section_end and sec_dir_size == overlay_size:
-                slack_type = "PE_CERTIFICATE_TABLE_REGION_DETECTED"
-                if len(overlay_bytes) >= 8:
-                    dwLength, wRevision, wCertType = struct.unpack_from("<IHH", overlay_bytes, 0)
-                    if dwLength <= overlay_size and wCertType in (0x0001, 0x0002):
-                        diagnostic_note = (
-                            f"Overlay matches PE Security Directory entry with WIN_CERTIFICATE structure "
-                            f"(dwLength={dwLength}, type={hex(wCertType)}). "
-                            f"Full cryptographic signature validation deferred to signature engine."
-                        )
+            if sec_dir_size > 0 and sec_dir_rva == max_section_end and sec_dir_size <= overlay_size:
+                if sec_dir_size == overlay_size:
+                    slack_type = "PE_CERTIFICATE_TABLE_REGION_DETECTED"
+                    if len(overlay_bytes) >= 8:
+                        dwLength, wRevision, wCertType = struct.unpack_from("<IHH", overlay_bytes, 0)
+                        if dwLength <= overlay_size and wCertType in (0x0001, 0x0002):
+                            diagnostic_note = (
+                                f"Overlay matches PE Security Directory entry with WIN_CERTIFICATE structure "
+                                f"(dwLength={dwLength}, type={hex(wCertType)}). "
+                                f"Full cryptographic signature validation deferred to signature engine."
+                            )
+                        else:
+                            diagnostic_note = (
+                                f"Overlay matches PE Security Directory ({overlay_size} bytes), but WIN_CERTIFICATE "
+                                f"structure is non-standard (dwLength={dwLength}, type={hex(wCertType)})."
+                            )
                     else:
-                        diagnostic_note = (
-                            f"Overlay matches PE Security Directory ({overlay_size} bytes), but WIN_CERTIFICATE "
-                            f"structure is non-standard (dwLength={dwLength}, type={hex(wCertType)})."
-                        )
+                        diagnostic_note = f"Overlay matches Security Directory entry ({overlay_size} bytes)."
                 else:
-                    diagnostic_note = f"Overlay matches Security Directory entry ({overlay_size} bytes)."
+                    post_cert_size = overlay_size - sec_dir_size
+                    post_cert_sample = overlay_bytes[sec_dir_size:] if len(overlay_bytes) > sec_dir_size else b""
+                    post_cert_entropy = cls.calculate_entropy(post_cert_sample)
+                    slack_type = "PE_CERTIFICATE_WITH_TRAILING_SLACK"
+                    extra_pe_fields["post_certificate_slack_bytes"] = post_cert_size
+                    extra_pe_fields["post_certificate_entropy"] = post_cert_entropy
+                    diagnostic_note = (
+                        f"PE Security Directory ({sec_dir_size} bytes) is followed by {post_cert_size} bytes "
+                        f"of unmapped trailing data beyond certificate boundary (entropy={post_cert_entropy})."
+                    )
             elif overlay_bytes.startswith(b"\xef\xbe\xad\xde"):
                 slack_type = "PE_INSTALLER_NSIS"
                 diagnostic_note = "Overlay contains Nullsoft Scriptable Install System (NSIS) payload."
@@ -226,7 +261,7 @@ class BinarySlackInspector:
             elif overlay_bytes.startswith(b"PK\x03\x04"):
                 slack_type = "PE_OVERLAY_ZIP_ARCHIVE"
                 diagnostic_note = "Overlay contains embedded ZIP archive."
-            elif all(b == 0 for b in overlay_bytes[:min(1024, len(overlay_bytes))]):
+            elif not overlay_sample_truncated and overlay_bytes and not any(overlay_bytes):
                 slack_type = "PE_ZERO_PADDING_SLACK"
                 diagnostic_note = f"Overlay contains {overlay_size} zero-padding alignment bytes."
             elif entropy > 7.0:
@@ -236,14 +271,17 @@ class BinarySlackInspector:
                 slack_type = "UNMAPPED_PE_OVERLAY"
                 diagnostic_note = f"Unmapped data detected beyond section headers ({overlay_size} bytes, entropy={entropy})."
 
-        return {
+        res = {
             "status": "ok",
             "format": "PE32+" if is_64bit else "PE32",
             "file_size": file_size,
             "sections_count": num_sections,
+            "sections_parsed": len(sections_info),
+            "section_table_truncated": section_table_truncated,
             "max_section_end_offset": max_section_end,
             "has_trailing_slack": has_overlay,
             "is_truncated": False,
+            "overlay_sample_truncated": overlay_sample_truncated,
             "slack_bytes_count": overlay_size,
             "slack_offset": max_section_end if has_overlay else None,
             "slack_entropy": entropy,
@@ -251,6 +289,8 @@ class BinarySlackInspector:
             "diagnostic_note": diagnostic_note,
             "sections": sections_info
         }
+        res.update(extra_pe_fields)
+        return res
 
     @classmethod
     def find_rtf_root_close_brace(cls, data: bytes) -> Optional[int]:
@@ -311,19 +351,24 @@ class BinarySlackInspector:
         Audits an RTF document for data residing beyond the root document closing brace '}'.
         Uses group-balancing lexer accounting for escapes and binary \bin blocks.
         """
+        cls._authorize_read(file_path)
         file_size = os.path.getsize(file_path)
         with open(file_path, "rb") as f:
-            data = f.read(50 * 1024 * 1024)
+            data = f.read(cls.MAX_DOCUMENT_READ)
 
+        sample_truncated = file_size > len(data)
+        malformed_unbalanced = False
         root_brace_idx = cls.find_rtf_root_close_brace(data)
         if root_brace_idx is None:
-            # Fallback to last closing brace with warning
+            # Fallback to last closing brace with explicit unbalanced warning
+            malformed_unbalanced = True
             last_brace_idx = data.rfind(b"}")
             if last_brace_idx == -1:
                 return {
                     "status": "warning",
                     "format": "RTF",
                     "file_size": file_size,
+                    "sample_truncated": sample_truncated,
                     "has_trailing_slack": False,
                     "slack_bytes_count": 0,
                     "slack_type": "MALFORMED_NO_CLOSING_BRACE",
@@ -337,6 +382,10 @@ class BinarySlackInspector:
 
         slack_type = "CLEAN_EXACT_EOF"
         diagnostic_note = "Document terminates cleanly at root closing brace."
+        if malformed_unbalanced:
+            diagnostic_note = (
+                "RTF group braces are unbalanced; evaluated trailing bytes relative to last '}'."
+            )
 
         if has_trailing:
             if trailing_data in (b"\x00", b"\r\n\x00", b"\n\x00"):
@@ -360,9 +409,11 @@ class BinarySlackInspector:
                 )
 
         return {
-            "status": "ok",
+            "status": "warning" if malformed_unbalanced else "ok",
             "format": "RTF",
             "file_size": file_size,
+            "sample_truncated": sample_truncated,
+            "malformed_unbalanced_braces": malformed_unbalanced,
             "root_closing_brace_offset": root_brace_idx,
             "has_trailing_slack": has_trailing,
             "slack_bytes_count": len(trailing_data),
@@ -377,16 +428,22 @@ class BinarySlackInspector:
         """
         Audits a JSON document for trailing data beyond the root structure using raw_decode.
         """
+        cls._authorize_read(file_path)
         file_size = os.path.getsize(file_path)
-        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-            text = f.read(25 * 1024 * 1024)
+        with open(file_path, "rb") as f:
+            raw_bytes = f.read(cls.MAX_JSON_READ)
+        sample_truncated = file_size > len(raw_bytes)
+        text = raw_bytes.decode("utf-8", errors="replace")
 
         decoder = json.JSONDecoder()
         try:
-            stripped_text = text.lstrip()
+            no_bom = text[1:] if text.startswith("\ufeff") else text
+            bom_len = len(text) - len(no_bom)
+            stripped_text = no_bom.lstrip()
             _, end_idx = decoder.raw_decode(stripped_text)
-            leading_ws = len(text) - len(stripped_text)
-            root_end_pos = leading_ws + end_idx
+            leading_ws = len(no_bom) - len(stripped_text)
+            root_end_pos = bom_len + leading_ws + end_idx
+            root_end_byte_offset = len(text[:root_end_pos].encode("utf-8"))
             trailing_text = text[root_end_pos:]
             trailing_bytes = trailing_text.encode("utf-8")
             has_trailing = len(trailing_bytes) > 0
@@ -409,7 +466,9 @@ class BinarySlackInspector:
                 "status": "ok",
                 "format": "JSON",
                 "file_size": file_size,
+                "sample_truncated": sample_truncated,
                 "root_end_offset": root_end_pos,
+                "root_end_byte_offset": root_end_byte_offset,
                 "has_trailing_slack": has_trailing,
                 "slack_bytes_count": len(trailing_bytes),
                 "slack_entropy": entropy,
@@ -422,6 +481,7 @@ class BinarySlackInspector:
                 "status": "warning",
                 "format": "JSON",
                 "file_size": file_size,
+                "sample_truncated": sample_truncated,
                 "has_trailing_slack": False,
                 "slack_bytes_count": 0,
                 "slack_type": "MALFORMED_JSON_PARSE_ERROR",
@@ -430,34 +490,78 @@ class BinarySlackInspector:
 
     @classmethod
     def inspect_xml_file(cls, file_path: str) -> Dict[str, Any]:
-        """Audits XML file for trailing bytes beyond the root closing tag."""
+        """Audits XML document for trailing bytes beyond the root closing tag via Expat."""
+        cls._authorize_read(file_path)
         file_size = os.path.getsize(file_path)
         with open(file_path, "rb") as f:
-            data = f.read(50 * 1024 * 1024)
+            data = f.read(cls.MAX_DOCUMENT_READ)
+        sample_truncated = file_size > len(data)
 
-        last_gt = data.rfind(b">")
-        if last_gt == -1:
-            return {"status": "warning", "format": "XML", "has_trailing_slack": False}
+        parser = _expat.ParserCreate()
+        depth = 0
+        root_end_cb_idx: Optional[int] = None
+        parse_err: Optional[Exception] = None
 
-        trailing = data[last_gt + 1:]
+        def _on_start(_name, _attrs):
+            nonlocal depth
+            depth += 1
+
+        def _on_end(_name):
+            nonlocal depth, root_end_cb_idx
+            depth -= 1
+            if depth == 0 and root_end_cb_idx is None:
+                root_end_cb_idx = parser.CurrentByteIndex
+
+        parser.StartElementHandler = _on_start
+        parser.EndElementHandler = _on_end
+        try:
+            parser.Parse(data, True)
+        except _expat.ExpatError as exc:
+            parse_err = exc
+
+        if root_end_cb_idx is None:
+            return {
+                "status": "warning",
+                "format": "XML",
+                "file_size": file_size,
+                "sample_truncated": sample_truncated,
+                "has_trailing_slack": False,
+                "slack_bytes_count": 0,
+                "slack_type": "MALFORMED_XML_PARSE_ERROR",
+                "diagnostic_note": f"XML syntax parse error before root element completion: {parse_err}" if parse_err else "Document lacks complete XML root element.",
+            }
+
+        # For </tag>, Expat reports start of closing tag; for <tag/>, index already points past '/>'.
+        if root_end_cb_idx < len(data) and data[root_end_cb_idx:root_end_cb_idx + 2] == b"</":
+            gt_pos = data.find(b">", root_end_cb_idx)
+            root_close_end = (gt_pos + 1) if gt_pos != -1 else root_end_cb_idx
+        else:
+            root_close_end = root_end_cb_idx
+
+        trailing = data[root_close_end:]
         has_trailing = len(trailing) > 0
         entropy = cls.calculate_entropy(trailing)
         slack_type = "CLEAN_EXACT_EOF"
-        diagnostic_note = "XML terminates cleanly at root tag."
+        diagnostic_note = "XML terminates cleanly at root element."
 
         if has_trailing:
             if all(b in (0x20, 0x09, 0x0D, 0x0A) for b in trailing):
                 slack_type = "TRAILING_WHITESPACE"
                 diagnostic_note = "Benign trailing whitespace after XML root tag."
+            elif parse_err is None and trailing.lstrip().startswith(b"<!--"):
+                slack_type = "TRAILING_XML_EPILOG"
+                diagnostic_note = f"Valid trailing XML comment/processing-instruction epilog ({len(trailing)} bytes)."
             else:
                 slack_type = "SUSPICIOUS_UNMAPPED_DOCUMENT_SLACK"
-                diagnostic_note = f"Unexpected data detected after XML root tag ({len(trailing)} bytes, entropy={entropy})."
+                diagnostic_note = f"Unexpected data detected after XML root element ({len(trailing)} bytes, entropy={entropy})."
 
         return {
             "status": "ok",
             "format": "XML",
             "file_size": file_size,
-            "root_closing_tag_offset": last_gt,
+            "sample_truncated": sample_truncated,
+            "root_closing_tag_offset": root_close_end - 1 if root_close_end > 0 else 0,
+            "root_end_byte_offset": root_close_end,
             "has_trailing_slack": has_trailing,
             "slack_bytes_count": len(trailing),
             "slack_entropy": entropy,
@@ -469,6 +573,7 @@ class BinarySlackInspector:
     @classmethod
     def inspect_generic_file(cls, file_path: str) -> Dict[str, Any]:
         """Fallback inspector for unformatted binaries."""
+        cls._authorize_read(file_path)
         file_size = os.path.getsize(file_path)
         with open(file_path, "rb") as f:
             data = f.read(cls.MAX_OVERLAY_SAMPLE)
@@ -478,6 +583,7 @@ class BinarySlackInspector:
             "status": "ok",
             "format": "GENERIC_BINARY",
             "file_size": file_size,
+            "sample_truncated": file_size > len(data),
             "has_trailing_slack": False,
             "slack_bytes_count": 0,
             "slack_entropy": entropy,

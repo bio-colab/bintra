@@ -154,12 +154,50 @@ class ProcessLongitudinalProfiler:
         return getattr(windll, "psapi", getattr(windll, "kernel32", None)) if windll else None
 
     @classmethod
+    def _capture_process_sample(
+        cls,
+        h_proc: wintypes.HANDLE,
+        k32: Any,
+        u32: Any,
+        ps: Any,
+        sample_index: int = 0,
+    ) -> Optional[ProcessResourceSample]:
+        pmc = PROCESS_MEMORY_COUNTERS_EX()
+        pmc.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS_EX)
+        if not ps.GetProcessMemoryInfo(h_proc, ctypes.byref(pmc), pmc.cb):
+            return None
+
+        handles_val: Optional[int] = None
+        if hasattr(k32, "GetProcessHandleCount"):
+            h_cnt = wintypes.DWORD(0)
+            if k32.GetProcessHandleCount(h_proc, ctypes.byref(h_cnt)):
+                handles_val = h_cnt.value
+
+        gdi_cnt = 0
+        usr_cnt = 0
+        if u32 and hasattr(u32, "GetGuiResources"):
+            gdi_cnt = u32.GetGuiResources(h_proc, GR_GDIOBJECTS)
+            usr_cnt = u32.GetGuiResources(h_proc, GR_USEROBJECTS)
+
+        return ProcessResourceSample(
+            sample_index=sample_index,
+            timestamp_epoch=time.time(),
+            working_set_bytes=pmc.WorkingSetSize,
+            private_bytes=pmc.PrivateUsage or pmc.PagefileUsage,
+            peak_working_set_bytes=pmc.PeakWorkingSetSize,
+            peak_private_bytes=pmc.PeakPagefileUsage,
+            kernel_handles=handles_val if handles_val is not None else -1,
+            gdi_handles=gdi_cnt,
+            user_handles=usr_cnt,
+        )
+
+    @classmethod
     def sample_process(cls, pid: int) -> Optional[Dict[str, Any]]:
         """
         Samples real-time memory and resource counters for a running process by PID.
         Returns None if process cannot be opened or platform is not Windows.
         """
-        if os.name != "nt":
+        if os.name != "nt" or not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
             return None
 
         _init_win32_prototypes()
@@ -177,38 +215,8 @@ class ProcessLongitudinalProfiler:
                 return None
 
         try:
-            pmc = PROCESS_MEMORY_COUNTERS_EX()
-            pmc.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS_EX)
-            success = ps.GetProcessMemoryInfo(h_proc, ctypes.byref(pmc), pmc.cb)
-            if not success:
-                return None
-
-            h_cnt = wintypes.DWORD(0)
-            handles_val = 0
-            if hasattr(k32, "GetProcessHandleCount"):
-                if k32.GetProcessHandleCount(h_proc, ctypes.byref(h_cnt)):
-                    handles_val = h_cnt.value
-                else:
-                    handles_val = -1
-
-            gdi_cnt = 0
-            usr_cnt = 0
-            if u32 and hasattr(u32, "GetGuiResources"):
-                gdi_cnt = u32.GetGuiResources(h_proc, GR_GDIOBJECTS)
-                usr_cnt = u32.GetGuiResources(h_proc, GR_USEROBJECTS)
-
-            sample = ProcessResourceSample(
-                sample_index=0,
-                timestamp_epoch=time.time(),
-                working_set_bytes=pmc.WorkingSetSize,
-                private_bytes=pmc.PagefileUsage,
-                peak_working_set_bytes=pmc.PeakWorkingSetSize,
-                peak_private_bytes=pmc.PeakPagefileUsage,
-                kernel_handles=handles_val,
-                gdi_handles=gdi_cnt,
-                user_handles=usr_cnt,
-            )
-            return sample.to_dict()
+            sample = cls._capture_process_sample(h_proc, k32, u32, ps, sample_index=0)
+            return sample.to_dict() if sample else None
         finally:
             k32.CloseHandle(h_proc)
 
@@ -232,6 +240,8 @@ class ProcessLongitudinalProfiler:
                 "platform": sys.platform,
                 "reason": "Process longitudinal profiling requires Windows NT."
             }
+        if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+            return {"status": "error", "error": f"Invalid target PID: {pid!r} (expected positive integer)."}
 
         _init_win32_prototypes()
         samples_count = max(2, min(int(samples_count), 120))
@@ -244,8 +254,10 @@ class ProcessLongitudinalProfiler:
             return {"status": "error", "error": "Win32 APIs not accessible."}
 
         h_proc = k32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
+        limited_access = False
         if not h_proc:
             h_proc = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            limited_access = bool(h_proc)
             if not h_proc:
                 err = k32.GetLastError() if hasattr(k32, "GetLastError") else 0
                 return {"status": "error", "error": f"Failed to open process PID {pid} (Win32 error: {err})."}
@@ -253,36 +265,9 @@ class ProcessLongitudinalProfiler:
         samples: List[ProcessResourceSample] = []
         try:
             for idx in range(1, samples_count + 1):
-                pmc = PROCESS_MEMORY_COUNTERS_EX()
-                pmc.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS_EX)
-                if not ps.GetProcessMemoryInfo(h_proc, ctypes.byref(pmc), pmc.cb):
+                s = cls._capture_process_sample(h_proc, k32, u32, ps, sample_index=idx)
+                if s is None:
                     break
-
-                h_cnt = wintypes.DWORD(0)
-                handles_val = 0
-                if hasattr(k32, "GetProcessHandleCount"):
-                    if k32.GetProcessHandleCount(h_proc, ctypes.byref(h_cnt)):
-                        handles_val = h_cnt.value
-                    else:
-                        handles_val = -1
-
-                gdi_cnt = 0
-                usr_cnt = 0
-                if u32 and hasattr(u32, "GetGuiResources"):
-                    gdi_cnt = u32.GetGuiResources(h_proc, GR_GDIOBJECTS)
-                    usr_cnt = u32.GetGuiResources(h_proc, GR_USEROBJECTS)
-
-                s = ProcessResourceSample(
-                    sample_index=idx,
-                    timestamp_epoch=time.time(),
-                    working_set_bytes=pmc.WorkingSetSize,
-                    private_bytes=pmc.PagefileUsage,
-                    peak_working_set_bytes=pmc.PeakWorkingSetSize,
-                    peak_private_bytes=pmc.PeakPagefileUsage,
-                    kernel_handles=handles_val,
-                    gdi_handles=gdi_cnt,
-                    user_handles=usr_cnt,
-                )
                 samples.append(s)
 
                 if idx < samples_count and interval_seconds > 0:
@@ -293,7 +278,10 @@ class ProcessLongitudinalProfiler:
         if not samples:
             return {"status": "error", "error": f"Failed to acquire memory telemetry for PID {pid}."}
 
-        return cls.analyze_telemetry_series(pid, [s.to_dict() for s in samples])
+        report = cls.analyze_telemetry_series(pid, [s.to_dict() for s in samples])
+        report["terminated_early"] = len(samples) < samples_count
+        report["limited_query_handle"] = limited_access
+        return report
 
     @classmethod
     def analyze_telemetry_series(
@@ -313,9 +301,14 @@ class ProcessLongitudinalProfiler:
         x = [s.get("sample_index", i + 1) for i, s in enumerate(telemetry_samples)]
         y_priv = [s["private_bytes_mb"] for s in telemetry_samples]
         y_ws = [s["working_set_mb"] for s in telemetry_samples]
-        y_hnd = [s.get("kernel_handles", 0) for s in telemetry_samples]
+        y_hnd_raw = [s.get("kernel_handles", 0) for s in telemetry_samples]
         y_gdi = [s.get("gdi_handles", 0) for s in telemetry_samples]
         y_usr = [s.get("user_handles", 0) for s in telemetry_samples]
+
+        hnd_pairs = [(xi, float(v)) for xi, v in zip(x, y_hnd_raw) if isinstance(v, (int, float)) and v >= 0]
+        handle_telemetry_available = bool(hnd_pairs)
+        x_hnd = [p[0] for p in hnd_pairs]
+        y_hnd = [p[1] for p in hnd_pairs]
 
         def calc_linear_regression(x_vals: List[float], y_vals: List[float]) -> Tuple[float, float]:
             """Returns (slope, r_squared)"""
@@ -338,23 +331,34 @@ class ProcessLongitudinalProfiler:
 
         slope_priv, r2_priv = calc_linear_regression(x, y_priv)
         slope_ws, r2_ws = calc_linear_regression(x, y_ws)
-        slope_hnd, _ = calc_linear_regression(x, [float(v) for v in y_hnd])
+        slope_hnd, _ = calc_linear_regression(x_hnd, y_hnd) if handle_telemetry_available else (0.0, 0.0)
         slope_gdi, r2_gdi = calc_linear_regression(x, [float(v) for v in y_gdi])
         slope_usr, r2_usr = calc_linear_regression(x, [float(v) for v in y_usr])
 
         delta_priv = round(y_priv[-1] - y_priv[0], 3)
         delta_ws = round(y_ws[-1] - y_ws[0], 3)
-        delta_hnd = y_hnd[-1] - y_hnd[0]
+        delta_hnd = int(y_hnd[-1] - y_hnd[0]) if len(y_hnd) >= 2 else 0
         delta_gdi = y_gdi[-1] - y_gdi[0]
         delta_usr = y_usr[-1] - y_usr[0]
+
+        timestamps = [s.get("timestamp_epoch") for s in telemetry_samples if isinstance(s.get("timestamp_epoch"), (int, float))]
+        elapsed_seconds = round(max(0.0, timestamps[-1] - timestamps[0]), 4) if len(timestamps) >= 2 else 0.0
+        slope_priv_per_sec = round(delta_priv / elapsed_seconds, 5) if elapsed_seconds > 0 else 0.0
 
         # Plateau detection: examine variance and slope in second half of samples
         half_idx = max(1, n // 2)
         second_half_priv = y_priv[half_idx:]
+        has_second_half = len(second_half_priv) >= 2
         second_half_slope, _ = calc_linear_regression(x[half_idx:], second_half_priv)
         second_half_gdi_slope, _ = calc_linear_regression(x[half_idx:], [float(v) for v in y_gdi[half_idx:]])
         second_half_usr_slope, _ = calc_linear_regression(x[half_idx:], [float(v) for v in y_usr[half_idx:]])
-        second_half_hnd_slope, _ = calc_linear_regression(x[half_idx:], [float(v) for v in y_hnd[half_idx:]])
+        hnd_half_idx = max(1, len(x_hnd) // 2)
+        has_hnd_second_half = len(y_hnd[hnd_half_idx:]) >= 2
+        second_half_hnd_slope, _ = (
+            calc_linear_regression(x_hnd[hnd_half_idx:], y_hnd[hnd_half_idx:])
+            if has_hnd_second_half
+            else (0.0, 0.0)
+        )
         is_plateau = False
 
         if n >= 6 and delta_priv > 0:
@@ -362,11 +366,26 @@ class ProcessLongitudinalProfiler:
             if abs(second_half_slope) <= 0.02 and (max(second_half_priv) - min(second_half_priv)) <= 0.25:
                 is_plateau = True
 
-        # Active leaks require ongoing unconstrained accumulation into the second half of the series
-        is_gdi_leak = delta_gdi > 10 and slope_gdi > 0.5 and second_half_gdi_slope > 0.1
-        is_usr_leak = delta_usr > 10 and slope_usr > 0.5 and second_half_usr_slope > 0.1
-        is_hnd_leak = delta_hnd > 20 and slope_hnd > 0.5 and second_half_hnd_slope > 0.1
+        # Active leaks require ongoing unconstrained accumulation into the second half of the series (when >= 4 samples)
+        is_gdi_leak = delta_gdi > 10 and slope_gdi > 0.5 and (second_half_gdi_slope > 0.1 if has_second_half else True)
+        is_usr_leak = delta_usr > 10 and slope_usr > 0.5 and (second_half_usr_slope > 0.1 if has_second_half else True)
+        is_hnd_leak = (
+            handle_telemetry_available
+            and delta_hnd > 20
+            and slope_hnd > 0.5
+            and (second_half_hnd_slope > 0.1 if has_hnd_second_half else True)
+        )
         is_mem_leak = slope_priv > 0.05 and r2_priv > 0.6 and not is_plateau
+
+        concurrent_leak_signals = []
+        if is_gdi_leak:
+            concurrent_leak_signals.append("ACTIVE_GDI_LEAK_SUSPECTED")
+        if is_usr_leak:
+            concurrent_leak_signals.append("ACTIVE_USER_OBJECT_LEAK_SUSPECTED")
+        if is_hnd_leak:
+            concurrent_leak_signals.append("ACTIVE_HANDLE_LEAK_SUSPECTED")
+        if is_mem_leak:
+            concurrent_leak_signals.append("ACTIVE_MEMORY_LEAK_SUSPECTED")
 
         # Behavioral Classification (Strictly considers memory, kernel handles, GDI, and USER objects)
         if is_gdi_leak:
@@ -413,17 +432,20 @@ class ProcessLongitudinalProfiler:
             "behavior_classification": classification,
             "diagnostic_explanation": explanation,
             "metrics_summary": {
+                "elapsed_seconds": elapsed_seconds,
                 "initial_private_bytes_mb": y_priv[0],
                 "final_private_bytes_mb": y_priv[-1],
                 "delta_private_bytes_mb": delta_priv,
                 "slope_private_bytes_mb_per_sample": slope_priv,
+                "slope_private_bytes_mb_per_second": slope_priv_per_sec,
                 "r_squared_private_bytes": r2_priv,
                 "initial_working_set_mb": y_ws[0],
                 "final_working_set_mb": y_ws[-1],
                 "delta_working_set_mb": delta_ws,
                 "slope_working_set_mb_per_sample": slope_ws,
-                "initial_kernel_handles": y_hnd[0],
-                "final_kernel_handles": y_hnd[-1],
+                "handle_telemetry_available": handle_telemetry_available,
+                "initial_kernel_handles": int(y_hnd[0]) if y_hnd else None,
+                "final_kernel_handles": int(y_hnd[-1]) if y_hnd else None,
                 "delta_kernel_handles": delta_hnd,
                 "slope_kernel_handles_per_sample": slope_hnd,
                 "initial_gdi_handles": y_gdi[0],
@@ -435,6 +457,7 @@ class ProcessLongitudinalProfiler:
                 "delta_user_handles": delta_usr,
                 "slope_user_handles_per_sample": slope_usr,
                 "is_saturation_plateau": is_plateau,
+                "concurrent_leak_signals": concurrent_leak_signals,
             },
             "samples": telemetry_samples,
         }

@@ -19,10 +19,10 @@ from binary_neural_engine import BinaryFormatInspector
 from windows_intelligence.dependency_resolver import WindowsDependencyResolver
 from windows_intelligence.runtime_telemetry.virtual_memory_inspector import (
     VirtualMemoryInspector, ProcessMemoryMapSnapshot, ProcessMemoryRegion,
-    MEM_COMMIT, MEM_RESERVE, MEM_PRIVATE, PAGE_READWRITE, PAGE_GUARD
+    MEM_COMMIT, MEM_PRIVATE, PAGE_READWRITE, PAGE_GUARD
 )
 from windows_intelligence.runtime_telemetry.etw_capture_engine import (
-    EtwLiveCaptureSession, EtwEventRecord
+    EtwLiveCaptureSession
 )
 
 

@@ -34,3 +34,20 @@ py-modules = ["analysis_orchestrator", "cli", "binary_neural_engine", "bintra_en
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.optional-dependencies]
+dev = ["ruff==0.17.6"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 160
+
+[tool.ruff.lint]
+# Correctness gate enforced in CI: pyflakes (undefined names, unused imports/variables,
+# redefinitions) + syntax errors. Style rules are intentionally not enforced.
+select = ["F", "E9"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests and benchmark scripts sometimes bind values only to keep resources alive.
+"tests/**" = ["F841"]
+"benchmarks/**" = ["F841"]

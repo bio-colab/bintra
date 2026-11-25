@@ -12,7 +12,6 @@ Verifies the complete analytical trajectory:
 
 import os
 import sys
-import json
 import unittest
 import tempfile
 
@@ -22,14 +21,11 @@ if SRC_DIR not in sys.path:
 
 from security import ExecutionGuard
 from ghidra_pcode_vectorizer import (
-    PcodeVectorizer,
     WeisfeilerLehmanCfgHasher,
-    GhidraDeepAnalyzer,
-    PcodeFunctionMatcher
+    GhidraDeepAnalyzer
 )
 from ghidra_live_bridge import GhidraLiveBridgeServer
 from windows_intelligence.evidence_engine.graph_model import fuse_static_dynamic_ghidra
-from pe_deep_forensics import SemanticBinaryDiffer
 
 
 class TestGhidraE2EPipeline(unittest.TestCase):

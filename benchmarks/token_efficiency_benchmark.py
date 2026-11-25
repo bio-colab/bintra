@@ -21,7 +21,7 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 from mcp_server import BintraMcpServer
-from token_telemetry import estimate_cost_usd, estimate_tokens, MODEL_PRICING_PER_1M
+from token_telemetry import estimate_cost_usd, estimate_tokens
 
 
 def _build_sample_pe(path: str) -> None:

@@ -65,6 +65,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    - name: Lint (pyflakes correctness gate)
+      run: |
+        pip install ruff==0.17.6
+        ruff check src tests benchmarks
+
     - name: Run Cross-Platform & Degradation Test Suite
       run: |
         python -m unittest discover -s tests -p "test_*.py" -v

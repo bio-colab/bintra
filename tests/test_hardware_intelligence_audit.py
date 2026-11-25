@@ -21,7 +21,6 @@ if str(SRC_DIR) not in sys.path:
 
 from windows_intelligence.system_introspection.device_inspector import NativeDeviceInspector
 from windows_intelligence.system_introspection.port_inspector import PortInspector
-from windows_intelligence.runtime_telemetry.etw_capture_engine import EtwLiveCaptureSession
 
 
 class TestHardwareIntelligenceAudit(unittest.TestCase):

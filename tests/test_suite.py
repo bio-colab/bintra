@@ -618,7 +618,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
     def test_ghidra_pcode_opcode_classification_and_vectorization(self):
         """Verifies Ghidra P-code operations vectorization into a 64-D unit sphere vector."""
-        from ghidra_pcode_vectorizer import PcodeVectorizer, PCODE_CATEGORIES
+        from ghidra_pcode_vectorizer import PcodeVectorizer
         ops = [
             {"opcode": "INT_ADD", "inputs": ["a", "b"], "output": "c"},
             {"opcode": "INT_SUB", "inputs": ["c", "1"], "output": "c"},
@@ -787,7 +787,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
 
     def test_mcp_server_initialize_and_tools_list(self):
         """Verifies that native MCP server implements JSON-RPC 2.0 handshake and 27 tools."""
-        from mcp_server import BintraMcpServer, TOOLS_REGISTRY
+        from mcp_server import BintraMcpServer
         server = BintraMcpServer()
         init_res = server.handle_initialize({})
         self.assertEqual(init_res["serverInfo"]["name"], "bintra")
@@ -2228,7 +2228,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
     def test_native_device_inspector_instance_id_and_multi_sz(self):
         """Verifies Track 1: SetupDiGetDeviceInstanceIdW string IDs and REG_MULTI_SZ hardware IDs."""
         from windows_intelligence.system_introspection import NativeDeviceInspector
-        from windows_intelligence.device_intelligence import DeviceIdentity, DriverMatcher
+        from windows_intelligence.device_intelligence import DeviceIdentity
 
         devs = NativeDeviceInspector.enumerate_devices(max_devices=32)
         self.assertIsInstance(devs, list)
@@ -2548,7 +2548,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
     def test_safety_kernel_cmd_executor_fails_closed_on_denial(self):
         """Verifies that CommandExecutor fails closed with DENY decision when Safety Kernel denies execution."""
         from windows_intelligence.command_engine import CommandExecutor
-        from security import CapabilityRegistry, Capability, SecurityViolationError
+        from security import CapabilityRegistry
 
         # 1. Unregistered command fails
         res_unreg = CommandExecutor.execute("unknown_malicious_command")
@@ -2652,7 +2652,7 @@ class TestRigorousEngineEvaluation(unittest.TestCase):
     def test_safety_kernel_capability_registry_enforcement_in_policy_engine(self):
         """Verifies that PolicyEngine enforces CapabilityRegistry grants and mode matching."""
         from security.policy_engine import PolicyEngine, AccessRequest
-        from security import CapabilityRegistry, Capability, TargetScope
+        from security import Capability, TargetScope
 
         scope = TargetScope(target_binary_path="C:\\dummy\\target.exe")
 

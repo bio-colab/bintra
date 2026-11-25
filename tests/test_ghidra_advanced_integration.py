@@ -14,11 +14,10 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
 from ghidra_export_store import GhidraExportStore
-from security import ExecutionGuard, Capability, SecurityViolationError
 
 
 MOCK_GHIDRA_EXPORT = {

@@ -84,7 +84,37 @@ pip install -e .
 Optional test tools:
 ```powershell
 pip install pytest pytest-cov
+pip install -e ".[dev]"   # ruff (the CI lint gate)
 ```
+
+---
+
+## Code Organization
+
+The two front-ends are thin; behaviour lives in per-domain handler modules:
+
+| Layer | Location | Role |
+|---|---|---|
+| CLI bootstrap | `src/cli.py` | audit-chain init, target/workspace scoping, output buffering and the exit-code contract, `patch` alias, registry dispatch |
+| CLI registry | `src/bintra_cli/registry.py` | static `command name -> (module, handler)` table; handler modules are imported lazily |
+| CLI handlers | `src/bintra_cli/commands/<domain>.py` | one `cmd_<name>(cmd)` function per command (binary, weights, ghidra, forensics, host, devices, processes, runtime, maintenance) |
+| Shared CLI helpers | `src/bintra_cli/commands/_common.py` | flag aliasing on a local argv copy, `guard_output_path()` write policy |
+| MCP server | `src/mcp_server.py` | JSON-RPC transport, initialize/tools/resources/prompts, schema validation, token diet |
+| MCP tool schemas | `src/bintra_mcp/tool_schemas.py` | `TOOLS_REGISTRY` (JSON Schemas served by `tools/list`) |
+| MCP tool handlers | `src/bintra_mcp/tools/<domain>.py` | one `_tool_<name>(self, name, args)` method per tool in a domain mixin; `TOOL_HANDLERS` maps names to methods |
+| Engines | `src/*_engine.py`, `src/windows_intelligence/`, ... | analysis logic only; no argparse, no printing |
+
+### Adding a CLI command
+1. Write `cmd_<name>(cmd: str) -> None` in the matching `bintra_cli/commands/<domain>.py` (parse with `argparse`, mediate access through `ExecutionGuard`, print JSON).
+2. Register it in `COMMANDS` in `bintra_cli/registry.py` (aliases are extra entries pointing to the same handler).
+3. Never rewrite the global `sys.argv`; normalise a local copy (`rename_flag`). Any command that writes a file must call `guard_output_path()`.
+
+### Adding an MCP tool
+1. Add its JSON Schema entry to `TOOLS_REGISTRY` in `bintra_mcp/tool_schemas.py` and its capability in `BintraMcpServer.TOOL_SECURITY_METADATA`.
+2. Implement `_tool_<name>(self, name, args)` in the matching mixin under `bintra_mcp/tools/` and map it in `TOOL_HANDLERS`.
+
+### Lint gate
+CI runs `ruff check src tests benchmarks` (pyflakes correctness rules: undefined names, unused imports/variables, redefinitions). Run it locally before pushing.
 
 ---
 

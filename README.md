@@ -159,9 +159,11 @@ bintra/
 ├── schemas/                       # MCP tool schema definitions
 ├── skills/                        # 8 agent-native skills (bintra router + 7 specialist skills)
 ├── src/
-│   ├── cli.py                     # Unified CLI entry point (`bintra`) with self-update
+│   ├── cli.py                     # CLI bootstrap (`bintra`): audit/scoping, exit-code contract, registry dispatch
+│   ├── bintra_cli/                # Lazy command registry + per-domain CLI handlers (commands/*.py)
+│   ├── bintra_mcp/                # MCP tool schemas (tool_schemas.py) + per-domain tool handler mixins (tools/*.py)
 │   ├── analysis_orchestrator.py   # Unified read-only binary triage & cross-domain evidence orchestrator
-│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`bintra-mcp`, 51 tools, resources, prompts)
+│   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP transport (`bintra-mcp`, 51 tools, resources, prompts)
 │   ├── binary_neural_engine.py    # PE binary analysis, deobfuscator & patcher
 │   ├── bintra_engine.py           # Weight-space SVD & circuit decompiler
 │   ├── sensory_cortex.py          # 10 Metaphorical Senses evaluation cortex
@@ -175,8 +177,8 @@ bintra/
 │   ├── token_telemetry.py         # Session telemetry tracker
 │   ├── security/                  # ExecutionGuard, AuditLogger & Reference Monitor
 │   └── windows_intelligence/      # Process, Device, Registry, Network, Slack & Crash Diagnostics
-├── tests/                         # 477 automated unit, sensory, runtime telemetry & security tests
-└── docs/                          # Architecture, Roadmap & runtime telemetry documentation
+├── tests/                         # 482 automated unit, sensory, runtime telemetry & security tests
+└── docs/                          # Architecture, Roadmap, runtime telemetry & historical evaluations (docs/history)
     ├── architecture.md            # Master architecture & formal model
     ├── ROADMAP.md                 # Strategic direction, tech evaluation & roadmap
     ├── RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md  # Live memory/ETW/crash pipeline reference

@@ -593,7 +593,7 @@ def level_5(m: Matrix, s: Dict[str, Optional[Path]], quick: bool):
     L = "L5"
     src = s.get("pe64_exe")
     if src:
-        info = run_cli(m, L, "patch/locate-entry", ["inspect", "--file", src])
+        run_cli(m, L, "patch/locate-entry", ["inspect", "--file", src])
         out = m.ws / "patched" / "notepad_patched.exe"
         out.parent.mkdir(exist_ok=True)
         # Patch inside the overlay-free tail of .text with NOPs over existing INT3/NOP padding if available
@@ -602,7 +602,7 @@ def level_5(m: Matrix, s: Dict[str, Optional[Path]], quick: bool):
         if off < 0:
             m.skip(L, "patch-binary", "no padding run found")
         else:
-            d = run_cli(m, L, "patch-binary/nop-padding", ["patch-binary", "--file", src, "--output", out, "--offset", hex(off), "--patch-hex", "90 90 90 90"],
+            run_cli(m, L, "patch-binary/nop-padding", ["patch-binary", "--file", src, "--output", out, "--offset", hex(off), "--patch-hex", "90 90 90 90"],
                         check=lambda d: None if d.get("is_safe") and d.get("original_sha256") != d.get("patched_sha256") else f"unexpected patch report: {json.dumps(d)[:300]}")
             if out.exists():
                 run_cli(m, L, "patch-binary/reinspect", ["inspect", "--file", out], check=expect_pe_type("PE32+"))
@@ -678,7 +678,7 @@ def level_6(m: Matrix, s: Dict[str, Optional[Path]], quick: bool):
             continue
         try:
             obj = json.loads(ln)
-        except Exception as e:
+        except Exception:
             bad.append(f"non-JSON frame: {ln[:120]!r}")
             continue
         frames.append(obj)

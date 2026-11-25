@@ -17,12 +17,10 @@ SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from security import ExecutionGuard, Capability
+from security import ExecutionGuard
 from ghidra_live_bridge import (
     GhidraLiveBridgeServer,
     GhidraLiveBridgeClient,
-    get_or_create_bridge,
-    get_active_bridge,
     stop_active_bridge
 )
 

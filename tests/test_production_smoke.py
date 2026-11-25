@@ -208,6 +208,20 @@ class TestProductionBaselineSmoke(unittest.TestCase):
             self.assertEqual(dmp1["exception_info"]["fault_module"], "mod.exe")
             self.assertEqual(dmp2["exception_info"]["fault_module"], "mod.exe")
 
+        from bintra_cli.commands._common import parse_int_arg as cli_parse_int, validate_port
+        self.assertEqual(cli_parse_int("0x10", "--addr"), 16)
+        with self.assertRaises(ValueError):
+            cli_parse_int(False, "--addr")
+        self.assertEqual(validate_port(41718), 41718)
+        with self.assertRaises(ValueError):
+            validate_port(70000)
+
+        json_exp = self.tmp_dir / "pcode_cg.json"
+        json_exp.write_text(json.dumps(export_payload), encoding="utf-8")
+        with ExecutionGuard.scoped_session(target_binary_path=str(json_exp), workspace_dir=str(ws_dir)):
+            cg_from_path = GhidraDeepAnalyzer().build_call_graph_and_xrefs(str(json_exp))
+            self.assertEqual(cg_from_path["functions_indexed"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

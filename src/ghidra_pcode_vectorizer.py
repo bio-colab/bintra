@@ -1319,12 +1319,15 @@ class GhidraDeepAnalyzer:
         if isinstance(export_data, str) or hasattr(export_data, "__fspath__"):
             fpath_str = str(export_data)
             if fpath_str.endswith(".json") and os.path.exists(fpath_str):
-                with open(fpath_str, "r", encoding="utf-8", errors="replace") as f:
-                    export_data = json.load(f)
+                from security import SafeFileAccess
+                export_data = json.loads(SafeFileAccess.read_text(fpath_str))
             else:
                 import importlib
                 store_mod = importlib.import_module("ghidra_export_store")
-                export_data = store_mod.GhidraExportStore.from_path(export_data)
+                with store_mod.GhidraExportStore.from_path(export_data) as store:
+                    if getattr(store, "is_sqlite", False):
+                        return store.build_call_graph_and_xrefs(target_function=target_function, max_depth=max_depth)
+                    export_data = store.to_dict()
 
         if hasattr(export_data, "build_call_graph_and_xrefs") and getattr(export_data, "is_sqlite", False):
             return export_data.build_call_graph_and_xrefs(target_function=target_function, max_depth=max_depth)

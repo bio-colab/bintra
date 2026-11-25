@@ -264,7 +264,7 @@ class WindowsRegistryReader:
             vals_64 = res_64.get("values", {})
             vals_32 = res_32.get("values", {})
             all_keys = set(vals_64.keys()) | set(vals_32.keys())
-            for k in all_keys:
+            for k in sorted(all_keys, key=str.lower):  # deterministic output order
                 v64 = vals_64.get(k, {}).get("value")
                 v32 = vals_32.get(k, {}).get("value")
                 if v64 != v32:

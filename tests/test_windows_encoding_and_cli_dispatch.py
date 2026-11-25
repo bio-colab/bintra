@@ -70,21 +70,27 @@ class TestMcpStdioUtf8(unittest.TestCase):
         self.assertNotIn("does not exist", text)
 
 
-class TestCliDispatchFallthrough(unittest.TestCase):
-    def test_every_win_intel_branch_terminates(self):
-        """Each `cmd == ...` branch in the WIN_INTEL block must return/exit."""
-        import re
-        with open(os.path.join(SRC_DIR, "cli.py"), encoding="utf-8") as f:
-            src = f.read().splitlines()
-        start = next(i for i, l in enumerate(src) if l.startswith("    if cmd in WIN_INTEL_COMMANDS"))
-        end = next(i for i, l in enumerate(src) if l.startswith("    if cmd in SENSORY_COMMANDS"))
-        heads = [i for i in range(start, end) if re.match(r"        (el)?if cmd (==|in) ", src[i])] + [end]
-        missing = []
-        for a, b in zip(heads, heads[1:]):
-            body = "\n".join(src[a:b])
-            if not re.search(r"^\s+return\b|sys\.exit\(", body, re.M):
-                missing.append(src[a].strip())
-        self.assertEqual(missing, [], f"Branches fall through to 'Unknown command': {missing}")
+class TestCliCommandRegistry(unittest.TestCase):
+    """The CLI dispatches through a lazy registry: every command is a standalone handler
+    function, so a branch can no longer fall through into 'Unknown command'."""
+
+    def test_every_command_resolves_to_a_callable_handler(self):
+        from bintra_cli import registry
+        import cli
+        groups = (cli.WIN_INTEL_COMMANDS | cli.BINARY_COMMANDS | cli.WEIGHT_COMMANDS | cli.GHIDRA_COMMANDS
+                  | cli.SENSORY_COMMANDS | cli.ARCHIVED_SCOPE_COMMANDS)
+        missing = sorted(n for n in groups if n not in registry.COMMANDS)
+        self.assertEqual(missing, [])
+        for name in registry.COMMANDS:
+            self.assertTrue(callable(registry.resolve(name)), name)
+        self.assertIsNone(registry.resolve("definitely-not-a-command"))
+
+    def test_handler_modules_import_lazily(self):
+        import importlib
+        from bintra_cli import registry
+        modules = {m for m, _ in registry.COMMANDS.values()}
+        for m in modules:
+            importlib.import_module(f"bintra_cli.commands.{m}")
 
 
 class TestCliGlueSignatures(unittest.TestCase):

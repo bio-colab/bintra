@@ -87,7 +87,8 @@ Bintra provides **7 specialized sub-skills** (plus the [`bintra`](skills/bintra/
 ## 3. Critical Rules for AI Agents on Windows (Safety Kernel)
 
 1. **Target Immutability & Workspace Confinement:**  
-   Never modify source binaries in-place. Passing `file_path == output_path` or writing inside the target's original directory is strictly blocked with `TargetMutationError`. Always write outputs to an isolated `./workspace/` directory.
+   Never modify source binaries in-place. Passing `file_path == output_path` or writing inside the target's original directory (or any sub-folder of it) is strictly blocked with `TargetMutationError`. Always write outputs to an isolated `./workspace/` directory.
+   On the **CLI**, an explicit write destination (`--output`, `--session-file`, `--to-sqlite`) designates its parent folder as the workspace when `--workspace` is not given, so `--output .\workspace\x.exe` works out of the box; filesystem roots, the user-home root, Windows system folders and target folders are still refused. The **MCP** server never infers a workspace from an output path.
 2. **Avoid Inline JSON Quoting in PowerShell:**  
    Windows PowerShell strips unescaped double quotes from inline arguments like `'[{"opcode": "INT_ADD"}]'`.  
    *Best Practice:* Always write complex JSON payloads to a temporary file (`temp_pcode.json`) and pass `--file temp_pcode.json`.
@@ -137,11 +138,11 @@ Bintra provides **7 specialized sub-skills** (plus the [`bintra`](skills/bintra/
 | `mem-scan` | Read-only value scan (`PROCESS_VM_READ`) | `--pid <pid> --type <t> --mode <m> [--value <v>] [--session-file <f>]` | `session_id`, `data_type`, `scan_type`, `total_candidates`, `candidates_sample` |
 | `pointer-scan` | Backward pointer path resolver (depth 1-3) | `--pid <pid> --target 0x... [--max-depth 1\|2\|3]` | `pid`, `target_address`, `max_depth_searched`, `heuristic`, `paths_count`, `paths` |
 | `dissect-struct`| 4-byte-granularity struct field inference | `--pid <pid> --address 0x... [--size 64]` | `status`, `heuristic`, `fields_count`, `fields`, `c_struct_definition` |
-| `crash-rca` | MiniDump + disassembly root-cause blame | `--dmp <file.dmp> [--binary <exe>]` | `exception_code`, `access_type`, `root_cause_classification`, `confidence`, `culprit_register` |
+| `crash-rca` | MiniDump + disassembly root-cause blame | `--dmp <file.dmp> [--binary <exe>]` | `exception_code`, `access_type`, `root_cause_classification`, `confidence`, `culprit_register`, `disassembly_window.code_source`, `blame_details.computed_address` / `probable_caller` |
 | `etw-capture` | Hybrid ETW / Event Log timeline capture | `--session-name <s> [--pid <pid>] [--duration 2.0]` | `session_info`, `events_count`, `event_sources`, `temporal_verdict` |
 | `proc-profile` | Longitudinal process profiler & leak diagnoser | `-p <pid> [-n 10] [-i 0.2] [--format json\|md]` | `status`, `verdict`, `private_bytes_slope`, `working_set_slope`, `handles_slope` |
 | `slack-audit` | Binary slack space & overlay forensic auditor | `-f <path> [--format json\|md]` | `status`, `file_type`, `has_overlay`, `has_slack`, `verdict` |
-| `triage` | Unified binary triage dossier | `-f <path> [--format json\|md] [--skip-deobf] [--skip-sensory] [--skip-hybrid-scan]` | `status`, `file_name`, `stages`, `verdict` |
+| `triage` | Unified binary triage dossier | `-f <path> [--format json\|md] [--skip-deobf] [--skip-sensory] [--skip-hybrid-scan]` | `status`, `file_name`, `target_sha256`, `stage_statuses`, `failed_stages`, `summary`, `evidence_graph` |
 | `ghidra-similar` | P-Code behavioral similar-function search | `--input <export> [--function <name>\|--pcode-file <f.json>] [--threshold 0.75] [--limit 20]` | `status`, `indexed_functions`, `matches` |
 | `ghidra-bridge` | Authenticated localhost Ghidra JSON-RPC | `--start\|--daemon\|--status\|--stop\|--annotate-* [--no-temp-marker]` | `is_running`, `port`, `ghidra_client_connected`, `queued_commands` |
 

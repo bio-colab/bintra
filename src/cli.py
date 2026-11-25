@@ -137,6 +137,20 @@ Maintenance & Update Commands:
 """)
 
 
+def _payload_signals_failure(raw_out: str) -> bool:
+    """True when a single JSON object payload reports an error or a missing target."""
+    text = (raw_out or "").strip()
+    if not text.startswith("{"):
+        return False
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    return str(parsed.get("status", "")).lower() == "error" or parsed.get("format") == "FILE_NOT_FOUND"
+
+
 def main():
     _ensure_utf8_stdio()
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
@@ -216,10 +230,18 @@ def main():
             else:
                 del sys.argv[idx]
 
-        if cmd_lower == "ghidra-analyze" and not workspace_arg and "--output" in sys.argv:
-            out_idx = sys.argv.index("--output")
-            if out_idx + 1 < len(sys.argv):
-                workspace_arg = os.path.dirname(os.path.abspath(sys.argv[out_idx + 1]))
+        # CLI only (never MCP): an explicit write destination designates the workspace when
+        # --workspace is absent, so documented flows such as
+        # `patch-binary --output .\workspace\x.exe` work out of the box. TargetScope still
+        # refuses unsafe roots (filesystem/home/system dirs) and relocates away from any
+        # target directory, so writes next to a target remain blocked fail-closed.
+        if not workspace_arg:
+            for out_flag in ("--output", "--session-file", "--to-sqlite"):
+                if out_flag in sys.argv:
+                    out_idx = sys.argv.index(out_flag)
+                    if out_idx + 1 < len(sys.argv) and not sys.argv[out_idx + 1].startswith("-"):
+                        workspace_arg = os.path.dirname(os.path.abspath(sys.argv[out_idx + 1]))
+                        break
 
         streaming_cmds = {"mcp", "mcp-server", "ghidra-bridge", "ghidra-headless", "etw-capture", "update", "self-update"}
         should_buffer = cmd_lower not in streaming_cmds
@@ -229,9 +251,11 @@ def main():
                 if should_buffer:
                     import io, contextlib
                     cap_buf = io.StringIO()
+                    dispatch_completed = False
                     try:
                         with contextlib.redirect_stdout(cap_buf):
                             _dispatch_cli()
+                        dispatch_completed = True
                     finally:
                         raw_out = cap_buf.getvalue()
                         final_out = raw_out
@@ -272,6 +296,10 @@ def main():
                                 f"(baseline={base_tok}, saved={saved_tok}) est_cost_usd=${cost_usd:.6f}\n"
                             )
                             sys.stderr.flush()
+                    # Exit-code contract: a command that returned normally but reported a
+                    # failure payload (status=error / missing target) must not exit 0.
+                    if dispatch_completed and _payload_signals_failure(raw_out):
+                        sys.exit(1)
                 else:
                     _dispatch_cli()
         except SystemExit:
@@ -1779,7 +1807,12 @@ def _dispatch_cli():
                 try:
                     raw_session = SafeFileAccess.read_text(args.session_file)
                     session_data = json.loads(raw_session)
-                    sid = session_data.get("session_id")
+                    state = session_data.get("session_state") if isinstance(session_data, dict) else None
+                    if state:
+                        # Full state persisted by a previous CLI process: restore it here.
+                        sid = ProcessMemoryScanner.import_session(state)
+                    else:
+                        sid = session_data.get("session_id")
                 except SecurityViolationError:
                     raise
                 except Exception:
@@ -1804,7 +1837,9 @@ def _dispatch_cli():
                 )
 
             if args.session_file and res.get("session_id"):
-                SafeFileAccess.write_workspace_file(args.session_file, json.dumps(res, indent=2))
+                persisted = dict(res)
+                persisted["session_state"] = ProcessMemoryScanner.export_session(res["session_id"])
+                SafeFileAccess.write_workspace_file(args.session_file, json.dumps(persisted))
 
             if args.format == "md":
                 is_next = "surviving_count" in res
@@ -2639,7 +2674,7 @@ def _dispatch_cli():
                     scope = ExecutionGuard.get_current_scope()
                     if scope and scope.is_target_directory(out_f):
                         raise TargetMutationError(
-                            f"TARGET_DIRECTORY_WRITE_FORBIDDEN: Output patch cannot be placed in the target's original directory '{os.path.dirname(os.path.abspath(out_f))}'."
+                            scope.target_directory_violation_message(out_f)
                         )
                     if not scope.is_inside_workspace(out_f):
                         raise OutOfScopeError(
@@ -2708,7 +2743,7 @@ def _dispatch_cli():
                     scope = ExecutionGuard.get_current_scope()
                     if scope and scope.is_target_directory(out_f):
                         raise TargetMutationError(
-                            f"TARGET_DIRECTORY_WRITE_FORBIDDEN: Output patch cannot be placed in the target's original directory '{os.path.dirname(os.path.abspath(out_f))}'."
+                            scope.target_directory_violation_message(out_f)
                         )
                     if not scope.is_inside_workspace(out_f):
                         raise OutOfScopeError(

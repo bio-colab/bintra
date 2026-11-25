@@ -197,6 +197,29 @@ class TargetScope:
         except Exception:
             return False
 
+    def containing_target_directory(self, path: str) -> Optional[str]:
+        """Returns the registered target directory that `path` is equal to or nested inside, if any."""
+        try:
+            can = PathIdentity.canonicalize(path)
+        except Exception:
+            return None
+        for td in sorted(self._target_dirs):
+            try:
+                if PathIdentity.is_same_file(can, td) or PathIdentity.is_within_directory(can, td):
+                    return td
+            except Exception:
+                continue
+        return None
+
+    def target_directory_violation_message(self, output_path: str) -> str:
+        """Actionable message for an output placed inside a target's directory tree."""
+        td = self.containing_target_directory(output_path) or os.path.dirname(os.path.abspath(output_path))
+        return (
+            f"TARGET_DIRECTORY_WRITE_FORBIDDEN: Output '{os.path.abspath(output_path)}' lies inside the directory "
+            f"tree of the analysis target ('{td}'). Outputs must go to a separate workspace directory that is "
+            f"not inside the target's folder."
+        )
+
     def is_inside_workspace(self, file_path: str) -> bool:
         """Checks if a path is located strictly within the designated workspace."""
         try:

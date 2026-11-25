@@ -107,7 +107,9 @@ class BinarySlackInspector:
         sec_dir_rva = 0
         sec_dir_size = 0
         data_dirs_offset = pe_offset + 24 + (112 if is_64bit else 96)
-        if pe_offset + 24 + size_of_opt_header >= data_dirs_offset + 40:
+        # Declared optional-header size AND the bytes actually present must both cover the entry
+        # (a truncated file can declare a full optional header it does not contain).
+        if pe_offset + 24 + size_of_opt_header >= data_dirs_offset + 40 and data_dirs_offset + 40 <= len(hdr_bytes):
             # Entry 4 is Security Directory (Certificate Table)
             sec_dir_rva, sec_dir_size = struct.unpack_from("<II", hdr_bytes, data_dirs_offset + (4 * 8))
 
@@ -131,6 +133,31 @@ class BinarySlackInspector:
                 "raw_size": raw_size,
                 "raw_end": sec_end
             })
+
+        # The section table itself is cut off by EOF: the headers are truncated, so no
+        # "clean" verdict can be given regardless of the (partial) section bounds parsed.
+        declared_table_end = sections_offset + num_sections * 40
+        if num_sections > 0 and declared_table_end > file_size:
+            return {
+                "status": "anomaly",
+                "format": "PE32+" if is_64bit else "PE32",
+                "file_size": file_size,
+                "sections_count": num_sections,
+                "sections_parsed": len(sections_info),
+                "max_section_end_offset": max_section_end,
+                "has_trailing_slack": False,
+                "is_truncated": True,
+                "missing_bytes_count": max(declared_table_end, max_section_end) - file_size,
+                "slack_bytes_count": 0,
+                "slack_offset": None,
+                "slack_entropy": 0.0,
+                "slack_type": "TRUNCATED_PE_HEADERS",
+                "diagnostic_note": (
+                    f"Corrupt or truncated PE: the section table ({num_sections} entries) ends at offset "
+                    f"{declared_table_end}, beyond the physical file size of {file_size} bytes."
+                ),
+                "sections": sections_info
+            }
 
         # Defect P1: Check for truncated PE sections extending beyond physical file size
         if max_section_end > file_size:

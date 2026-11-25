@@ -520,8 +520,13 @@ class TestAuditRemediations(unittest.TestCase):
             "modules": [],
         }
         no_av_rca = CrashRootCauseAnalyzer.analyze_crash(no_av_dump)
-        self.assertEqual(no_av_rca["root_cause_classification"], "UNKNOWN_TARGET_ADDRESS")
+        # Non-AV codes are classified from the exception code itself, never as a NULL trap.
+        self.assertEqual(no_av_rca["root_cause_classification"], "INTEGER_DIVIDE_BY_ZERO")
+        self.assertNotIn("NULL", no_av_rca["root_cause_classification"])
         self.assertEqual(no_av_rca["target_address"], "UNAVAILABLE")
+        unknown_code_dump = dict(no_av_dump, exception_info={"exception_code": "0xE0001234", "exception_name": "CUSTOM"})
+        unknown_rca = CrashRootCauseAnalyzer.analyze_crash(unknown_code_dump)
+        self.assertEqual(unknown_rca["root_cause_classification"], "UNKNOWN_TARGET_ADDRESS")
 
         # F-13: Thread stack bounds [st_base, st_base + st_size_bytes) must NOT include st_base - 0x100
         below_stack = CrashRootCauseAnalyzer._classify_target_memory(0x00100000 - 0x100, no_av_dump)

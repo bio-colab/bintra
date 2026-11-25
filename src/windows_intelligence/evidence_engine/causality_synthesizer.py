@@ -35,9 +35,15 @@ class CausalitySynthesizer:
         cls,
         binary_path: str,
         crash_record: Optional[Dict[str, Any]] = None,
-        ghidra_export: Optional[Dict[str, Any]] = None
+        ghidra_export: Optional[Dict[str, Any]] = None,
+        precomputed: Optional[Dict[str, Any]] = None
     ) -> EvidenceGraph:
-        """Constructs the comprehensive diagnostic Evidence Graph."""
+        """
+        Constructs the comprehensive diagnostic Evidence Graph.
+        `precomputed` lets a caller that already gathered host telemetry for the same target
+        (os_profile, dependency_audit, file_locks, running_instances) avoid recomputing it.
+        """
+        pre = precomputed or {}
         graph = EvidenceGraph()
         norm_path = os.path.abspath(binary_path)
         bin_name = os.path.basename(norm_path)
@@ -58,7 +64,7 @@ class CausalitySynthesizer:
         )
 
         # 2. Host OS Node
-        os_prof = WindowsOSProfiler.profile(norm_path)
+        os_prof = pre.get("os_profile") or WindowsOSProfiler.profile(norm_path)
         kernel_info = os_prof.get("kernel", {})
         os_node_id = "HOST_OS"
         graph.add_node(
@@ -96,7 +102,7 @@ class CausalitySynthesizer:
             section_nodes[s_name] = (va_int, vsize_int, sec_id)
 
         # 4. Dependency Resolution
-        dep_audit = WindowsDependencyResolver.audit_dependencies(norm_path)
+        dep_audit = pre.get("dependency_audit") or WindowsDependencyResolver.audit_dependencies(norm_path)
         for dll_info in dep_audit.get("resolved_dlls", []):
             dll_name = dll_info.get("imported_name", "")
             if not dll_name:
@@ -165,7 +171,7 @@ class CausalitySynthesizer:
         # 5.1 Process & Resource Intelligence: File Locks and Active Instances
         try:
             from ..process_intelligence import FileUsageInspector, ProcessInventory
-            locks = FileUsageInspector.inspect_file_locks(norm_path)
+            locks = pre["file_locks"] if isinstance(pre.get("file_locks"), dict) else FileUsageInspector.inspect_file_locks(norm_path)
             if locks.get("is_locked"):
                 for proc in locks.get("locking_processes", []):
                     lock_pid = proc.get("process_id")
@@ -179,7 +185,7 @@ class CausalitySynthesizer:
                     )
                     graph.add_edge(bin_id, lock_id, relation="LOCKED_BY")
 
-            active_procs = ProcessInventory.find_processes_by_file(norm_path)
+            active_procs = pre["running_instances"] if isinstance(pre.get("running_instances"), list) else ProcessInventory.find_processes_by_file(norm_path)
             for ap in active_procs:
                 ap_pid = ap.get("process_id")
                 proc_id = f"PROC:{ap_pid}"
@@ -745,7 +751,15 @@ class CausalitySynthesizer:
                     remediation_steps.append("Validate buffer bounds and check for use-after-free or data execution prevention conflicts.")
 
         # 5. Build Evidence Graph & Extract Causal Chain
-        graph = cls.build_evidence_graph(norm_path, crash_record=crash_record, ghidra_export=ghidra_export)
+        graph = cls.build_evidence_graph(
+            norm_path, crash_record=crash_record, ghidra_export=ghidra_export,
+            precomputed={
+                "os_profile": os_data,
+                "dependency_audit": dep_data,
+                "file_locks": resource_data.get("file_locks"),
+                "running_instances": resource_data.get("running_instances"),
+            },
+        )
         target_node_id = f"TARGET:{bin_name}"
         causal_chain = []
         if "AV_ROOT_CAUSE" in graph.nodes and target_node_id in graph.nodes:

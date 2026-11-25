@@ -415,6 +415,16 @@ We warmly welcome contributions from the binary analysis, systems research, and 
 
 ---
 
+## Real-World Validation Matrix
+
+`benchmarks/real_world_windows/` contains a host-driven campaign (8 levels: static PE anatomy, host intelligence, real crash dumps, live processes, mutation & safety, MCP end-to-end, malformed-PE fuzzing, System32-scale triage) that runs against genuine artifacts on a Windows workstation and reports to `workspace/real_world/SUMMARY.md`:
+
+```powershell
+python benchmarks\real_world_windows\run_matrix.py
+```
+
+See [`TEST_PLAN.md`](benchmarks/real_world_windows/TEST_PLAN.md) for pass criteria and [`RESULTS.md`](benchmarks/real_world_windows/RESULTS.md) for the latest campaign and the defects it uncovered.
+
 ## Known Limitations & Heuristic Boundaries
 
 `Bintra` maintains a strict, transparent distinction between deterministic mathematical verification and heuristic statistical pattern matching:

@@ -225,7 +225,7 @@ class SafetensorsHandler:
             scope = ExecutionGuard.get_current_scope()
             if scope and scope.is_target_directory(out_abs):
                 raise TargetMutationError(
-                    f"TARGET_DIRECTORY_WRITE_FORBIDDEN: Output patch cannot be placed in the target's original directory '{os.path.dirname(out_abs)}'."
+                    scope.target_directory_violation_message(out_abs)
                 )
 
             # Mandatory Reference Monitor Mediation: Enforce workspace confinement & target immutability
@@ -1638,7 +1638,17 @@ class WeightSecurityAuditor:
         suspect_rows = np.where(row_z > 4.5)[0].tolist()
 
         # Check rank-1 alignment of outlier rows (classic backdoor trigger signature)
-        has_backdoor_spike = len(suspect_rows) > 0 and max_r_z > 5.0
+        has_row_spike = len(suspect_rows) > 0 and max_r_z > 5.0
+
+        # Column axis: in [out, in] projections (e.g. MLP down_proj) a column is one upstream
+        # neuron's entire write-out vector, so a planted trojan unit appears as a column outlier
+        # that row norms cannot see (adding it shifts every row equally).
+        col_z, _, _ = cls._compute_robust_row_zscores(col_norms)
+        max_c_z = float(np.max(col_z)) if col_z.size > 0 else 0.0
+        suspect_cols = np.where(col_z > 4.5)[0].tolist()
+        has_col_spike = len(suspect_cols) > 0 and max_c_z > 5.0
+
+        has_backdoor_spike = has_row_spike or has_col_spike
 
         # Spatial Receptive Field Concentration (Exp 1)
         grid_size = spatial_height * spatial_width
@@ -1656,6 +1666,9 @@ class WeightSecurityAuditor:
             "potential_backdoor_detected": has_backdoor_spike,
             "max_neuron_norm_zscore": round(max_r_z, 4),
             "suspect_trigger_neurons": suspect_rows[:16],
+            "max_input_channel_norm_zscore": round(max_c_z, 4),
+            "suspect_input_channel_neurons": suspect_cols[:16],
+            "suspect_axes": [a for a, hit in (("rows", has_row_spike), ("columns", has_col_spike)) if hit],
             "receptive_field_dominant_row": dominant_spatial_row,
             "bottom_row_paddle_concentration": round(bottom_row_ratio, 4)
         }

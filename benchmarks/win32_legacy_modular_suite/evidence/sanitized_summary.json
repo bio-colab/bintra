@@ -1,0 +1,2983 @@
+{
+  "campaign_metadata": {
+    "os": "Windows 10 Pro 22H2 (Build 19045.6466) x64",
+    "python": "3.12",
+    "execution_privilege": "Standard User (Medium IL 0x2000)",
+    "target_safety": "Strict read-only on <TARGET_ROOT>; patch verification ran strictly in isolated workspace copies"
+  },
+  "fast_scan": {
+    "binaries": {
+      "legacy_host_x86.exe": {
+        "size": 14383616,
+        "sha256": "590b4be1bb005f4e07edf6b32df4a95b7ba403fb85472d68aa4275875b345b6f",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": false,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections": [
+          ".text",
+          "_rwcseg",
+          ".rdata",
+          ".data",
+          "_TEXT_HA",
+          "_rwdseg",
+          ".rsrc",
+          ".text",
+          ".init",
+          ".data",
+          ".<STUB_SEC>"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "CLEO.asi": {
+        "size": 325120,
+        "sha256": "748ea0b36a1580652146c8b443066bdd81ef14556431805b2102f0f1f44caa08",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": false
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".rsrc",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "cleo_redux.asi": {
+        "size": 5309952,
+        "sha256": "02380a76a76fffbf65dedce0c9986698fd1f58b58ca2a2afe79b975b6b886925",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".fptable",
+          ".rsrc",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "dinput8.dll": {
+        "size": 166912,
+        "sha256": "14faf8c4ca5058746f04826f9545b25e9111513ee1c99d3733e743e749e5e270",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": false
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".rsrc",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "vorbisFile.dll": {
+        "size": 53760,
+        "sha256": "c33e1bafafd441b42eaa6d322393b9dd700f8a9c13fb2e7780daf49707a46353",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": false
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "vorbisFile.dll.vanilla_bak": {
+        "size": 65536,
+        "sha256": "a08923479000cec366967fb8259e0920b7aa18859722c7dda1415726bed4774f",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": false,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": false,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": false
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "vorbisHooked.dll": {
+        "size": 65536,
+        "sha256": "a08923479000cec366967fb8259e0920b7aa18859722c7dda1415726bed4774f",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": false,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": false,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": false
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "bass.dll": {
+        "size": 139128,
+        "sha256": "6e1bf8ea63f9923687709f4e2f0dac7ff558b2ab923e8c8aa147384746e05b1d",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": false
+        },
+        "sections": [
+          "",
+          ".rsrc",
+          "petite"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "PE_CERTIFICATE_TABLE_REGION_DETECTED",
+        "slack_bytes": 7752,
+        "trailing_slack": true,
+        "sig_rc": 0,
+        "is_signed": true,
+        "sig_trust": "TRUSTED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "eax.dll": {
+        "size": 188416,
+        "sha256": "b2da4f1e47ef8054c8390ead0b97d1fbb0c547245b79b8861cfa92ce9ef153fb",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": false,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": false,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": false
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".rsrc",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "ogg.dll": {
+        "size": 36864,
+        "sha256": "4a4f65427e016b3c5ae0d2517a69db5f1cdc7a43d2c0a7957e8da5d6f378f063",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": false,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": false,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": false
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "vorbis.dll": {
+        "size": 1060864,
+        "sha256": "fefda850b69e007fceba644483c7616bc07e9f177fc634fb74e114f0d15b0db0",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": false,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": false,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": false
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "cleo\\CLEO_PLUGINS\\dylib.cleo": {
+        "size": 9728,
+        "sha256": "b98ef2f2a3380f91972be9e22ee9489ebe55e887c654901165b3d12adb682c18",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": false
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".rsrc",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "cleo\\CLEO_PLUGINS\\Events.cleo": {
+        "size": 267264,
+        "sha256": "abe618b70b6fa7efe912868b708aad0a27cd0a335a4fec96384297912831d9e6",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "cleo\\CLEO_PLUGINS\\Frontend.cleo": {
+        "size": 1730560,
+        "sha256": "d0ac8590f875211c9680359648c28767c770e10200c33a18c712ffb79a376e3c",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "cleo\\CLEO_PLUGINS\\FxtLoader.cleo": {
+        "size": 219648,
+        "sha256": "67d30fc64e0407887f4a5a2170e9e72b85379f73d496ad40a35e60eb5c9a1200",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".fptable",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "cleo\\CLEO_PLUGINS\\IdeLoader.cleo": {
+        "size": 224256,
+        "sha256": "da946169cfcc24b2da4b048920ddc6bb8b22d312d46e89a0845750c1b4ee1cfe",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".fptable",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "cleo\\CLEO_PLUGINS\\IniFiles.cleo": {
+        "size": 11264,
+        "sha256": "582692a1ef0e46772d7865eaad8e133c26b64658a31edc42f2e609b65468e1c0",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": false
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".rsrc",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "cleo\\CLEO_PLUGINS\\Input.cleo": {
+        "size": 186368,
+        "sha256": "732c398162c32c927ad45b3aa9dc01e764757371149be36b089782c9a2825592",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": true
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "cleo\\CLEO_PLUGINS\\TextLoader.cleo": {
+        "size": 33280,
+        "sha256": "46b7624de70731f9dcccfbe07f15d3f5bcf5703c8baaba9b99fe1ae833982994",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": false
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".rsrc",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "cleo\\FileSystemOperations.cleo": {
+        "size": 98304,
+        "sha256": "b7b80bc1aad995e7643127a978dfb56bda7fe02ab54879327cfa7baca71bcddf",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": false
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".rsrc",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "cleo\\IniFiles.cleo": {
+        "size": 110080,
+        "sha256": "d9ddde713211eb1341ec7181d0b2d7e487e8c816ced7afadee5d50ef3f37d168",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": false
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".rsrc",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      },
+      "cleo\\IntOperations.cleo": {
+        "size": 76800,
+        "sha256": "5897bcd19ac9097f3b730c091623c556a176c82af4f97e3a2c483f62f4819f4f",
+        "inspect_rc": 0,
+        "format": "PE",
+        "arch": null,
+        "entropy": null,
+        "mitigations": {
+          "aslr_dynamic_base": true,
+          "high_entropy_64bit_aslr": false,
+          "dep_nx_compat": true,
+          "control_flow_guard_cfg": false,
+          "no_seh": false,
+          "large_address_aware_4gb": false
+        },
+        "sections": [
+          ".text",
+          ".rdata",
+          ".data",
+          ".rsrc",
+          ".reloc"
+        ],
+        "imports_cnt": 2,
+        "exports_cnt": 2,
+        "slack_rc": 0,
+        "slack_type": "CLEAN_EXACT_EOF",
+        "slack_bytes": 0,
+        "trailing_slack": false,
+        "sig_rc": 0,
+        "is_signed": false,
+        "sig_trust": "UNSIGNED",
+        "hybrid_rc": 0,
+        "hybrid_assets": 0
+      }
+    },
+    "sig_audit": {
+      "rc": 0,
+      "summary": {
+        "status": "ok",
+        "directory": "<TARGET_ROOT>",
+        "pattern": "*.*",
+        "metrics": {
+          "total_scanned": 26,
+          "trusted_embedded": 1,
+          "trusted_catalog": 0,
+          "unsigned": 10,
+          "tampered": 0,
+          "untrusted_or_expired": 15,
+          "microsoft_system_binaries": 0,
+          "scan_errors": 0
+        },
+        "errors": [],
+        "epistemic_classification": "DIRECTORY_SIGNATURE_AUDIT"
+      },
+      "stderr": ""
+    },
+    "resolve_deps": {
+      "rc": 0,
+      "verdict": "HEALTHY",
+      "loader_mode": "WOW64 (32-on-64)",
+      "resolved_count": 9,
+      "missing_dlls": [],
+      "sxs": null,
+      "keys": [
+        "status",
+        "audit_scope",
+        "binary_path",
+        "binary_architecture",
+        "loader_mode",
+        "known_dlls_enforced",
+        "verdict",
+        "total_imported_dlls",
+        "resolved_dlls_count",
+        "missing_dlls_count",
+        "architecture_mismatches_count",
+        "missing_exports_count",
+        "sxs_assemblies_count",
+        "resolved_dlls",
+        "missing_dlls",
+        "architecture_mismatches",
+        "missing_exports",
+        "search_directories"
+      ]
+    },
+    "crash_dumps": {
+      "legacy_host_x86.exe.12224.dmp": {
+        "rc": 0,
+        "size": 19231282,
+        "status": "success",
+        "exception_code": null,
+        "exception_address": "0x72fbfedb",
+        "faulting_module": null,
+        "operation": "READ",
+        "is_null": true,
+        "stderr": ""
+      },
+      "legacy_host_x86.exe.12992.dmp": {
+        "rc": 0,
+        "size": 19152307,
+        "status": "success",
+        "exception_code": null,
+        "exception_address": "0x645f40",
+        "faulting_module": null,
+        "operation": "READ",
+        "is_null": true,
+        "stderr": ""
+      },
+      "legacy_host_x86.exe.15592.dmp": {
+        "rc": 0,
+        "size": 19218834,
+        "status": "success",
+        "exception_code": null,
+        "exception_address": "0x0",
+        "faulting_module": null,
+        "operation": "EXECUTE (DEP / NX Violation)",
+        "is_null": true,
+        "stderr": ""
+      },
+      "legacy_host_x86.exe.15656.dmp": {
+        "rc": 0,
+        "size": 19108323,
+        "status": "success",
+        "exception_code": null,
+        "exception_address": "0x0",
+        "faulting_module": null,
+        "operation": "EXECUTE (DEP / NX Violation)",
+        "is_null": true,
+        "stderr": ""
+      },
+      "legacy_host_x86.exe.2200.dmp": {
+        "rc": 0,
+        "size": 19211746,
+        "status": "success",
+        "exception_code": null,
+        "exception_address": "0x72fbfedb",
+        "faulting_module": null,
+        "operation": "READ",
+        "is_null": true,
+        "stderr": ""
+      }
+    },
+    "py_bytecode": {
+      "AINPC": {
+        "rc": 0,
+        "status": "ok",
+        "error": null,
+        "code_objects": null,
+        "keys": [
+          "status",
+          "package_name",
+          "package_root",
+          "total_modules",
+          "total_lines_of_code",
+          "total_ast_nodes",
+          "total_functions",
+          "total_classes",
+          "total_functions_cataloged",
+          "monolithic_modules_count",
+          "monolithic_modules",
+          "circular_dependencies_count",
+          "circular_dependencies",
+          "complexity_hotspots_count",
+          "complexity_hotspots",
+          "algorithmic_hazards",
+          "supply_chain_audit",
+          "argument_map",
+          "execution_workflows",
+          "function_catalog_sample",
+          "module_coupling_metrics",
+          "modules_summary",
+          "epistemic_classification"
+        ]
+      },
+      "agent-harness": {
+        "rc": 0,
+        "status": "ok",
+        "error": null,
+        "code_objects": null,
+        "keys": [
+          "status",
+          "package_name",
+          "package_root",
+          "total_modules",
+          "total_lines_of_code",
+          "total_ast_nodes",
+          "total_functions",
+          "total_classes",
+          "total_functions_cataloged",
+          "monolithic_modules_count",
+          "monolithic_modules",
+          "circular_dependencies_count",
+          "circular_dependencies",
+          "complexity_hotspots_count",
+          "complexity_hotspots",
+          "algorithmic_hazards",
+          "supply_chain_audit",
+          "argument_map",
+          "execution_workflows",
+          "function_catalog_sample",
+          "module_coupling_metrics",
+          "modules_summary",
+          "epistemic_classification"
+        ]
+      }
+    },
+    "failures": []
+  },
+  "deep_phase1": {
+    "pe_forensics": {
+      "legacy_host_x86.exe": {
+        "status": "ok",
+        "architecture": "x86 (PE32)",
+        "pdata_count": 0,
+        "pdata_status": null,
+        "rtti_count": null,
+        "rtti_vftables": 14,
+        "rtti_sample": [
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "pdb": {
+          "rsds_records": [],
+          "pdb_verification": {
+            "offline_only": true,
+            "local_pdb_found": false,
+            "local_pdb_path": null,
+            "msf_valid": false,
+            "guid_match": false,
+            "age_match": false,
+            "is_exact_match": false,
+            "match_status": "NOT_FOUND"
+          }
+        },
+        "slack_type": "CLEAN_EXACT_EOF"
+      },
+      "CLEO.asi": {
+        "status": "ok",
+        "architecture": "x86 (PE32)",
+        "pdata_count": 0,
+        "pdata_status": null,
+        "rtti_count": null,
+        "rtti_vftables": 38,
+        "rtti_sample": [
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "pdb": {
+          "rsds_records": [],
+          "pdb_verification": {
+            "offline_only": true,
+            "local_pdb_found": false,
+            "local_pdb_path": null,
+            "msf_valid": false,
+            "guid_match": false,
+            "age_match": false,
+            "is_exact_match": false,
+            "match_status": "NOT_FOUND"
+          }
+        },
+        "slack_type": "CLEAN_EXACT_EOF"
+      },
+      "cleo_redux.asi": {
+        "status": "ok",
+        "architecture": "x86 (PE32)",
+        "pdata_count": 0,
+        "pdata_status": null,
+        "rtti_count": null,
+        "rtti_vftables": 3,
+        "rtti_sample": [
+          null,
+          null,
+          null
+        ],
+        "pdb": {
+          "rsds_records": [
+            {
+              "signature": "RSDS",
+              "guid": "DB1BEE62-D645-4AB2-918C-74901C920A0A",
+              "age": 1261,
+              "embedded_pdb_path": "cleo_redux.pdb"
+            }
+          ],
+          "pdb_verification": {
+            "offline_only": true,
+            "local_pdb_found": false,
+            "local_pdb_path": null,
+            "msf_valid": false,
+            "guid_match": false,
+            "age_match": false,
+            "is_exact_match": false,
+            "match_status": "NOT_FOUND"
+          }
+        },
+        "slack_type": "CLEAN_EXACT_EOF"
+      },
+      "dinput8.dll": {
+        "status": "ok",
+        "architecture": "x86 (PE32)",
+        "pdata_count": 0,
+        "pdata_status": null,
+        "rtti_count": null,
+        "rtti_vftables": 28,
+        "rtti_sample": [
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "pdb": {
+          "rsds_records": [],
+          "pdb_verification": {
+            "offline_only": true,
+            "local_pdb_found": false,
+            "local_pdb_path": null,
+            "msf_valid": false,
+            "guid_match": false,
+            "age_match": false,
+            "is_exact_match": false,
+            "match_status": "NOT_FOUND"
+          }
+        },
+        "slack_type": "CLEAN_EXACT_EOF"
+      },
+      "vorbisFile.dll": {
+        "status": "ok",
+        "architecture": "x86 (PE32)",
+        "pdata_count": 0,
+        "pdata_status": null,
+        "rtti_count": null,
+        "rtti_vftables": 0,
+        "rtti_sample": [],
+        "pdb": {
+          "rsds_records": [],
+          "pdb_verification": {
+            "offline_only": true,
+            "local_pdb_found": false,
+            "local_pdb_path": null,
+            "msf_valid": false,
+            "guid_match": false,
+            "age_match": false,
+            "is_exact_match": false,
+            "match_status": "NOT_FOUND"
+          }
+        },
+        "slack_type": "CLEAN_EXACT_EOF"
+      },
+      "vorbisHooked.dll": {
+        "status": "ok",
+        "architecture": "x86 (PE32)",
+        "pdata_count": 0,
+        "pdata_status": null,
+        "rtti_count": null,
+        "rtti_vftables": 0,
+        "rtti_sample": [],
+        "pdb": {
+          "rsds_records": [],
+          "pdb_verification": {
+            "offline_only": true,
+            "local_pdb_found": false,
+            "local_pdb_path": null,
+            "msf_valid": false,
+            "guid_match": false,
+            "age_match": false,
+            "is_exact_match": false,
+            "match_status": "NOT_FOUND"
+          }
+        },
+        "slack_type": "CLEAN_EXACT_EOF"
+      },
+      "bass.dll": {
+        "status": "ok",
+        "architecture": "x86 (PE32)",
+        "pdata_count": 0,
+        "pdata_status": null,
+        "rtti_count": null,
+        "rtti_vftables": 0,
+        "rtti_sample": [],
+        "pdb": {
+          "rsds_records": [],
+          "pdb_verification": {
+            "offline_only": true,
+            "local_pdb_found": false,
+            "local_pdb_path": null,
+            "msf_valid": false,
+            "guid_match": false,
+            "age_match": false,
+            "is_exact_match": false,
+            "match_status": "NOT_FOUND"
+          }
+        },
+        "slack_type": "PE_CERTIFICATE_TABLE_REGION_DETECTED"
+      },
+      "cleo\\CLEO_PLUGINS\\Frontend.cleo": {
+        "status": "ok",
+        "architecture": "x86 (PE32)",
+        "pdata_count": 0,
+        "pdata_status": null,
+        "rtti_count": null,
+        "rtti_vftables": 3,
+        "rtti_sample": [
+          null,
+          null,
+          null
+        ],
+        "pdb": {
+          "rsds_records": [
+            {
+              "signature": "RSDS",
+              "guid": "27B283E8-9E02-44CF-8C7B-7148121D4276",
+              "age": 71,
+              "embedded_pdb_path": "C:\\work\\CLEO_REDUX\\rust-cleo-redux\\cleo_redux_frontend\\frontend.pdb"
+            }
+          ],
+          "pdb_verification": {
+            "offline_only": true,
+            "local_pdb_found": false,
+            "local_pdb_path": null,
+            "msf_valid": false,
+            "guid_match": false,
+            "age_match": false,
+            "is_exact_match": false,
+            "match_status": "NOT_FOUND"
+          }
+        },
+        "slack_type": "CLEAN_EXACT_EOF"
+      }
+    },
+    "diffs": {
+      "vorbis_mod_vs_vanilla": {
+        "status": "ok",
+        "baseline_file": "<TARGET_ROOT>\\vorbisFile.dll.vanilla_bak",
+        "target_file": "<TARGET_ROOT>\\vorbisFile.dll",
+        "identical_sha256": false,
+        "baseline_sha256": "a08923479000cec366967fb8259e0920b7aa18859722c7dda1415726bed4774f",
+        "target_sha256": "c33e1bafafd441b42eaa6d322393b9dd700f8a9c13fb2e7780daf49707a46353",
+        "pe_semantic_similarity": 0.577,
+        "pdata_function_delta": 0,
+        "baseline_pdata_count": 0,
+        "target_pdata_count": 0,
+        "rtti_classes_shared_count": 0,
+        "epistemic_classification": "DETERMINISTIC_PE_DIFF"
+      },
+      "vorbis_mod_vs_hooked": {
+        "status": "ok",
+        "baseline_file": "<TARGET_ROOT>\\vorbisHooked.dll",
+        "target_file": "<TARGET_ROOT>\\vorbisFile.dll",
+        "identical_sha256": false,
+        "baseline_sha256": "a08923479000cec366967fb8259e0920b7aa18859722c7dda1415726bed4774f",
+        "target_sha256": "c33e1bafafd441b42eaa6d322393b9dd700f8a9c13fb2e7780daf49707a46353",
+        "pe_semantic_similarity": 0.577,
+        "pdata_function_delta": 0,
+        "baseline_pdata_count": 0,
+        "target_pdata_count": 0,
+        "rtti_classes_shared_count": 0,
+        "epistemic_classification": "DETERMINISTIC_PE_DIFF"
+      },
+      "cleo_vs_redux": {
+        "status": "ok",
+        "baseline_file": "<TARGET_ROOT>\\cleo_redux.asi",
+        "target_file": "<TARGET_ROOT>\\CLEO.asi",
+        "identical_sha256": false,
+        "baseline_sha256": "02380a76a76fffbf65dedce0c9986698fd1f58b58ca2a2afe79b975b6b886925",
+        "target_sha256": "748ea0b36a1580652146c8b443066bdd81ef14556431805b2102f0f1f44caa08",
+        "pe_semantic_similarity": 0.525,
+        "pdata_function_delta": 0,
+        "baseline_pdata_count": 0,
+        "target_pdata_count": 0,
+        "rtti_classes_shared_count": 3,
+        "epistemic_classification": "DETERMINISTIC_PE_DIFF"
+      }
+    },
+    "deobfuscate": {
+      "legacy_host_x86.exe": {
+        "entry_offset": "0x423970",
+        "opaque": 0,
+        "cff": {
+          "has_control_flow_flattening": true,
+          "dispatcher_comparisons_count": 26,
+          "state_transitions_count": 28,
+          "dispatcher_cadence_regularity": 0.5468,
+          "detected_state_states": [
+            "0x0",
+            "0x1",
+            "0x10",
+            "0x100",
+            "0x10000",
+            "0x2",
+            "0x3",
+            "0x40",
+            "0x400",
+            "0x7ff00000",
+            "0x8",
+            "0x800",
+            "0x8e3090",
+            "0xfd",
+            "0xfff00000"
+          ],
+          "unflattening_strategy": "Trace state variable assignments to rebuild sequential basic block graph."
+        },
+        "reduction_pct": 0.0,
+        "error": null
+      },
+      "CLEO.asi": {
+        "entry_offset": "0x14ace",
+        "opaque": 0,
+        "cff": {
+          "has_control_flow_flattening": false,
+          "dispatcher_comparisons_count": 6,
+          "state_transitions_count": 40,
+          "dispatcher_cadence_regularity": 0.4852,
+          "detected_state_states": [
+            "0x0",
+            "0x1",
+            "0x123",
+            "0x20",
+            "0xff"
+          ],
+          "unflattening_strategy": "Control flow appears canonical/unflattened."
+        },
+        "reduction_pct": 0.0,
+        "error": null
+      },
+      "cleo_redux.asi": {
+        "entry_offset": "0x3218b0",
+        "opaque": 0,
+        "cff": {
+          "has_control_flow_flattening": true,
+          "dispatcher_comparisons_count": 18,
+          "state_transitions_count": 24,
+          "dispatcher_cadence_regularity": 0.5368,
+          "detected_state_states": [
+            "0x0",
+            "0x1",
+            "0x104f1d8c",
+            "0x104f1d94",
+            "0x18000000",
+            "0x20",
+            "0x24",
+            "0x3573403e",
+            "0x4",
+            "0x41e00000",
+            "0x43e00000",
+            "0x6",
+            "0x7",
+            "0xbb40e64e",
+            "0xd0030000"
+          ],
+          "unflattening_strategy": "Trace state variable assignments to rebuild sequential basic block graph."
+        },
+        "reduction_pct": 0.0,
+        "error": null
+      },
+      "bass.dll": {
+        "entry_offset": "0x1f204",
+        "opaque": 0,
+        "cff": {
+          "has_control_flow_flattening": false,
+          "dispatcher_comparisons_count": 2,
+          "state_transitions_count": 11,
+          "dispatcher_cadence_regularity": 1.0,
+          "detected_state_states": [
+            "0x10000",
+            "0xff"
+          ],
+          "unflattening_strategy": "Control flow appears canonical/unflattened."
+        },
+        "reduction_pct": 0.0,
+        "error": null
+      },
+      "vorbisFile.dll": {
+        "entry_offset": "0xd7b",
+        "opaque": 0,
+        "cff": {
+          "has_control_flow_flattening": false,
+          "dispatcher_comparisons_count": 24,
+          "state_transitions_count": 33,
+          "dispatcher_cadence_regularity": 0.4535,
+          "detected_state_states": [
+            "0x0",
+            "0x1",
+            "0x1000a160",
+            "0x1000a168",
+            "0x1000d1c0",
+            "0x1000d850",
+            "0xe0",
+            "0xfe",
+            "0xff"
+          ],
+          "unflattening_strategy": "Control flow appears canonical/unflattened."
+        },
+        "reduction_pct": 0.0,
+        "error": null
+      },
+      "dinput8.dll": {
+        "entry_offset": "0x7463",
+        "opaque": 0,
+        "cff": {
+          "has_control_flow_flattening": true,
+          "dispatcher_comparisons_count": 34,
+          "state_transitions_count": 33,
+          "dispatcher_cadence_regularity": 0.5969,
+          "detected_state_states": [
+            "0x0",
+            "0x1",
+            "0x10",
+            "0x123",
+            "0x16",
+            "0x2",
+            "0x22",
+            "0x3",
+            "0x30",
+            "0x4",
+            "0x8",
+            "0x80",
+            "0xe0",
+            "0xff"
+          ],
+          "unflattening_strategy": "Trace state variable assignments to rebuild sequential basic block graph."
+        },
+        "reduction_pct": 0.0,
+        "error": null
+      }
+    },
+    "sense": {
+      "legacy_host_x86.exe": {
+        "active_senses": 10,
+        "efficiency": 0.958,
+        "error": null
+      },
+      "CLEO.asi": {
+        "active_senses": 10,
+        "efficiency": 0.958,
+        "error": null
+      },
+      "cleo_redux.asi": {
+        "active_senses": 10,
+        "efficiency": 0.958,
+        "error": null
+      },
+      "bass.dll": {
+        "active_senses": 10,
+        "efficiency": 0.958,
+        "error": null
+      },
+      "vorbisFile.dll": {
+        "active_senses": 10,
+        "efficiency": 0.958,
+        "error": null
+      },
+      "dinput8.dll": {
+        "active_senses": 10,
+        "efficiency": 0.958,
+        "error": null
+      }
+    },
+    "deps": {
+      "legacy_host_x86.exe": {
+        "rc": 0,
+        "verdict": "HEALTHY",
+        "total": 9,
+        "resolved": 9,
+        "missing": [],
+        "arch_mismatch": [],
+        "missing_exports_count": 0,
+        "missing_exports_sample": []
+      },
+      "CLEO.asi": {
+        "rc": 0,
+        "verdict": "HEALTHY",
+        "total": 3,
+        "resolved": 3,
+        "missing": [],
+        "arch_mismatch": [],
+        "missing_exports_count": 0,
+        "missing_exports_sample": []
+      },
+      "cleo_redux.asi": {
+        "rc": 0,
+        "verdict": "HEALTHY",
+        "total": 10,
+        "resolved": 10,
+        "missing": [],
+        "arch_mismatch": [],
+        "missing_exports_count": 0,
+        "missing_exports_sample": []
+      },
+      "dinput8.dll": {
+        "rc": 0,
+        "verdict": "HEALTHY",
+        "total": 2,
+        "resolved": 2,
+        "missing": [],
+        "arch_mismatch": [],
+        "missing_exports_count": 0,
+        "missing_exports_sample": []
+      },
+      "vorbisFile.dll": {
+        "rc": 0,
+        "verdict": "HEALTHY",
+        "total": 1,
+        "resolved": 1,
+        "missing": [],
+        "arch_mismatch": [],
+        "missing_exports_count": 0,
+        "missing_exports_sample": []
+      },
+      "vorbisHooked.dll": {
+        "rc": 0,
+        "verdict": "HEALTHY",
+        "total": 3,
+        "resolved": 3,
+        "missing": [],
+        "arch_mismatch": [],
+        "missing_exports_count": 0,
+        "missing_exports_sample": []
+      },
+      "bass.dll": {
+        "rc": 0,
+        "verdict": "HEALTHY",
+        "total": 7,
+        "resolved": 7,
+        "missing": [],
+        "arch_mismatch": [],
+        "missing_exports_count": 0,
+        "missing_exports_sample": []
+      },
+      "eax.dll": {
+        "rc": 0,
+        "verdict": "HEALTHY",
+        "total": 4,
+        "resolved": 4,
+        "missing": [],
+        "arch_mismatch": [],
+        "missing_exports_count": 0,
+        "missing_exports_sample": []
+      },
+      "cleo\\CLEO_PLUGINS\\Frontend.cleo": {
+        "rc": 0,
+        "verdict": "HEALTHY",
+        "total": 5,
+        "resolved": 5,
+        "missing": [],
+        "arch_mismatch": [],
+        "missing_exports_count": 0,
+        "missing_exports_sample": []
+      }
+    },
+    "triage_dumps": {
+      "legacy_host_x86.exe.12224.dmp": {
+        "status": "ok",
+        "stage_statuses": {
+          "binary_inspection": {
+            "status": "ok"
+          },
+          "pe_deep_forensics": {
+            "status": "ok"
+          },
+          "signature_intelligence": {
+            "status": "ok",
+            "trust_status": "UNSIGNED",
+            "is_verified": false
+          },
+          "deobfuscation": {
+            "status": "skipped",
+            "reason": "disabled_by_caller"
+          },
+          "sensory_perception": {
+            "status": "skipped",
+            "reason": "disabled_by_caller"
+          },
+          "embedded_ai_scan": {
+            "status": "skipped",
+            "reason": "disabled_by_caller"
+          },
+          "slack_and_overlay": {
+            "status": "ok",
+            "has_trailing_slack": false,
+            "slack_bytes_count": 0,
+            "slack_type": "CLEAN_EXACT_EOF"
+          },
+          "crash_rca": {
+            "status": "success"
+          },
+          "ghidra_analysis": {
+            "status": "skipped",
+            "reason": "no_ghidra_export_provided"
+          }
+        },
+        "failed_stages": [],
+        "partial_stages": [],
+        "fault_module": null,
+        "root_cause": null,
+        "confidence": null,
+        "graph_edges": 2
+      },
+      "legacy_host_x86.exe.12992.dmp": {
+        "status": "ok",
+        "stage_statuses": {
+          "binary_inspection": {
+            "status": "ok"
+          },
+          "pe_deep_forensics": {
+            "status": "ok"
+          },
+          "signature_intelligence": {
+            "status": "ok",
+            "trust_status": "UNSIGNED",
+            "is_verified": false
+          },
+          "deobfuscation": {
+            "status": "skipped",
+            "reason": "disabled_by_caller"
+          },
+          "sensory_perception": {
+            "status": "skipped",
+            "reason": "disabled_by_caller"
+          },
+          "embedded_ai_scan": {
+            "status": "skipped",
+            "reason": "disabled_by_caller"
+          },
+          "slack_and_overlay": {
+            "status": "ok",
+            "has_trailing_slack": false,
+            "slack_bytes_count": 0,
+            "slack_type": "CLEAN_EXACT_EOF"
+          },
+          "crash_rca": {
+            "status": "success"
+          },
+          "ghidra_analysis": {
+            "status": "skipped",
+            "reason": "no_ghidra_export_provided"
+          }
+        },
+        "failed_stages": [],
+        "partial_stages": [],
+        "fault_module": null,
+        "root_cause": null,
+        "confidence": null,
+        "graph_edges": 2
+      },
+      "legacy_host_x86.exe.15592.dmp": {
+        "status": "ok",
+        "stage_statuses": {
+          "binary_inspection": {
+            "status": "ok"
+          },
+          "pe_deep_forensics": {
+            "status": "ok"
+          },
+          "signature_intelligence": {
+            "status": "ok",
+            "trust_status": "UNSIGNED",
+            "is_verified": false
+          },
+          "deobfuscation": {
+            "status": "skipped",
+            "reason": "disabled_by_caller"
+          },
+          "sensory_perception": {
+            "status": "skipped",
+            "reason": "disabled_by_caller"
+          },
+          "embedded_ai_scan": {
+            "status": "skipped",
+            "reason": "disabled_by_caller"
+          },
+          "slack_and_overlay": {
+            "status": "ok",
+            "has_trailing_slack": false,
+            "slack_bytes_count": 0,
+            "slack_type": "CLEAN_EXACT_EOF"
+          },
+          "crash_rca": {
+            "status": "success"
+          },
+          "ghidra_analysis": {
+            "status": "skipped",
+            "reason": "no_ghidra_export_provided"
+          }
+        },
+        "failed_stages": [],
+        "partial_stages": [],
+        "fault_module": null,
+        "root_cause": null,
+        "confidence": null,
+        "graph_edges": 2
+      },
+      "legacy_host_x86.exe.15656.dmp": {
+        "status": "ok",
+        "stage_statuses": {
+          "binary_inspection": {
+            "status": "ok"
+          },
+          "pe_deep_forensics": {
+            "status": "ok"
+          },
+          "signature_intelligence": {
+            "status": "ok",
+            "trust_status": "UNSIGNED",
+            "is_verified": false
+          },
+          "deobfuscation": {
+            "status": "skipped",
+            "reason": "disabled_by_caller"
+          },
+          "sensory_perception": {
+            "status": "skipped",
+            "reason": "disabled_by_caller"
+          },
+          "embedded_ai_scan": {
+            "status": "skipped",
+            "reason": "disabled_by_caller"
+          },
+          "slack_and_overlay": {
+            "status": "ok",
+            "has_trailing_slack": false,
+            "slack_bytes_count": 0,
+            "slack_type": "CLEAN_EXACT_EOF"
+          },
+          "crash_rca": {
+            "status": "success"
+          },
+          "ghidra_analysis": {
+            "status": "skipped",
+            "reason": "no_ghidra_export_provided"
+          }
+        },
+        "failed_stages": [],
+        "partial_stages": [],
+        "fault_module": null,
+        "root_cause": null,
+        "confidence": null,
+        "graph_edges": 2
+      },
+      "legacy_host_x86.exe.2200.dmp": {
+        "status": "ok",
+        "stage_statuses": {
+          "binary_inspection": {
+            "status": "ok"
+          },
+          "pe_deep_forensics": {
+            "status": "ok"
+          },
+          "signature_intelligence": {
+            "status": "ok",
+            "trust_status": "UNSIGNED",
+            "is_verified": false
+          },
+          "deobfuscation": {
+            "status": "skipped",
+            "reason": "disabled_by_caller"
+          },
+          "sensory_perception": {
+            "status": "skipped",
+            "reason": "disabled_by_caller"
+          },
+          "embedded_ai_scan": {
+            "status": "skipped",
+            "reason": "disabled_by_caller"
+          },
+          "slack_and_overlay": {
+            "status": "ok",
+            "has_trailing_slack": false,
+            "slack_bytes_count": 0,
+            "slack_type": "CLEAN_EXACT_EOF"
+          },
+          "crash_rca": {
+            "status": "success"
+          },
+          "ghidra_analysis": {
+            "status": "skipped",
+            "reason": "no_ghidra_export_provided"
+          }
+        },
+        "failed_stages": [],
+        "partial_stages": [],
+        "fault_module": null,
+        "root_cause": null,
+        "confidence": null,
+        "graph_edges": 2
+      }
+    },
+    "fuse_dumps": {
+      "legacy_host_x86.exe.12224.dmp": {
+        "status": "ok",
+        "verdict": null,
+        "edges": 0,
+        "nodes": 0
+      },
+      "legacy_host_x86.exe.12992.dmp": {
+        "status": "ok",
+        "verdict": null,
+        "edges": 0,
+        "nodes": 0
+      },
+      "legacy_host_x86.exe.15592.dmp": {
+        "status": "ok",
+        "verdict": null,
+        "edges": 0,
+        "nodes": 0
+      },
+      "legacy_host_x86.exe.15656.dmp": {
+        "status": "ok",
+        "verdict": null,
+        "edges": 0,
+        "nodes": 0
+      },
+      "legacy_host_x86.exe.2200.dmp": {
+        "status": "ok",
+        "verdict": null,
+        "edges": 0,
+        "nodes": 0
+      }
+    },
+    "py_bytecode": {
+      "AINPC\\bridge.py": {
+        "status": "ok",
+        "error": null,
+        "keys": [
+          "status",
+          "file",
+          "sha256",
+          "metadata",
+          "code_objects_analyzed",
+          "total_basic_blocks",
+          "total_bytecode_instructions",
+          "functions"
+        ],
+        "code_objects": 24,
+        "diff": null
+      },
+      "AINPC\\__pycache__\\bridge.cpython-312.pyc": {
+        "status": "ok",
+        "error": null,
+        "keys": [
+          "status",
+          "file",
+          "sha256",
+          "metadata",
+          "code_objects_analyzed",
+          "total_basic_blocks",
+          "total_bytecode_instructions",
+          "functions"
+        ],
+        "code_objects": 24,
+        "diff": null
+      },
+      "AINPC\\llm_brain.py": {
+        "status": "ok",
+        "error": null,
+        "keys": [
+          "status",
+          "file",
+          "sha256",
+          "metadata",
+          "code_objects_analyzed",
+          "total_basic_blocks",
+          "total_bytecode_instructions",
+          "functions"
+        ],
+        "code_objects": 16,
+        "diff": null
+      },
+      "agent-harness\\cli_anything\\legacy_host_companion\\core\\companion.py": {
+        "status": "ok",
+        "error": null,
+        "keys": [
+          "status",
+          "diff_mode",
+          "matched_identical_count",
+          "modified_count",
+          "added_functions",
+          "removed_functions",
+          "modified_functions"
+        ],
+        "code_objects": null,
+        "diff": null
+      }
+    },
+    "win_and_reg": {
+      "win_audit": {
+        "os": {
+          "status": "success",
+          "kernel": {
+            "is_windows": true,
+            "friendly_name": "Windows 10",
+            "major_version": 10,
+            "minor_version": 0,
+            "build_number": 19045,
+            "service_pack": "",
+            "product_type": "Workstation (Client)",
+            "suite_mask": "0x100"
+          },
+          "architecture": {
+            "native_architecture": "x64 (AMD64)",
+            "processor_count": 8,
+            "page_size": 4096,
+            "allocation_granularity": 65536
+          },
+          "process_wow64": {
+            "is_wow64": false,
+            "emulation_mode": "Native"
+          },
+          "registry_info": {
+            "productname": "Windows 10 Pro",
+            "displayversion": "22H2",
+            "releaseid": "2009",
+            "currentbuild": "19045",
+            "ubr": 6466,
+            "editionid": "Professional",
+            "installationtype": "Client",
+            "currentversion": "6.3"
+          },
+          "compatibility_shims": {
+            "binary": "<TARGET_ROOT>\\legacy_host_x86.exe",
+            "compatibility_mode_active": true,
+            "shims_count": 1,
+            "shims": [
+              {
+                "hive": "HKCU",
+                "path": "<TARGET_ROOT>\\legacy_host_x86.exe",
+                "raw_flags": "HIGHDPIAWARE",
+                "parsed_shims": [
+                  "HIGHDPIAWARE"
+                ]
+              }
+            ]
+          }
+        },
+        "devices": {
+          "status": "success",
+          "graphics_adapters": [
+            {
+              "device_index": "0000",
+              "driverdesc": "Intel(R) UHD Graphics 620",
+              "driverversion": "31.0.101.2134",
+              "providername": "Intel Corporation",
+              "driverdate": "11-20-2024",
+              "matchingdeviceid": "PCI\\VEN_8086&DEV_5917&SUBSYS_08161028"
+            }
+          ],
+          "directx_runtimes": {
+            "registry_version": "4.09.00.0904",
+            "subsystems": {
+              "legacy_directdraw": {
+                "dll": "ddraw.dll",
+                "x64_present": true,
+                "x86_present": true
+              },
+              "legacy_direct3d8": {
+                "dll": "d3d8.dll",
+                "x64_present": false,
+                "x86_present": true
+              },
+              "legacy_direct3d9": {
+                "dll": "d3d9.dll",
+                "x64_present": true,
+                "x86_present": true
+              },
+              "legacy_directsound": {
+                "dll": "dsound.dll",
+                "x64_present": true,
+                "x86_present": true
+              },
+              "modern_direct3d11": {
+                "dll": "d3d11.dll",
+                "x64_present": true,
+                "x86_present": true
+              },
+              "modern_direct3d12": {
+                "dll": "d3d12.dll",
+                "x64_present": true,
+                "x86_present": true
+              }
+            }
+          }
+        },
+        "security": {
+          "status": "success",
+          "is_elevated_admin": false,
+          "token_integrity": {
+            "rid": "0x2000",
+            "integrity_level": "Medium (Standard User)",
+            "is_elevated": false
+          },
+          "directory_write_permissions": {
+            "directory": "<TARGET_ROOT>",
+            "exists": true,
+            "is_writable": true,
+            "is_read_only_audit": true,
+            "evaluation_type": "POLICY_ESTIMATION",
+            "confidence": 0.85,
+            "methodology": "In-memory policy heuristic (evaluates system protected roots against token elevation; zero disk mutation)",
+            "notice": "Heuristic policy evaluation without filesystem DACL probing. Actual permissions may vary based on explicit user/group ACLs.",
+            "is_program_files_path": false,
+            "is_elevated_admin": false
+          }
+        }
+      },
+      "wer": {
+        "status": "success",
+        "query_target": "legacy_host_x86.exe",
+        "wer_reports_found": 5,
+        "event_log_errors_found": 0,
+        "minidumps_found": 3,
+        "wer_reports": [
+          {
+            "source": "WER_REPORT",
+            "file_path": "C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportArchive\\AppCrash_legacy_host_x86.exe_1a3e17cad2c2ff547063c7ee90d7b5e2b342db3c_33dd8f66_2eefe3fe-8bc3-4127-8dbd-545075cad9ad\\Report.wer",
+            "event_time": "134358811339205249",
+            "event_type": "BEX",
+            "app_name": "legacy_host_x86.exe",
+            "fault_module": "StackHash_2beb",
+            "exception_code": "PCH_D7_FROM_ntdll+0x0007379C",
+            "exception_name": "UNKNOWN_EXCEPTION",
+            "fault_offset": "0xc0000005"
+          },
+          {
+            "source": "WER_REPORT",
+            "file_path": "C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportArchive\\AppCrash_legacy_host_x86.exe_1a3e17cad2c2ff547063c7ee90d7b5e2b342db3c_33dd8f66_7e556448-8715-4d11-9c71-30665a7dfb89\\Report.wer",
+            "event_time": "134358955025710993",
+            "event_type": "BEX",
+            "app_name": "legacy_host_x86.exe",
+            "fault_module": "StackHash_2beb",
+            "exception_code": "PCH_D7_FROM_ntdll+0x0007379C",
+            "exception_name": "UNKNOWN_EXCEPTION",
+            "fault_offset": "0xc0000005"
+          },
+          {
+            "source": "WER_REPORT",
+            "file_path": "C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportArchive\\AppCrash_legacy_host_x86.exe_6518b255bd8fef7179e75a711fa605a21a8c888_33dd8f66_000016ec-4c81-4ced-97b1-a08ed385a414\\Report.wer",
+            "event_time": "134359457812522617",
+            "event_type": "APPCRASH",
+            "app_name": "legacy_host_x86.exe",
+            "fault_module": "d3d9.dll",
+            "exception_code": "0xc0000005",
+            "exception_name": "STATUS_ACCESS_VIOLATION (Memory Read/Write/Execute Violation)",
+            "fault_offset": "0x0005fedb"
+          },
+          {
+            "source": "WER_REPORT",
+            "file_path": "C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportArchive\\AppCrash_legacy_host_x86.exe_6518b255bd8fef7179e75a711fa605a21a8c888_33dd8f66_0e63ab74-9ed4-4371-b093-8495f8868cd8\\Report.wer",
+            "event_time": "134359456476179951",
+            "event_type": "APPCRASH",
+            "app_name": "legacy_host_x86.exe",
+            "fault_module": "d3d9.dll",
+            "exception_code": "0xc0000005",
+            "exception_name": "STATUS_ACCESS_VIOLATION (Memory Read/Write/Execute Violation)",
+            "fault_offset": "0x0005fedb"
+          },
+          {
+            "source": "WER_REPORT",
+            "file_path": "C:\\ProgramData\\Microsoft\\Windows\\WER\\ReportArchive\\AppCrash_legacy_host_x86.exe_d94446577a74c16467c642befdedae7bb72a68_33dd8f66_8647531f-49f6-4155-91d2-65e4e4ee4c90\\Report.wer",
+            "event_time": "134358959599022558",
+            "event_type": "APPCRASH",
+            "app_name": "legacy_host_x86.exe",
+            "fault_module": "legacy_host_x86.exe",
+            "exception_code": "0xc0000005",
+            "exception_name": "STATUS_ACCESS_VIOLATION (Memory Read/Write/Execute Violation)",
+            "fault_offset": "0x00245f40"
+          }
+        ],
+        "event_log_errors": [],
+        "minidumps": [
+          {
+            "status": "success",
+            "file": "<LOCALAPPDATA>\\CrashDumps\\legacy_host_x86.exe.12224.dmp",
+            "format": "MINIDUMP",
+            "stream_count": 14,
+            "module_count": 112,
+            "exception_info": {
+              "thread_id": 3160,
+              "exception_code": "0xc0000005",
+              "exception_name": "STATUS_ACCESS_VIOLATION (Memory Read/Write/Execute Violation)",
+              "exception_address": "0x72fbfedb",
+              "fault_module": "d3d9.dll",
+              "fault_offset": "0x5fedb"
+            },
+            "modules_preview": [
+              "legacy_host_x86.exe",
+              "ntdll.dll",
+              "kernel32.dll",
+              "KERNELBASE.dll",
+              "apphelp.dll",
+              "ws2_32.dll",
+              "rpcrt4.dll",
+              "vorbisfile.dll",
+              "winmm.dll",
+              "user32.dll"
+            ]
+          },
+          {
+            "status": "success",
+            "file": "<LOCALAPPDATA>\\CrashDumps\\legacy_host_x86.exe.12992.dmp",
+            "format": "MINIDUMP",
+            "stream_count": 14,
+            "module_count": 112,
+            "exception_info": {
+              "thread_id": 16256,
+              "exception_code": "0xc0000005",
+              "exception_name": "STATUS_ACCESS_VIOLATION (Memory Read/Write/Execute Violation)",
+              "exception_address": "0x645f40",
+              "fault_module": "legacy_host_x86.exe",
+              "fault_offset": "0x245f40"
+            },
+            "modules_preview": [
+              "legacy_host_x86.exe",
+              "ntdll.dll",
+              "kernel32.dll",
+              "KERNELBASE.dll",
+              "apphelp.dll",
+              "ws2_32.dll",
+              "rpcrt4.dll",
+              "vorbisfile.dll",
+              "user32.dll",
+              "winmm.dll"
+            ]
+          },
+          {
+            "status": "success",
+            "file": "<LOCALAPPDATA>\\CrashDumps\\legacy_host_x86.exe.15592.dmp",
+            "format": "MINIDUMP",
+            "stream_count": 14,
+            "module_count": 112,
+            "exception_info": {
+              "thread_id": 13728,
+              "exception_code": "0xc0000005",
+              "exception_name": "STATUS_ACCESS_VIOLATION (Memory Read/Write/Execute Violation)",
+              "exception_address": "0x0"
+            },
+            "modules_preview": [
+              "legacy_host_x86.exe",
+              "ntdll.dll",
+              "kernel32.dll",
+              "KERNELBASE.dll",
+              "apphelp.dll",
+              "ws2_32.dll",
+              "rpcrt4.dll",
+              "vorbisfile.dll",
+              "user32.dll",
+              "winmm.dll"
+            ]
+          }
+        ]
+      },
+      "reg_appcompat": {
+        "status": "error",
+        "domain": "APP_COMPAT_LAYERS",
+        "error": "Domain 'APP_COMPAT_LAYERS' is not recognized in RegistryCatalog."
+      },
+      "reg_search": {
+        "status": "success",
+        "platform": "win32",
+        "query": "legacy_host_sa",
+        "hive": "HKCU",
+        "root_key": "\\",
+        "matched_count": 0,
+        "keys_scanned": 1807,
+        "values_scanned": 3056,
+        "elapsed_seconds": 0.0831,
+        "timed_out": false,
+        "limit": 20,
+        "matches": []
+      }
+    },
+    "errors": []
+  },
+  "host_and_mcp": {
+    "initialize": {
+      "protocolVersion": "2025-06-18",
+      "supportedProtocolVersions": [
+        "2024-11-05",
+        "2025-03-26",
+        "2025-06-18",
+        "2025-11-25",
+        "2026-07-28"
+      ],
+      "capabilities": {
+        "tools": {
+          "listChanged": false
+        },
+        "resources": {
+          "subscribe": false,
+          "listChanged": false
+        },
+        "prompts": {
+          "listChanged": false
+        }
+      },
+      "serverInfo": {
+        "name": "bintra",
+        "version": "1.1.0"
+      }
+    },
+    "discover": {
+      "name": "bintra",
+      "version": "1.1.0",
+      "protocolVersion": "2026-07-28",
+      "supportedProtocolVersions": [
+        "2024-11-05",
+        "2025-03-26",
+        "2025-06-18",
+        "2025-11-25",
+        "2026-07-28"
+      ],
+      "capabilities": {
+        "tools": {
+          "listChanged": false
+        },
+        "resources": {
+          "subscribe": false,
+          "listChanged": false
+        },
+        "prompts": {
+          "listChanged": false
+        }
+      },
+      "serverInfo": {
+        "name": "bintra",
+        "version": "1.1.0"
+      }
+    },
+    "resources": {
+      "bintra://capabilities": {
+        "ok": true,
+        "len": 22196
+      },
+      "bintra://security/policy": {
+        "ok": true,
+        "len": 630
+      },
+      "bintra://telemetry/session": {
+        "ok": true,
+        "len": 556
+      },
+      "bintra://workflows/playbooks": {
+        "ok": true,
+        "len": 1137
+      }
+    },
+    "prompts": {
+      "triage_pe_binary": {
+        "ok": true,
+        "messages": 1
+      },
+      "root_cause_crash": {
+        "ok": true,
+        "messages": 1
+      },
+      "audit_windows_host": {
+        "ok": true,
+        "messages": 1
+      },
+      "diff_binary_versions": {
+        "ok": true,
+        "messages": 1
+      },
+      "audit_neural_weights": {
+        "ok": true,
+        "messages": 1
+      }
+    },
+    "pagination": {
+      "page_sizes": [
+        25,
+        25,
+        1
+      ],
+      "total": 51
+    },
+    "host_tools": {
+      "bintra_hardware_audit": {
+        "status": "success",
+        "keys": [
+          "status",
+          "is_hardware_healthy",
+          "health_classification",
+          "total_pnp_devices_enumerated",
+          "problem_devices_count",
+          "status_unavailable_count",
+          "display_adapters_count",
+          "audio_devices_count",
+          "audio_devices_truncated",
+          "display_adapters"
+        ],
+        "error": null
+      },
+      "bintra_port_audit": {
+        "status": "success",
+        "keys": [
+          "status",
+          "host_os",
+          "serial_ports_count",
+          "serial_ports",
+          "parallel_ports_count",
+          "parallel_ports"
+        ],
+        "error": null
+      },
+      "bintra_hardware_topology": {
+        "status": "success",
+        "keys": [
+          "status",
+          "format",
+          "total_nodes",
+          "root_nodes_count",
+          "roots",
+          "rendered"
+        ],
+        "error": null
+      },
+      "bintra_network_audit": {
+        "status": "success",
+        "keys": [
+          "status",
+          "total_adapters",
+          "adapters",
+          "epistemic_classification"
+        ],
+        "error": null
+      },
+      "bintra_network_hardware_dissect": {
+        "status": "SUCCESS",
+        "keys": [
+          "status",
+          "dossier_completeness",
+          "selection_method",
+          "match_confidence",
+          "target_query",
+          "device_name",
+          "layer_1_physical_bus",
+          "layer_2_ndis_telemetry",
+          "layer_3_driver_registry",
+          "layer_4_scm_service"
+        ],
+        "error": null
+      },
+      "bintra_network_connections": {
+        "status": "success",
+        "keys": [
+          "status",
+          "filter_pid",
+          "total_connections",
+          "ipv4_count",
+          "ipv6_count",
+          "connections",
+          "epistemic_classification"
+        ],
+        "error": null
+      },
+      "bintra_driver_audit": {
+        "status": "success",
+        "keys": [
+          "status",
+          "filter",
+          "matched_count",
+          "drivers"
+        ],
+        "error": null
+      },
+      "bintra_service_audit": {
+        "status": "success",
+        "keys": [
+          "status",
+          "total_matching_services",
+          "services"
+        ],
+        "error": null
+      },
+      "bintra_etw_audit": {
+        "status": "success",
+        "keys": [
+          "status",
+          "is_windows",
+          "standard_sessions_probed",
+          "active_sessions_count",
+          "accessible_sessions_count",
+          "system_protected_sessions_count",
+          "system_total_registered_providers",
+          "active_kernel_providers_count",
+          "active_sessions",
+          "accessible_sessions"
+        ],
+        "error": null
+      },
+      "bintra_etw_audit_providers": {
+        "status": "success",
+        "keys": [
+          "status",
+          "total_system_providers",
+          "matched_count",
+          "filter",
+          "providers",
+          "truncated"
+        ],
+        "error": null
+      },
+      "bintra_device_driver_intelligence": {
+        "status": "success",
+        "keys": [
+          "status",
+          "platform",
+          "total_classes",
+          "total_devices",
+          "total_problems",
+          "total_unknown",
+          "classes"
+        ],
+        "error": null
+      },
+      "bintra_device_driver_intelligence_match": {
+        "status": "success",
+        "keys": [
+          "status",
+          "devices_audited",
+          "driver_packages_cataloged",
+          "device_reports"
+        ],
+        "error": null
+      },
+      "bintra_process_resource_audit": {
+        "status": "success",
+        "keys": [
+          "status",
+          "file_path",
+          "resource_state",
+          "is_locked",
+          "usage_classifications",
+          "usage_breakdown",
+          "handle_exclusivity",
+          "locking_processes_count",
+          "locking_processes",
+          "audit_method"
+        ],
+        "error": null
+      },
+      "bintra_process_resource_audit_sys": {
+        "status": "success",
+        "keys": [
+          "status",
+          "cpu_utilization_percent",
+          "memory",
+          "uptime",
+          "topology"
+        ],
+        "error": null
+      },
+      "bintra_registry_audit": {
+        "status": "success",
+        "keys": [
+          "status",
+          "total_domains_audited",
+          "total_keys_inspected",
+          "total_discrepancies_detected",
+          "critical_policies",
+          "domains"
+        ],
+        "error": null
+      },
+      "bintra_win_catalog_cmd": {
+        "status": "error",
+        "keys": [
+          "status",
+          "command_id",
+          "error"
+        ],
+        "error": "Command 'list' is not registered in the immutable CommandCatalog."
+      }
+    },
+    "errors": [
+      {
+        "tag": "bintra_win_catalog_cmd",
+        "res": {
+          "status": "error",
+          "command_id": "list",
+          "error": "Command 'list' is not registered in the immutable CommandCatalog."
+        }
+      }
+    ]
+  },
+  "post_fix_verification": {
+    "sig_audit_root": {
+      "total_scanned": 27,
+      "trusted_embedded": 1,
+      "trusted_catalog": 0,
+      "unsigned": 10,
+      "tampered": 0,
+      "untrusted_or_expired": 0,
+      "unsupported_format": 16,
+      "microsoft_system_binaries": 0,
+      "scan_errors": 0
+    },
+    "sig_audit_cleo": {
+      "total_scanned": 6,
+      "trusted_embedded": 0,
+      "trusted_catalog": 0,
+      "unsigned": 4,
+      "tampered": 0,
+      "untrusted_or_expired": 0,
+      "unsupported_format": 2,
+      "microsoft_system_binaries": 0,
+      "scan_errors": 0
+    },
+    "diff_vorbis_mod_vs_vanilla": {
+      "status": "ok",
+      "baseline_file": "<TARGET_ROOT>\\vorbisFile.dll.vanilla_bak",
+      "target_file": "<TARGET_ROOT>\\vorbisFile.dll",
+      "identical_sha256": false,
+      "baseline_sha256": "a08923479000cec366967fb8259e0920b7aa18859722c7dda1415726bed4774f",
+      "target_sha256": "c33e1bafafd441b42eaa6d322393b9dd700f8a9c13fb2e7780daf49707a46353",
+      "pe_semantic_similarity": 0.552,
+      "sections_diff": {
+        "sections_added": [],
+        "sections_removed": [],
+        "sections_shared_count": 4,
+        "geometry_deltas": [
+          {
+            "section": ".data",
+            "virtual_size_delta": 1204,
+            "raw_size_delta": -4096,
+            "entropy_baseline": 2.0161,
+            "entropy_target": 2.0571,
+            "entropy_delta": 0.041,
+            "executable_changed": false
+          },
+          {
+            "section": ".rdata",
+            "virtual_size_delta": 4546,
+            "raw_size_delta": 1536,
+            "entropy_baseline": 3.8087,
+            "entropy_target": 4.828,
+            "entropy_delta": 1.0193,
+            "executable_changed": false
+          },
+          {
+            "section": ".reloc",
+            "virtual_size_delta": -348,
+            "raw_size_delta": -512,
+            "entropy_baseline": 3.6297,
+            "entropy_target": 4.6833,
+            "entropy_delta": 1.0536,
+            "executable_changed": false
+          },
+          {
+            "section": ".text",
+            "virtual_size_delta": -4776,
+            "raw_size_delta": -5632,
+            "entropy_baseline": 6.6156,
+            "entropy_target": 6.4995,
+            "entropy_delta": -0.1161,
+            "executable_changed": false
+          }
+        ],
+        "section_structural_similarity": 0.9
+      },
+      "imports_diff": {
+        "jaccard_similarity": 0.3629,
+        "apis_added": [
+          "kernel32.dll!CreateFileA",
+          "kernel32.dll!CreateFileW",
+          "kernel32.dll!DecodePointer",
+          "kernel32.dll!EncodePointer",
+          "kernel32.dll!FindClose",
+          "kernel32.dll!FindFirstFileA",
+          "kernel32.dll!FindNextFileA",
+          "kernel32.dll!GetConsoleCP",
+          "kernel32.dll!GetConsoleMode",
+          "kernel32.dll!GetCurrentProcessId",
+          "kernel32.dll!GetModuleFileNameW",
+          "kernel32.dll!GetModuleHandleW",
+          "kernel32.dll!GetPrivateProfileIntA",
+          "kernel32.dll!GetProcessHeap",
+          "kernel32.dll!GetStartupInfoW",
+          "kernel32.dll!GetSystemTimeAsFileTime",
+          "kernel32.dll!GetTickCount",
+          "kernel32.dll!HeapSize",
+          "kernel32.dll!InitializeCriticalSectionAndSpinCount",
+          "kernel32.dll!IsDebuggerPresent",
+          "kernel32.dll!IsProcessorFeaturePresent",
+          "kernel32.dll!IsValidCodePage",
+          "kernel32.dll!LoadLibraryW",
+          "kernel32.dll!QueryPerformanceCounter",
+          "kernel32.dll!SetCurrentDirectoryA",
+          "kernel32.dll!SetEndOfFile",
+          "kernel32.dll!SetUnhandledExceptionFilter",
+          "kernel32.dll!Sleep",
+          "kernel32.dll!UnhandledExceptionFilter",
+          "kernel32.dll!VirtualProtect",
+          "kernel32.dll!WriteConsoleW"
+        ],
+        "apis_removed": [
+          "kernel32.dll!FreeEnvironmentStringsA",
+          "kernel32.dll!GetEnvironmentStrings",
+          "kernel32.dll!GetStringTypeA",
+          "kernel32.dll!GetVersion",
+          "kernel32.dll!InitializeCriticalSection",
+          "kernel32.dll!LCMapStringA",
+          "kernel32.dll!RaiseException",
+          "kernel32.dll!VirtualAlloc",
+          "kernel32.dll!VirtualFree",
+          "ogg.dll!ogg_page_continued",
+          "ogg.dll!ogg_page_eos",
+          "ogg.dll!ogg_page_granulepos",
+          "ogg.dll!ogg_page_serialno",
+          "ogg.dll!ogg_stream_clear",
+          "ogg.dll!ogg_stream_init",
+          "ogg.dll!ogg_stream_packetout",
+          "ogg.dll!ogg_stream_packetpeek",
+          "ogg.dll!ogg_stream_pagein",
+          "ogg.dll!ogg_stream_reset",
+          "ogg.dll!ogg_stream_reset_serialno",
+          "ogg.dll!ogg_sync_buffer",
+          "ogg.dll!ogg_sync_clear",
+          "ogg.dll!ogg_sync_init",
+          "ogg.dll!ogg_sync_pageseek",
+          "ogg.dll!ogg_sync_reset",
+          "ogg.dll!ogg_sync_wrote",
+          "vorbis.dll!_analysis_output_always",
+          "vorbis.dll!vorbis_block_clear",
+          "vorbis.dll!vorbis_block_init",
+          "vorbis.dll!vorbis_comment_clear",
+          "vorbis.dll!vorbis_comment_init",
+          "vorbis.dll!vorbis_dsp_clear",
+          "vorbis.dll!vorbis_info_blocksize",
+          "vorbis.dll!vorbis_info_clear",
+          "vorbis.dll!vorbis_info_init",
+          "vorbis.dll!vorbis_packet_blocksize",
+          "vorbis.dll!vorbis_synthesis",
+          "vorbis.dll!vorbis_synthesis_blockin",
+          "vorbis.dll!vorbis_synthesis_halfrate",
+          "vorbis.dll!vorbis_synthesis_halfrate_p",
+          "vorbis.dll!vorbis_synthesis_headerin",
+          "vorbis.dll!vorbis_synthesis_init",
+          "vorbis.dll!vorbis_synthesis_lapout",
+          "vorbis.dll!vorbis_synthesis_pcmout",
+          "vorbis.dll!vorbis_synthesis_read",
+          "vorbis.dll!vorbis_synthesis_restart",
+          "vorbis.dll!vorbis_synthesis_trackonly",
+          "vorbis.dll!vorbis_window"
+        ],
+        "baseline_apis_count": 93,
+        "target_apis_count": 76
+      },
+      "exports_diff": {
+        "jaccard_similarity": 0.2353,
+        "exports_added": [],
+        "exports_removed": [
+          "ov_bitrate",
+          "ov_bitrate_instant",
+          "ov_comment",
+          "ov_crosslap",
+          "ov_halfrate",
+          "ov_halfrate_p",
+          "ov_open",
+          "ov_pcm_seek",
+          "ov_pcm_seek_lap",
+          "ov_pcm_seek_page",
+          "ov_pcm_seek_page_lap",
+          "ov_pcm_tell",
+          "ov_pcm_total",
+          "ov_raw_seek",
+          "ov_raw_seek_lap",
+          "ov_raw_tell",
+          "ov_raw_total",
+          "ov_read_float",
+          "ov_seekable",
+          "ov_serialnumber",
+          "ov_streams",
+          "ov_test",
+          "ov_test_callbacks",
+          "ov_test_open",
+          "ov_time_seek_lap",
+          "ov_time_seek_page_lap"
+        ],
+        "baseline_exports_count": 34,
+        "target_exports_count": 8
+      },
+      "functions_diff": {
+        "analysis_mode": "x86_prologue_heuristics",
+        "identical_functions_count": 0,
+        "modified_functions_count": 1,
+        "added_functions_count": 121,
+        "removed_functions_count": 77,
+        "mean_cosine_similarity": 0.5
+      },
+      "pdata_function_delta": 0,
+      "baseline_pdata_count": 0,
+      "target_pdata_count": 0,
+      "rtti_classes_added": [],
+      "rtti_classes_removed": [],
+      "rtti_classes_shared_count": 0,
+      "epistemic_classification": "DETERMINISTIC_PE_DIFF"
+    },
+    "deobf_check": {
+      "legacy_host_x86.exe": {
+        "has_control_flow_flattening": false,
+        "dispatcher_comparisons_count": 454,
+        "state_transitions_count": 316,
+        "opaque_predicates_detected": 0
+      },
+      "dinput8.dll": {
+        "has_control_flow_flattening": false,
+        "dispatcher_comparisons_count": 265,
+        "state_transitions_count": 196,
+        "opaque_predicates_detected": 0
+      },
+      "cleo_redux.asi": {
+        "has_control_flow_flattening": false,
+        "dispatcher_comparisons_count": 287,
+        "state_transitions_count": 179,
+        "opaque_predicates_detected": 0
+      },
+      "CLEO.asi": {
+        "has_control_flow_flattening": false,
+        "dispatcher_comparisons_count": 368,
+        "state_transitions_count": 167,
+        "opaque_predicates_detected": 0
+      },
+      "vorbisFile.dll": {
+        "has_control_flow_flattening": false,
+        "dispatcher_comparisons_count": 212,
+        "state_transitions_count": 184,
+        "opaque_predicates_detected": 0
+      }
+    },
+    "resolve_deps_legacy_host": {
+      "verdict": "HEALTHY",
+      "total_imported_dlls": 9,
+      "missing_dlls_count": 0,
+      "delay_dependency_health": "HEALTHY",
+      "delay_imported_dlls_count": 4,
+      "resolved_delay_dlls_count": 4,
+      "missing_delay_dlls_count": 0,
+      "resolved_delay_dll_names": [
+        "d3d9.dll",
+        "DINPUT8.dll",
+        "DSOUND.dll",
+        "DDRAW.dll"
+      ]
+    },
+    "resolve_deps_redux": {
+      "verdict": "HEALTHY",
+      "delay_dependency_health": "NO_DELAY_IMPORTS",
+      "delay_imported_dlls_count": 0
+    },
+    "crash_rca_null_calls": {
+      "legacy_host_x86.exe.15592.dmp": {
+        "root_cause": "NULL_FUNCTION_POINTER_CALL",
+        "probable_caller": {
+          "return_address": "0x469EF7",
+          "module": "legacy_host_x86.exe",
+          "module_rva": "0x69EF7"
+        },
+        "remediation_advice": "Control transferred to NULL/zero through an indirect call, jump, or vtable slot near probable caller `legacy_host_x86.exe+0x69EF7` (return address `0x469EF7`). Inspect the indirect call site preceding `legacy_host_x86.exe+0x69EF7` and guard the function/vtable pointer against `nullptr`."
+      },
+      "legacy_host_x86.exe.15656.dmp": {
+        "root_cause": "NULL_FUNCTION_POINTER_CALL",
+        "probable_caller": {
+          "return_address": "0x469EF7",
+          "module": "legacy_host_x86.exe",
+          "module_rva": "0x69EF7"
+        },
+        "remediation_advice": "Control transferred to NULL/zero through an indirect call, jump, or vtable slot near probable caller `legacy_host_x86.exe+0x69EF7` (return address `0x469EF7`). Inspect the indirect call site preceding `legacy_host_x86.exe+0x69EF7` and guard the function/vtable pointer against `nullptr`."
+      }
+    },
+    "triage_and_fuse": {
+      "legacy_host_x86.exe.12992.dmp": {
+        "observed_facts": [
+          "Binary format/architecture: PE",
+          "Observed Shannon entropy: 5.34",
+          "Sensory Cortex perception active on 10/10 metaphorical senses (overall efficiency 0.958)",
+          "Recovered 0 .pdata runtime functions and 14 MSVC RTTI vftables",
+          "Signature trust_status=UNSIGNED (cryptographically_verified=False)",
+          "Correlated crash exception: 0xC0000005"
+        ],
+        "nodes": [
+          {
+            "id": "pe:590b4be1bb00",
+            "type": "PE_BINARY",
+            "label": "<TARGET_ROOT>\\legacy_host_x86.exe",
+            "properties": {
+              "pdata_functions": 0,
+              "rtti_vftables": 14,
+              "pdb_matched": false,
+              "format": "PE",
+              "entropy": 5.3445
+            }
+          },
+          {
+            "id": "sig:UNSIGNED",
+            "type": "SIGNATURE_TRUST",
+            "label": "Signature: UNSIGNED",
+            "properties": {
+              "evidence_source": "WINDOWS_SIGNATURE_INTELLIGENCE",
+              "verification_level": "CRYPTOGRAPHIC_STRUCTURE_PARSE",
+              "signature_present": false,
+              "is_verified": false,
+              "signature_type": "NONE",
+              "is_whql_certified": false,
+              "timestamp_status": "UNKNOWN",
+              "expiration_status": "UNKNOWN"
+            }
+          },
+          {
+            "id": "crash:0xC0000005",
+            "type": "CRASH_EVENT",
+            "label": "0xC0000005 (DETERMINISTIC_NULL_POINTER_DEREFERENCE)",
+            "properties": {
+              "evidence_source": "CRASH_ROOT_CAUSE_ANALYZER",
+              "verification_level": "OBSERVED_CRASH_TELEMETRY",
+              "culprit_register": "EAX",
+              "fault_address": "0x0000000000000474",
+              "fault_module": "legacy_host_x86.exe",
+              "fault_rva": "0x245F40",
+              "fault_virtual_address": "0x645f40",
+              "confidence": "CONFIDENT_DETERMINISTIC"
+            }
+          },
+          {
+            "id": "sensory:cortex",
+            "type": "SENSORY_PERCEPTION",
+            "label": "Sensory Cortex (10/10 senses)",
+            "properties": {
+              "evidence_source": "CONTINUOUS_SENSORY_CORTEX",
+              "verification_level": "HEURISTIC_PERCEPTION_MODEL",
+              "active_senses_count": 10,
+              "overall_sensory_efficiency": 0.958
+            }
+          }
+        ]
+      },
+      "legacy_host_x86.exe.12224.dmp": {
+        "observed_facts": [
+          "Binary format/architecture: PE",
+          "Observed Shannon entropy: 5.34",
+          "Sensory Cortex perception active on 10/10 metaphorical senses (overall efficiency 0.958)",
+          "Recovered 0 .pdata runtime functions and 14 MSVC RTTI vftables",
+          "Signature trust_status=UNSIGNED (cryptographically_verified=False)",
+          "Correlated crash exception: 0xC0000005"
+        ],
+        "nodes": [
+          {
+            "id": "pe:590b4be1bb00",
+            "type": "PE_BINARY",
+            "label": "<TARGET_ROOT>\\legacy_host_x86.exe",
+            "properties": {
+              "pdata_functions": 0,
+              "rtti_vftables": 14,
+              "pdb_matched": false,
+              "format": "PE",
+              "entropy": 5.3445
+            }
+          },
+          {
+            "id": "sig:UNSIGNED",
+            "type": "SIGNATURE_TRUST",
+            "label": "Signature: UNSIGNED",
+            "properties": {
+              "evidence_source": "WINDOWS_SIGNATURE_INTELLIGENCE",
+              "verification_level": "CRYPTOGRAPHIC_STRUCTURE_PARSE",
+              "signature_present": false,
+              "is_verified": false,
+              "signature_type": "NONE",
+              "is_whql_certified": false,
+              "timestamp_status": "UNKNOWN",
+              "expiration_status": "UNKNOWN"
+            }
+          },
+          {
+            "id": "crash:0xC0000005",
+            "type": "CRASH_EVENT",
+            "label": "0xC0000005 (DETERMINISTIC_NULL_POINTER_DEREFERENCE)",
+            "properties": {
+              "evidence_source": "CRASH_ROOT_CAUSE_ANALYZER",
+              "verification_level": "OBSERVED_CRASH_TELEMETRY",
+              "culprit_register": "EAX",
+              "fault_address": "0x000000000000000C",
+              "fault_module": "d3d9.dll",
+              "fault_rva": "0x5FEDB",
+              "fault_virtual_address": "0x72fbfedb",
+              "confidence": "CONFIDENT_DETERMINISTIC"
+            }
+          },
+          {
+            "id": "sensory:cortex",
+            "type": "SENSORY_PERCEPTION",
+            "label": "Sensory Cortex (10/10 senses)",
+            "properties": {
+              "evidence_source": "CONTINUOUS_SENSORY_CORTEX",
+              "verification_level": "HEURISTIC_PERCEPTION_MODEL",
+              "active_senses_count": 10,
+              "overall_sensory_efficiency": 0.958
+            }
+          }
+        ]
+      }
+    },
+    "cli_ghidra_headless": {
+      "returncode": 1,
+      "stdout_head": "[Bintra] Launching Ghidra Headless Analyzer...\n[Bintra] Binary: <TARGET_ROOT>\\vorbisFile.dll\n[Bintra] Script: BintraGhidraBridge.java\n[Bintra] Transient Ghidra project 'BintraHeadless_f250190f' safely cleaned.\n******************************************************************\nJDK 21+ (64-bit) could not be found and must be manually chosen!\n******************************************************************\nEnter path to JDK home directory (ENTER for dialog): \nERROR: Failed to find a supporte",
+      "stderr_head": "java.lang.NullPointerException: Cannot invoke \"String.trim()\" because the return value of \"java.io.BufferedReader.readLine()\" is null\n\tat LaunchSupport.askJavaHome(LaunchSupport.java:300)\n\tat LaunchSupport.handleJavaHome(LaunchSupport.java:151)\n\tat LaunchSupport.main(LaunchSupport.java:113)\n[Bintra] Ghidra Headless Analyzer failed (rc=1, script_error=True)\n"
+    },
+    "mcp_win_catalog_list": {
+      "status": "success",
+      "commands_count": 10,
+      "sample_ids": [
+        "boot_cfg",
+        "driver_list",
+        "os_ver",
+        "pnp_devices_problem",
+        "pnp_drivers",
+        "power_cfg",
+        "proc_list",
+        "service_list"
+      ]
+    },
+    "live_cpython_post_fix": {
+      "pydict_status": "ok",
+      "pydict_used": 3,
+      "pydict_entries": 3,
+      "pyascii_status": "ok",
+      "pyascii_preview": "AINPC_RUNTIME_STATUS_ACTIVE",
+      "pylong_status": "ok",
+      "pylong_val": "0x13572468abcd",
+      "scan_first": 5,
+      "scan_next_surviving": 5
+    },
+    "dump_and_match": {
+      "legacy_host_ep_hex": "6a606878808800e864410000bf940000008bc7e8e8daffff8965e88bf4893e56",
+      "cli_dump_rc": 0,
+      "cli_match_rc": 0,
+      "match_vorb_self_cos": 1.0,
+      "match_vorb_vs_vhook": {
+        "cosine_similarity": 0.0,
+        "is_semantic_match": false,
+        "confidence": "LOW / NO MATCH",
+        "granularity_type": "OPERATIONAL_MIX_HISTOGRAM",
+        "branch_topology_congruent": false,
+        "scale_ratio": 1.0,
+        "interpretation": "One or both functions contain insufficient valid instructions to form a behavioral vector."
+      }
+    },
+    "pcode_tools": {
+      "match_pcode": {
+        "pcode_cosine_similarity": 0.69382,
+        "is_semantic_match": false,
+        "confidence": "INSUFFICIENT_EVIDENCE",
+        "function_a_telemetry": {
+          "ops": 5,
+          "effective_rank": 4.0,
+          "dominance_ratio": 1.0
+        },
+        "function_b_telemetry": {
+          "ops": 3,
+          "effective_rank": 2.0,
+          "dominance_ratio": 1.0
+        },
+        "interpretation": "Insufficient P-code operations (func_a=5, func_b=3, minimum required: 5) to evaluate semantic equivalence reliably without high false-positive risk."
+      },
+      "deobf_pcode": {
+        "total_pcode_ops": 5,
+        "opaque_predicates_count": 1,
+        "detected_predicates": [
+          {
+            "xor_op_index": 1,
+            "cbranch_index": 2,
+            "zeroed_varnode": "T1",
+            "predicate_type": "ALGEBRAIC_ZERO_CBRANCH_OPAQUE",
+            "guaranteed_condition": "ALWAYS_EVALUATES_TO_ZERO",
+            "simplification": "Turn CBRANCH into direct BRANCH or NOP fallthrough"
+          }
+        ],
+        "prunable_operations": [
+          2
+        ],
+        "is_obfuscated": true
+      }
+    },
+    "cli_ghidra_plan": {
+      "method": "annotate_native_function",
+      "params": {
+        "address": "0x469EF7",
+        "name": "CallerOfNullPtr_469EF7",
+        "return_type": "int",
+        "parameters": [],
+        "comment": "Verified caller from 15592.dmp"
+      }
+    },
+    "pcode_store_analyze": {
+      "profile": {
+        "status": "ok",
+        "total_functions": 2,
+        "total_pcode_ops": 8,
+        "total_basic_blocks": 0,
+        "sensitive_api_functions_count": 1,
+        "arithmetic_to_control_ratio": 1.0,
+        "memory_io_ratio": 0.0,
+        "architectural_classification": "BALANCED_SYSTEM_CODE",
+        "confidence_score": 0.85,
+        "threshold_criteria": {
+          "algorithmic_compute": "arith_to_ctrl > 2.0",
+          "logic_state_machine": "control_ops > arith_ops",
+          "memory_buffer_io": "mem_to_total > 0.4",
+          "balanced": "fallback baseline"
+        },
+        "category_distribution": {
+          "ALU_ARITH": 2,
+          "ALU_LOGIC": 1,
+          "BIT_SHIFT": 0,
+          "COMPARE": 0,
+          "CONTROL_BRANCH_COND": 1,
+          "CONTROL_BRANCH_UNCOND": 0,
+          "CONTROL_CALL": 2,
+          "CONTROL_RETURN": 2,
+          "MEMORY_LOAD": 0,
+          "MEMORY_STORE": 0,
+          "SUBPIECE_CAST": 0,
+          "SSA_PHI": 0
+        },
+        "epistemic_classification": "EXPLORATORY_HEURISTIC_ARCHITECTURAL_PROFILE",
+        "disclaimer": "Heuristic categorization based on static P-Code category distribution; does not guarantee dynamic runtime behavior."
+      },
+      "sensitive_count": 1,
+      "sensitive_sample": {
+        "status": "ok",
+        "query": null,
+        "opcode_filter": null,
+        "xref_target": null,
+        "sensitive_only": true,
+        "total_matches": 1,
+        "limit": 50,
+        "offset": 0,
+        "matches": [
+          {
+            "name": "CallerOfNullPtr_469EF7",
+            "demangled_name": null,
+            "entry_point": "0x469EF7",
+            "size": 0,
+            "signature": "int __cdecl CallerOfNullPtr_469EF7(void)",
+            "parameter_count": 0,
+            "return_type": "void",
+            "has_sensitive_api": true,
+            "pcode_ops_count": 3,
+            "basic_blocks_count": 0,
+            "match_reasons": [
+              "matched filter criteria"
+            ]
+          }
+        ],
+        "epistemic_classification": "GHIDRA_INDEXED_FUNCTION_SEARCH"
+      }
+    }
+  }
+}

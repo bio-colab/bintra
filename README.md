@@ -175,7 +175,7 @@ bintra/
 │   ├── token_telemetry.py         # Session telemetry tracker
 │   ├── security/                  # ExecutionGuard, AuditLogger & Reference Monitor
 │   └── windows_intelligence/      # Process, Device, Registry, Network, Slack & Crash Diagnostics
-├── tests/                         # 466 automated unit, sensory, runtime telemetry & security tests
+├── tests/                         # 477 automated unit, sensory, runtime telemetry & security tests
 └── docs/                          # Architecture, Roadmap & runtime telemetry documentation
     ├── architecture.md            # Master architecture & formal model
     ├── ROADMAP.md                 # Strategic direction, tech evaluation & roadmap
@@ -447,7 +447,7 @@ bintra update --yes
 
 ### Running the Test Suite
 ```powershell
-# Run the complete test suite (466 tests across 36 suites, sustaining 440+ unit, sensory, runtime telemetry & security tests)
+# Run the complete test suite (477 tests across 37 suites, sustaining 440+ unit, sensory, runtime telemetry & security tests)
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
@@ -499,7 +499,7 @@ We warmly welcome contributions from the binary analysis, systems research, and 
 python benchmarks\real_world_windows\run_matrix.py
 ```
 
-See [`TEST_PLAN.md`](benchmarks/real_world_windows/TEST_PLAN.md) for pass criteria and [`RESULTS.md`](benchmarks/real_world_windows/RESULTS.md) for the latest campaign and the defects it uncovered.
+See [`TEST_PLAN.md`](benchmarks/real_world_windows/TEST_PLAN.md) for pass criteria and [`RESULTS.md`](benchmarks/real_world_windows/RESULTS.md) for the latest campaign and the defects it uncovered. For a full-spectrum multi-layer Win32 PE32 modular suite & crash-correlation field audit (plus the generic fixes it uncovered), see [`benchmarks/win32_legacy_modular_suite/REPORT.md`](benchmarks/win32_legacy_modular_suite/REPORT.md).
 
 ## Known Limitations & Heuristic Boundaries
 

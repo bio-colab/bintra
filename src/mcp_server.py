@@ -29,18 +29,12 @@ if str(SRC_DIR) not in sys.path:
 
 SERVER_NAME = "bintra"
 SERVER_VERSION = "1.1.0"
-PROTOCOL_VERSION = "2024-11-05"
-SUPPORTED_PROTOCOL_VERSIONS = [
-    "2024-11-05",
-    "2025-03-26",
-    "2025-06-18",
-    "2025-11-25",
-    "2026-07-28",
-]
-LATEST_PROTOCOL_VERSION = "2026-07-28"
-DEFAULT_PROTOCOL_VERSION = "2024-11-05"
 
-
+from bintra_mcp.config import (  # noqa: E402,F401  (public re-exports)
+    DEFAULT_PROTOCOL_VERSION, LATEST_PROTOCOL_VERSION, MCP_PROMPTS, MCP_RESOURCES,
+    MCP_TOOL_PROFILES, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS,
+    TARGET_PATH_ARG_KEYS, TOOL_SECURITY_METADATA, TOOLS_LIST_PAGE_SIZE, WORKFLOW_PLAYBOOKS,
+)
 from bintra_mcp.tool_schemas import TOOLS_REGISTRY  # noqa: E402,F401  (public re-export)
 from bintra_mcp.tools import (  # noqa: E402
     TOOL_HANDLERS, BinaryToolsMixin, DevicesToolsMixin, ForensicsToolsMixin, GhidraToolsMixin,
@@ -265,31 +259,11 @@ class BintraMcpServer(
     def handle_ping(self, params: Dict[str, Any]) -> Dict[str, Any]:
         return {}
 
-    MCP_TOOL_PROFILES = {
-        "core": {
-            "bintra_triage_binary", "bintra_inspect_binary", "bintra_pe_deep_forensics",
-            "bintra_sensory_audit", "bintra_deobfuscate_binary", "bintra_binary_diff",
-            "bintra_list_capabilities",
-        },
-        "static": {
-            "bintra_triage_binary", "bintra_inspect_binary", "bintra_pe_deep_forensics",
-            "bintra_deobfuscate_binary", "bintra_dump_bytes", "bintra_match_functions",
-            "bintra_scan_hybrid", "bintra_sensory_audit", "bintra_binary_diff",
-            "bintra_patch_binary", "bintra_list_capabilities",
-        },
-        "ghidra": {
-            "bintra_ghidra_analyze", "bintra_ghidra_headless", "bintra_ghidra_live_bridge",
-            "bintra_ghidra_call_graph", "bintra_ghidra_data_flow", "bintra_ghidra_similar_functions",
-            "bintra_match_pcode", "bintra_deobfuscate_pcode", "bintra_fuse_evidence",
-            "bintra_list_capabilities",
-        },
-        "neural": {
-            "bintra_sensory_audit", "bintra_scan_hybrid", "bintra_wsp_audit",
-            "bintra_patch_weights", "bintra_list_capabilities",
-        },
-    }
-
-    TOOLS_LIST_PAGE_SIZE = 25
+    MCP_TOOL_PROFILES = MCP_TOOL_PROFILES
+    TOOLS_LIST_PAGE_SIZE = TOOLS_LIST_PAGE_SIZE
+    MCP_RESOURCES = MCP_RESOURCES
+    MCP_PROMPTS = MCP_PROMPTS
+    TOOL_SECURITY_METADATA = TOOL_SECURITY_METADATA
 
     def handle_tools_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
         params = params or {}
@@ -358,77 +332,6 @@ class BintraMcpServer(
             "openWorldHint": False,
         }
 
-    MCP_RESOURCES: List[Dict[str, Any]] = [
-        {
-            "uri": "bintra://capabilities",
-            "name": "Bintra Capability Catalog",
-            "description": "Live platform-aware manifest of all registered Bintra MCP tools, capabilities, and workflows.",
-            "mimeType": "application/json",
-        },
-        {
-            "uri": "bintra://security/policy",
-            "name": "Bintra Security Kernel Policy",
-            "description": "Active workspace boundary, prohibited hazard capabilities, and component capability grants.",
-            "mimeType": "application/json",
-        },
-        {
-            "uri": "bintra://telemetry/session",
-            "name": "Bintra Token Efficiency Telemetry",
-            "description": "Current MCP session token footprint, call count, and token savings summary.",
-            "mimeType": "application/json",
-        },
-        {
-            "uri": "bintra://workflows/playbooks",
-            "name": "Bintra Reverse Engineering Playbooks",
-            "description": "Structured multi-tool workflows for PE triage, crash RCA, Ghidra analysis, and Windows auditing.",
-            "mimeType": "application/json",
-        },
-    ]
-
-    MCP_PROMPTS: List[Dict[str, Any]] = [
-        {
-            "name": "triage_pe_binary",
-            "description": "Run a complete read-only triage of a Windows PE binary combining headers, .pdata/RTTI/PDB, digital signature trust, obfuscation, and optional crash/Ghidra correlation.",
-            "arguments": [
-                {"name": "file_path", "description": "Absolute path to the target binary (.exe, .dll, .sys)", "required": True},
-                {"name": "dmp_path", "description": "Optional MiniDump (.dmp) file path", "required": False},
-                {"name": "ghidra_export_path", "description": "Optional Ghidra export (.json/.jsonl/.db) path", "required": False},
-            ],
-        },
-        {
-            "name": "root_cause_crash",
-            "description": "Correlate a Windows MiniDump (.dmp) crash with static PE forensics and Ghidra call-graph/data-flow evidence.",
-            "arguments": [
-                {"name": "dmp_path", "description": "Path to MiniDump (.dmp) file", "required": True},
-                {"name": "binary_path", "description": "Optional faulting binary path", "required": False},
-                {"name": "ghidra_export_path", "description": "Optional Ghidra export path", "required": False},
-            ],
-        },
-        {
-            "name": "audit_windows_host",
-            "description": "Perform a read-only Windows host security, driver, service, and telemetry audit.",
-            "arguments": [
-                {"name": "focus", "description": "Audit domain: all, drivers, network, processes, or registry", "required": False},
-            ],
-        },
-        {
-            "name": "diff_binary_versions",
-            "description": "Compare two versions of a binary semantically using WL-CFG hashing, P-Code behavior vectors, and API anchors.",
-            "arguments": [
-                {"name": "baseline_path", "description": "Path to baseline binary or Ghidra export", "required": True},
-                {"name": "target_path", "description": "Path to target binary or Ghidra export", "required": True},
-            ],
-        },
-        {
-            "name": "audit_neural_weights",
-            "description": "Zero-execution security audit of neural weights embedded in a binary or shipped as a Safetensors model: outlier-neuron trojan detection, spectral effective rank, and surgical amenability.",
-            "arguments": [
-                {"name": "target_path", "description": "Path to the hybrid binary or .safetensors model to audit", "required": True},
-                {"name": "scan_embedded", "description": "First run hybrid embedded-AI scanning on a PE binary (default true)", "required": False},
-            ],
-        },
-    ]
-
     def handle_resources_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
         return {"resources": list(self.MCP_RESOURCES)}
 
@@ -451,16 +354,7 @@ class BintraMcpServer(
         elif uri == "bintra://telemetry/session":
             payload = self.token_tracker.summary()
         elif uri == "bintra://workflows/playbooks":
-            payload = {
-                "playbooks": {
-                    "unified_binary_triage": ["bintra_triage_binary"],
-                    "static_pe_deep_audit": ["bintra_inspect_binary", "bintra_pe_deep_forensics", "bintra_deobfuscate_binary", "bintra_scan_hybrid", "bintra_sensory_audit"],
-                    "ghidra_deep_re": ["bintra_ghidra_analyze", "bintra_ghidra_call_graph", "bintra_ghidra_data_flow", "bintra_ghidra_similar_functions"],
-                    "crash_root_cause_fusion": ["bintra_dmp_inspect", "bintra_crash_rca", "bintra_pe_deep_forensics", "bintra_fuse_evidence"],
-                    "differential_binary_audit": ["bintra_binary_diff", "bintra_match_functions", "bintra_match_pcode", "bintra_ghidra_similar_functions"],
-                    "windows_host_audit": ["bintra_windows_env_audit", "bintra_driver_audit", "bintra_service_audit", "bintra_network_connections"],
-                }
-            }
+            payload = {"playbooks": WORKFLOW_PLAYBOOKS}
         else:
             raise ValueError(f"Unknown Bintra MCP resource URI: '{uri}'.")
 
@@ -555,60 +449,6 @@ class BintraMcpServer(
             ],
         }
 
-    TOOL_SECURITY_METADATA = {
-        "bintra_inspect_binary": ("cap.file.read", "READ", "file_path"),
-        "bintra_deobfuscate_binary": ("cap.file.read", "READ", "file_path"),
-        "bintra_dump_bytes": ("cap.file.read", "READ", "file_path"),
-        "bintra_match_functions": ("cap.file.read", "READ", None),
-        "bintra_patch_binary": ("cap.workspace.write", "WRITE", "output_path"),
-        "bintra_scan_hybrid": ("cap.file.read", "READ", "file_path"),
-        "bintra_sensory_audit": ("cap.file.read", "READ", "file_path"),
-        "bintra_match_pcode": ("cap.file.read", "READ", None),
-        "bintra_deobfuscate_pcode": ("cap.file.read", "READ", None),
-        "bintra_ghidra_analyze": ("cap.file.read", "READ", "input_file"),
-        "bintra_ghidra_headless": ("cap.ghidra.headless_exec", "EXECUTE", "binary_path"),
-        "bintra_windows_env_audit": ("cap.registry.read", "READ", "file_path"),
-        "bintra_resolve_dependencies": ("cap.file.read", "READ", "file_path"),
-        "bintra_inspect_crash_reports": ("cap.minidump.read", "READ", "file_path"),
-        "bintra_correlate_failure_evidence": ("cap.file.read", "READ", "binary_path"),
-        "bintra_win_catalog_cmd": ("cap.subprocess.catalog_exec", "EXECUTE", "command_id"),
-        "bintra_registry_audit": ("cap.registry.read", "READ", "domain"),
-        "bintra_hardware_audit": ("cap.device.query", "QUERY", None),
-        "bintra_port_audit": ("cap.device.query", "QUERY", "port_name"),
-        "bintra_hardware_topology": ("cap.device.query", "QUERY", "bus_filter"),
-        "bintra_network_audit": ("cap.device.query", "QUERY", None),
-        "bintra_network_hardware_dissect": ("cap.device.query", "QUERY", "target_query"),
-        "bintra_network_connections": ("cap.device.query", "QUERY", "pid"),
-        "bintra_driver_audit": ("cap.driver.query", "QUERY", None),
-        "bintra_service_audit": ("cap.service.query", "QUERY", None),
-        "bintra_dmp_inspect": ("cap.minidump.read", "READ", "dmp_path"),
-        "bintra_etw_audit": ("cap.event_log.read", "READ", "session_name"),
-        "bintra_etw_capture": ("cap.event_log.read", "READ", "session_name"),
-        "bintra_vad_inspect": ("cap.process.query", "QUERY", "pid"),
-        "bintra_memory_scan": ("cap.process.query", "READ", "pid"),
-        "bintra_pointer_scan": ("cap.process.query", "READ", "pid"),
-        "bintra_struct_dissect": ("cap.process.query", "READ", "pid"),
-        "bintra_crash_rca": ("cap.minidump.read", "READ", "dmp_path"),
-        "bintra_ghidra_live_bridge": ("cap.file.read", "READ", None),
-        "bintra_evidence_graph": ("cap.file.read", "READ", "binary_path"),
-        "bintra_wsp_audit": ("cap.file.read", "READ", "model_path"),
-        "bintra_patch_weights": ("cap.workspace.write", "WRITE", "output_path"),
-        "bintra_device_driver_intelligence": ("cap.device.query", "QUERY", "device_query"),
-        "bintra_process_resource_audit": ("cap.process.query", "QUERY", "file_path"),
-        "bintra_python_bytecode": ("cap.file.read", "READ", "file_path"),
-        "bintra_cpython_memory_forensics": ("cap.process.query", "READ", "pid"),
-        "bintra_pe_deep_forensics": ("cap.file.read", "READ", "file_path"),
-        "bintra_binary_diff": ("cap.file.read", "READ", "baseline_path"),
-        "bintra_ghidra_call_graph": ("cap.file.read", "READ", "export_path"),
-        "bintra_ghidra_data_flow": ("cap.file.read", "READ", "export_path"),
-        "bintra_ghidra_similar_functions": ("cap.file.read", "READ", "export_path"),
-        "bintra_fuse_evidence": ("cap.file.read", "READ", "binary_path"),
-        "bintra_triage_binary": ("cap.file.read", "READ", "file_path"),
-        "bintra_profile_process": ("cap.process.query", "QUERY", "pid"),
-        "bintra_inspect_slack_space": ("cap.file.read", "READ", "file_path"),
-        "bintra_list_capabilities": ("cap.file.read", "READ", None)
-    }
-
     @staticmethod
     def _apply_token_diet(tool_name: str, result_data: Any, args: Dict[str, Any]) -> Any:
         """Prune verbose boilerplate and bound large arrays when compact/summary_only is enabled."""
@@ -670,17 +510,16 @@ class BintraMcpServer(
             if not sec_meta:
                 raise SecurityViolationError(f"UNREGISTERED_TOOL: Tool '{tool_name}' has no registered security capability in PolicyEngine.")
 
+            if args is None:
+                args = {}
+            self._validate_tool_arguments(tool_name, args)
+
             cap_val, mode, target_param = sec_meta
             cap = Capability(cap_val)
 
             # Extract target path and derive workspace strictly server-side
-            target_path = (
-                args.get("file_path") or args.get("binary_path") or
-                args.get("model_path") or args.get("source_path") or
-                args.get("target_path") or args.get("dump_path") or
-                args.get("input_file") or args.get("dmp_path")
-            )
-            workspace_dir = self._resolve_server_workspace(args if isinstance(args, dict) else {})
+            target_path = next((args.get(k) for k in TARGET_PATH_ARG_KEYS if args.get(k)), None)
+            workspace_dir = self._resolve_server_workspace(args)
 
             # Determine mediated target name
             effective_target = args.get(target_param) if target_param else (target_path or tool_name)
@@ -691,7 +530,6 @@ class BintraMcpServer(
             if tool_name == "bintra_win_catalog_cmd":
                 req_metadata["is_catalog_command"] = True
 
-            self._validate_tool_arguments(tool_name, args)
             with ExecutionGuard.scoped_session(target_binary_path=target_path, workspace_dir=workspace_dir):
                 # COMPLETE MEDIATION: All MCP tool invocations MUST be authorized by Reference Monitor
                 ExecutionGuard.request_access(

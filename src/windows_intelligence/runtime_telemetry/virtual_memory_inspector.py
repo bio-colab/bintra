@@ -70,18 +70,6 @@ class MEMORY_BASIC_INFORMATION64(ctypes.Structure):
     ]
 
 
-class MEMORY_BASIC_INFORMATION32(ctypes.Structure):
-    _fields_ = [
-        ("BaseAddress", wintypes.DWORD),
-        ("AllocationBase", wintypes.DWORD),
-        ("AllocationProtect", wintypes.DWORD),
-        ("RegionSize", wintypes.DWORD),
-        ("State", wintypes.DWORD),
-        ("Protect", wintypes.DWORD),
-        ("Type", wintypes.DWORD),
-    ]
-
-
 class ProcessMemoryRegion:
     """Represents a discrete contiguous page allocation block in a process's virtual memory."""
 

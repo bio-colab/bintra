@@ -44,3 +44,27 @@ def guard_output_path(source: Optional[str], output: str, operation: str, in_pla
         capability=Capability.WORKSPACE_WRITE,
         access_mode="WRITE",
     )
+
+
+def parse_int_arg(raw: object, flag_name: str) -> int:
+    """Parse decimal or 0x-prefixed hex integer CLI arguments, rejecting booleans and blanks."""
+    if isinstance(raw, bool):
+        raise ValueError(f"Invalid integer value for '{flag_name}': boolean {raw!r} is not accepted.")
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str):
+        stripped = raw.strip()
+        if not stripped:
+            raise ValueError(f"Empty integer value for '{flag_name}'.")
+        try:
+            return int(stripped, 0)
+        except ValueError as exc:
+            raise ValueError(f"Invalid integer value for '{flag_name}': {raw!r}") from exc
+    raise ValueError(f"Invalid integer value for '{flag_name}': expected int or hex/decimal string, got {type(raw).__name__}.")
+
+
+def validate_port(port: object) -> int:
+    """Validate that a TCP port argument falls within 1..65535."""
+    if isinstance(port, bool) or not isinstance(port, int) or not (1 <= port <= 65535):
+        raise ValueError(f"Invalid TCP port {port!r}: expected an integer between 1 and 65535.")
+    return port

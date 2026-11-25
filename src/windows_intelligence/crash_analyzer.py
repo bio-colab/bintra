@@ -8,7 +8,6 @@ and provides a native pure-Python MiniDump (.dmp) header/stream parser.
 import os
 import sys
 import glob
-import struct
 import xml.etree.ElementTree as ET
 from typing import Dict, Any, List, Optional
 
@@ -287,113 +286,21 @@ class WindowsCrashAnalyzer:
         return events
 
     @classmethod
-    def _read_minidump_string(cls, f, rva: int) -> str:
-        """Reads a UTF-16 LE MINIDUMP_STRING at the specified RVA."""
-        try:
-            f.seek(rva)
-            (length,) = struct.unpack("<I", f.read(4))
-            raw_str = f.read(length)
-            return raw_str.decode("utf-16-le", errors="replace").rstrip("\x00")
-        except Exception:
-            return ""
-
-    @classmethod
     def parse_minidump(cls, dmp_path: str) -> Dict[str, Any]:
-        """
-        Pure-Python MiniDump parser (reads Signature 'MDMP' and Directory Streams).
-        Extracts ExceptionRecord (Stream 6) and Loaded Modules (Stream 4) without WinDbg.
-        Correlates faulting exception address against loaded modules to identify the
-        faulting module and relative virtual address (FaultingOffset/RVA).
-        """
-        if not os.path.isfile(dmp_path):
-            return {"status": "error", "error": f"Dump file not found: {dmp_path}"}
+        """Delegate MiniDump parsing to MiniDumpParser and project the legacy summary contract."""
+        from .runtime_telemetry.minidump_parser import MiniDumpParser
 
-        with open(dmp_path, "rb") as f:
-            header = f.read(32)
-            if len(header) < 32 or header[:4] != b"MDMP":
-                return {"status": "error", "error": "Invalid MiniDump magic signature (expected 'MDMP')"}
-
-            sig, ver, num_streams, stream_dir_rva, checksum, time_date = struct.unpack("<IIIIII", header[:24])
-
-            f.seek(stream_dir_rva)
-            dir_bytes = f.read(num_streams * 12)
-
-            exception_info = None
-            modules: List[Dict[str, Any]] = []
-
-            # Pass 1: Parse ExceptionStream (Stream 6)
-            for i in range(num_streams):
-                entry = dir_bytes[i * 12 : (i + 1) * 12]
-                if len(entry) < 12:
-                    break
-                st_type, data_size, rva = struct.unpack("<III", entry)
-
-                if st_type == 6 and data_size >= 168:
-                    f.seek(rva)
-                    exc_bytes = f.read(data_size)
-                    thread_id, _, exc_code, exc_flags, exc_record, exc_addr = struct.unpack("<IIIIQQ", exc_bytes[:32])
-                    exception_info = {
-                        "thread_id": thread_id,
-                        "exception_code": hex(exc_code),
-                        "exception_name": cls.COMMON_EXCEPTION_CODES.get(exc_code, "UNKNOWN_EXCEPTION"),
-                        "exception_address": hex(exc_addr),
-                        "exception_address_int": exc_addr
-                    }
-
-            # Pass 2: Parse ModuleListStream (Stream 4)
-            for i in range(num_streams):
-                entry = dir_bytes[i * 12 : (i + 1) * 12]
-                if len(entry) < 12:
-                    break
-                st_type, data_size, rva = struct.unpack("<III", entry)
-
-                if st_type == 4 and data_size >= 4:
-                    f.seek(rva)
-                    (mod_num,) = struct.unpack("<I", f.read(4))
-                    for m_idx in range(min(mod_num, 256)):
-                        mod_record = f.read(108)
-                        if len(mod_record) < 108:
-                            break
-                        base_img, size_img, chksum, timestamp, name_rva = struct.unpack("<QIIII", mod_record[:24])
-                        cur_pos = f.tell()
-                        mod_name_str = cls._read_minidump_string(f, name_rva)
-                        f.seek(cur_pos)
-
-                        modules.append({
-                            "name": os.path.basename(mod_name_str),
-                            "path": mod_name_str,
-                            "base_address": hex(base_img),
-                            "base_int": base_img,
-                            "size": size_img,
-                            "end_address": hex(base_img + size_img)
-                        })
-
-            # Correlate exception address with modules to determine fault module & RVA
-            fault_module = None
-            fault_offset = None
-            if exception_info and "exception_address_int" in exception_info:
-                exc_addr = exception_info["exception_address_int"]
-                for mod in modules:
-                    base = mod["base_int"]
-                    size = mod["size"]
-                    if base <= exc_addr < base + size:
-                        fault_module = mod["name"]
-                        fault_offset = hex(exc_addr - base)
-                        break
-
-                if fault_module:
-                    exception_info["fault_module"] = fault_module
-                    exception_info["fault_offset"] = fault_offset
-                del exception_info["exception_address_int"]
-
+        parsed = MiniDumpParser.parse_minidump(dmp_path)
+        if parsed.get("status") != "success":
+            return {"status": "error", "error": parsed.get("error", "MiniDump parsing failed")}
         return {
             "status": "success",
-            "file": dmp_path,
+            "file": parsed.get("file_path", dmp_path),
             "format": "MINIDUMP",
-            "stream_count": num_streams,
-            "module_count": len(modules),
-            "exception_info": exception_info,
-            "modules_preview": [m["name"] for m in modules[:10]]
+            "stream_count": parsed.get("stream_count", 0),
+            "module_count": parsed.get("module_count", 0),
+            "exception_info": parsed.get("exception_info"),
+            "modules_preview": parsed.get("modules_sample", []),
         }
 
     @classmethod

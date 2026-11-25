@@ -2,6 +2,8 @@
 import os
 from typing import Any, Dict
 
+from bintra_mcp.tools._common import parse_int_arg
+
 
 
 
@@ -59,7 +61,7 @@ class RuntimeTelemetryToolsMixin:
         snapshot = VirtualMemoryInspector.inspect_process(pid)
         addr_str = args.get("address")
         if addr_str:
-            addr = int(addr_str, 0)
+            addr = parse_int_arg(addr_str, "address")
             return snapshot.classify_address(addr)
         return snapshot.to_dict(include_regions=bool(args.get("include_regions", False)))
 
@@ -148,7 +150,7 @@ class RuntimeTelemetryToolsMixin:
         target_str = args.get("target_address")
         if not target_str:
             raise ValueError("'target_address' is required.")
-        target_addr = int(target_str, 0) if isinstance(target_str, str) else int(target_str)
+        target_addr = parse_int_arg(target_str, "target_address")
         from windows_intelligence import PointerScanner
         depth = int(args.get("max_depth", 2))
         offset = int(args.get("max_offset", 4096))
@@ -171,7 +173,7 @@ class RuntimeTelemetryToolsMixin:
         addr_str = args.get("address")
         if not addr_str:
             raise ValueError("'address' is required.")
-        addr = int(addr_str, 0) if isinstance(addr_str, str) else int(addr_str)
+        addr = parse_int_arg(addr_str, "address")
         size = min(4096, max(8, int(args.get("size", 64))))
         s_name = args.get("struct_name")
         from windows_intelligence import StructureDissector

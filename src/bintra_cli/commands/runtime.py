@@ -6,6 +6,7 @@ import sys
 import time
 
 
+from bintra_cli.commands._common import parse_int_arg
 from windows_intelligence import (
     MiniDumpParser, EtwController, VirtualMemoryInspector, CrashRootCauseAnalyzer,
     EtwLiveCaptureSession, EtwTimelineCorrelator,
@@ -164,14 +165,14 @@ def cmd_mem_scan(cmd: str) -> None:
     high_val = args.high_value
     if val is not None:
         if args.type in ("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64"):
-            val = int(val, 0)
+            val = parse_int_arg(val, "--value")
         elif args.type in ("float", "double"):
             val = float(val)
         elif args.type == "bytes":
             val = bytes.fromhex(val.replace(" ", "").replace("0x", ""))
     if high_val is not None:
         if args.type in ("int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64"):
-            high_val = int(high_val, 0)
+            high_val = parse_int_arg(high_val, "--high-value")
         elif args.type in ("float", "double"):
             high_val = float(high_val)
 
@@ -199,8 +200,8 @@ def cmd_mem_scan(cmd: str) -> None:
                 sid = session_data.get("session_id")
         except SecurityViolationError:
             raise
-        except Exception:
-            pass
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+            sys.stderr.write(f"[!] Warning: Could not restore memory scan session '{args.session_file}': {exc}\n")
 
     if sid:
         res = ProcessMemoryScanner.next_scan(
@@ -269,7 +270,7 @@ def cmd_pointer_scan(cmd: str) -> None:
         access_mode="READ"
     )
 
-    target_addr = int(args.target, 0)
+    target_addr = parse_int_arg(args.target, "--target")
     res = PointerScanner.find_pointer_paths(
         pid=args.pid,
         target_address=target_addr,
@@ -317,7 +318,7 @@ def cmd_dissect_struct(cmd: str) -> None:
         access_mode="READ"
     )
 
-    addr = int(args.address, 0)
+    addr = parse_int_arg(args.address, "--address")
     res = StructureDissector.dissect(pid=args.pid, base_address=addr, size=args.size)
 
     if args.format == "c":

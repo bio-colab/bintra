@@ -1,5 +1,6 @@
 """Bintra CLI commands: Ghidra P-Code matching, export analysis, headless automation and the live bridge."""
 import argparse
+import ast
 import json
 import os
 import sys
@@ -7,9 +8,24 @@ import time
 from typing import Any, Dict
 
 
+from bintra_cli.commands._common import parse_int_arg, validate_port
 from ghidra_pcode_vectorizer import (
     PcodeFunctionMatcher, PcodeDeobfuscator, GhidraAnnotationPlanner
 )
+
+
+def _load_pcode_input(val: str) -> Any:
+    """Load P-code operations from a JSON file path or an inline JSON/literal payload."""
+    if os.path.exists(val):
+        with open(val, "r", encoding="utf-8") as f:
+            return json.load(f)
+    try:
+        return json.loads(val)
+    except json.JSONDecodeError as json_err:
+        try:
+            return ast.literal_eval(val)
+        except (ValueError, SyntaxError):
+            raise ValueError(f"Invalid P-code payload (expected file path, JSON, or Python literal): {json_err}") from json_err
 
 
 def cmd_match_pcode(cmd: str) -> None:
@@ -19,17 +35,8 @@ def cmd_match_pcode(cmd: str) -> None:
     parser.add_argument("--func1", required=True, help="JSON file or inline JSON string of function 1 P-code ops")
     parser.add_argument("--func2", required=True, help="JSON file or inline JSON string of function 2 P-code ops")
     args = parser.parse_args()
-    def _load_pcode(val):
-        if os.path.exists(val):
-            with open(val, "r", encoding="utf-8") as f:
-                return json.load(f)
-        try:
-            return json.loads(val)
-        except Exception:
-            import ast
-            return ast.literal_eval(val)
-    p1 = _load_pcode(args.func1)
-    p2 = _load_pcode(args.func2)
+    p1 = _load_pcode_input(args.func1)
+    p2 = _load_pcode_input(args.func2)
     res = PcodeFunctionMatcher.match(p1, p2)
     print(json.dumps(res, indent=2))
     return
@@ -248,13 +255,16 @@ def cmd_ghidra_bridge(cmd: str) -> None:
     parser.add_argument("--format", choices=["json", "md"], default="json", help="Output format")
     args = parser.parse_args(sys.argv[2:])
 
+    validate_port(args.port)
+    auth_token = args.token or os.environ.get("BINTRA_BRIDGE_AUTH_TOKEN")
+
     from ghidra_live_bridge import (
         GhidraLiveBridgeClient,
         get_or_create_bridge, get_active_bridge, stop_active_bridge
     )
 
     if args.stop:
-        res = stop_active_bridge(port=args.port, auth_token=args.token)
+        res = stop_active_bridge(port=args.port, auth_token=auth_token)
         print(json.dumps(res, indent=2))
         return
 
@@ -267,8 +277,6 @@ def cmd_ghidra_bridge(cmd: str) -> None:
             "--start",
             "--port", str(args.port)
         ]
-        if args.token:
-            daemon_cmd.extend(["--token", args.token])
         if args.no_temp_marker:
             daemon_cmd.append("--no-temp-marker")
         popen_kwargs: Dict[str, Any] = {
@@ -276,6 +284,10 @@ def cmd_ghidra_bridge(cmd: str) -> None:
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.DEVNULL,
         }
+        if auth_token:
+            daemon_env = dict(os.environ)
+            daemon_env["BINTRA_BRIDGE_AUTH_TOKEN"] = auth_token
+            popen_kwargs["env"] = daemon_env
         if os.name == "nt":
             DETACHED_PROCESS = 0x00000008
             CREATE_NEW_PROCESS_GROUP = 0x00000200
@@ -288,7 +300,7 @@ def cmd_ghidra_bridge(cmd: str) -> None:
 
     if args.status:
         try:
-            client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
+            client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=auth_token)
             st = client.call_rpc("get_status")
             print(json.dumps(st, indent=2, ensure_ascii=False))
         except Exception as e:
@@ -313,20 +325,19 @@ def cmd_ghidra_bridge(cmd: str) -> None:
                                        or payload.get("struct_report") or payload.get("pointer_report"))
             return {"status": "error", "message": f"Bridge communication error: {rpc_exc}"}
 
+    def _dispatch_inject(method: str, key: str, report: Any) -> None:
+        client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=auth_token)
+        inj = _bridge_rpc(client, method, {key: report})
+        print(json.dumps(inj, indent=2, ensure_ascii=False))
+
     if args.annotate_crash:
         from windows_intelligence import CrashRootCauseAnalyzer
-        rca = CrashRootCauseAnalyzer.analyze_crash(args.annotate_crash)
-        client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
-        inj = _bridge_rpc(client, "bintra.inject_crash_rca", {"rca_report": rca})
-        print(json.dumps(inj, indent=2, ensure_ascii=False))
+        _dispatch_inject("bintra.inject_crash_rca", "rca_report", CrashRootCauseAnalyzer.analyze_crash(args.annotate_crash))
         return
 
     if args.annotate_vad:
         from windows_intelligence import VirtualMemoryInspector
-        snap = VirtualMemoryInspector.inspect_process(args.annotate_vad)
-        client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
-        inj = _bridge_rpc(client, "bintra.inject_vad_snapshot", {"vad_snapshot": snap.to_dict()})
-        print(json.dumps(inj, indent=2, ensure_ascii=False))
+        _dispatch_inject("bintra.inject_vad_snapshot", "vad_snapshot", VirtualMemoryInspector.inspect_process(args.annotate_vad).to_dict())
         return
 
     if args.annotate_struct:
@@ -334,17 +345,15 @@ def cmd_ghidra_bridge(cmd: str) -> None:
             with open(args.annotate_struct, "r", encoding="utf-8") as f:
                 struct_rep = json.load(f)
         else:
-            target_pid = int(args.annotate_struct)
+            target_pid = parse_int_arg(args.annotate_struct, "--annotate-struct")
             if not args.addr:
                 print(json.dumps({"status": "error", "message": "--addr is required when --annotate-struct is a PID"}, indent=2))
                 return
-            base_addr = int(args.addr, 16) if args.addr.lower().startswith("0x") else int(args.addr)
+            base_addr = parse_int_arg(args.addr, "--addr")
             from windows_intelligence import StructureDissector
             struct_rep = StructureDissector.dissect(target_pid, base_addr, size=args.size)
 
-        client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
-        inj = _bridge_rpc(client, "bintra.inject_structure_dissection", {"struct_report": struct_rep})
-        print(json.dumps(inj, indent=2, ensure_ascii=False))
+        _dispatch_inject("bintra.inject_structure_dissection", "struct_report", struct_rep)
         return
 
     if args.annotate_pointers:
@@ -352,23 +361,21 @@ def cmd_ghidra_bridge(cmd: str) -> None:
             with open(args.annotate_pointers, "r", encoding="utf-8") as f:
                 ptr_rep = json.load(f)
         else:
-            target_pid = int(args.annotate_pointers)
+            target_pid = parse_int_arg(args.annotate_pointers, "--annotate-pointers")
             if not args.addr:
                 print(json.dumps({"status": "error", "message": "--addr is required when --annotate-pointers is a PID"}, indent=2))
                 return
-            target_addr = int(args.addr, 16) if args.addr.lower().startswith("0x") else int(args.addr)
+            target_addr = parse_int_arg(args.addr, "--addr")
             from windows_intelligence import PointerScanner
             ptr_rep = PointerScanner.find_pointer_paths(target_pid, target_addr, max_depth=args.depth)
 
-        client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{args.port}", auth_token=args.token)
-        inj = _bridge_rpc(client, "bintra.inject_pointer_chains", {"pointer_report": ptr_rep})
-        print(json.dumps(inj, indent=2, ensure_ascii=False))
+        _dispatch_inject("bintra.inject_pointer_chains", "pointer_report", ptr_rep)
         return
 
     # Default / --start: start bridge server in foreground
     server = get_or_create_bridge(
         port=args.port,
-        auth_token=args.token,
+        auth_token=auth_token,
         publish_temp_marker=not args.no_temp_marker,
     )
     print(f"[*] Bintra Ghidra Live Bridge running on http://127.0.0.1:{server.port}")

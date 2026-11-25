@@ -432,7 +432,17 @@ class BinaryTriageOrchestrator:
                 disabled = [k for k, v in mit.items() if v is False]
                 if disabled:
                     observed_facts.append(f"Disabled PE mitigations: {', '.join(sorted(disabled))}")
-            entropy = pe_inspect.get("overall_entropy") or pe_inspect.get("shannon_entropy")
+            entropy = (
+                pe_inspect.get("overall_entropy")
+                or pe_inspect.get("overall_shannon_entropy")
+                or pe_inspect.get("shannon_entropy")
+                or (pe_inspect.get("embedded_ai_scan") or {}).get("overall_shannon_entropy")
+            )
+            if not isinstance(entropy, (int, float)):
+                secs = [s for s in (pe_inspect.get("sections") or []) if isinstance(s, dict) and isinstance(s.get("shannon_entropy"), (int, float))]
+                if secs:
+                    total_raw = sum(max(1, int(s.get("raw_size", 0))) for s in secs)
+                    entropy = round(sum(float(s["shannon_entropy"]) * max(1, int(s.get("raw_size", 0))) for s in secs) / total_raw, 4)
             if isinstance(entropy, (int, float)):
                 observed_facts.append(f"Observed Shannon entropy: {entropy:.2f}")
                 if entropy >= 7.2:

@@ -454,7 +454,18 @@ def fuse_static_dynamic_ghidra(
             bin_id = f"pe:{sha[:12]}"
             bin_label = binary_inspection.get("file_name") or binary_inspection.get("file_path") or bin_label
         bin_props["format"] = binary_inspection.get("format")
-        bin_props["entropy"] = binary_inspection.get("overall_entropy") or binary_inspection.get("shannon_entropy")
+        ent = (
+            binary_inspection.get("overall_entropy")
+            or binary_inspection.get("overall_shannon_entropy")
+            or binary_inspection.get("shannon_entropy")
+            or (binary_inspection.get("embedded_ai_scan") or {}).get("overall_shannon_entropy")
+        )
+        if ent is None:
+            secs = [s for s in (binary_inspection.get("sections") or []) if isinstance(s, dict) and s.get("shannon_entropy") is not None]
+            if secs:
+                total_raw = sum(max(1, int(s.get("raw_size", 0))) for s in secs)
+                ent = round(sum(float(s["shannon_entropy"]) * max(1, int(s.get("raw_size", 0))) for s in secs) / total_raw, 4)
+        bin_props["entropy"] = ent
 
     if bin_id != "pe:unknown":
         graph.add_node(bin_id, "PE_BINARY", bin_label, properties=bin_props)
@@ -537,7 +548,14 @@ def fuse_static_dynamic_ghidra(
                 "evidence_source": "CRASH_ROOT_CAUSE_ANALYZER",
                 "verification_level": "OBSERVED_CRASH_TELEMETRY",
                 "culprit_register": crash_rca.get("culprit_register"),
-                "fault_address": crash_rca.get("fault_address"),
+                "fault_address": (
+                    crash_rca.get("fault_address")
+                    or crash_rca.get("target_address")
+                    or crash_rca.get("fault_virtual_address")
+                ),
+                "fault_module": crash_rca.get("fault_module"),
+                "fault_rva": crash_rca.get("fault_rva"),
+                "fault_virtual_address": crash_rca.get("fault_virtual_address"),
                 "confidence": crash_rca.get("confidence"),
             },
         )

@@ -146,8 +146,10 @@ class PeDeepForensicsInspector:
             layout = _parse_pe_layout(data)
         if not layout["is_pe64"]:
             return {
+                "applicable": False,
                 "supported": False,
                 "reason": "PE32 (32-bit) binaries do not use x64 .pdata RUNTIME_FUNCTION tables.",
+                "total_runtime_functions": 0,
                 "function_count": 0,
                 "functions": [],
             }
@@ -155,8 +157,10 @@ class PeDeepForensicsInspector:
         dirs = layout["data_directories"]
         if len(dirs) <= 3 or dirs[3][0] == 0 or dirs[3][1] == 0:
             return {
+                "applicable": True,
                 "supported": True,
                 "reason": "No Exception Directory (.pdata) present.",
+                "total_runtime_functions": 0,
                 "function_count": 0,
                 "functions": [],
             }
@@ -694,8 +698,19 @@ class SemanticBinaryDiffer:
         base_pe = BinaryFormatInspector.inspect(baseline_path)
         targ_pe = BinaryFormatInspector.inspect(target_path)
 
-        base_sections = {s["name"]: s for s in base_pe.get("sections", [])}
-        targ_sections = {s["name"]: s for s in targ_pe.get("sections", [])}
+        def _index_sections(secs: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+            indexed: Dict[str, Dict[str, Any]] = {}
+            seen: Dict[str, int] = {}
+            for sec in secs:
+                raw_name = sec.get("name", "")
+                occ = seen.get(raw_name, 0) + 1
+                seen[raw_name] = occ
+                key = raw_name if occ == 1 else f"{raw_name}#{occ}"
+                indexed[key] = sec
+            return indexed
+
+        base_sections = _index_sections(base_pe.get("sections", []))
+        targ_sections = _index_sections(targ_pe.get("sections", []))
 
         sec_added = sorted(list(set(targ_sections.keys()) - set(base_sections.keys())))
         sec_removed = sorted(list(set(base_sections.keys()) - set(targ_sections.keys())))
@@ -706,9 +721,11 @@ class SemanticBinaryDiffer:
             bs = base_sections[sname]
             ts = targ_sections[sname]
             vsz_diff = ts.get("virtual_size", 0) - bs.get("virtual_size", 0)
-            rsz_diff = ts.get("raw_data_size", 0) - bs.get("raw_data_size", 0)
-            ent_b = bs.get("entropy", 0.0)
-            ent_t = ts.get("entropy", 0.0)
+            rsz_b = bs.get("raw_size", bs.get("raw_data_size", 0))
+            rsz_t = ts.get("raw_size", ts.get("raw_data_size", 0))
+            rsz_diff = rsz_t - rsz_b
+            ent_b = bs.get("shannon_entropy", bs.get("entropy", 0.0))
+            ent_t = ts.get("shannon_entropy", ts.get("entropy", 0.0))
             ent_diff = round(ent_t - ent_b, 4)
             geometry_deltas.append({
                 "section": sname,
@@ -747,8 +764,25 @@ class SemanticBinaryDiffer:
         apis_added = sorted(list(targ_apis - base_apis))[:100]
         apis_removed = sorted(list(base_apis - targ_apis))[:100]
 
-        base_exp = set(base_pe.get("exports", {}).get("names", []))
-        targ_exp = set(targ_pe.get("exports", {}).get("names", []))
+        def _extract_export_names(pe_dict: Dict[str, Any]) -> Set[str]:
+            exp = pe_dict.get("exports") or {}
+            funcs = exp.get("functions", [])
+            if isinstance(funcs, list) and funcs:
+                names: Set[str] = set()
+                for entry in funcs:
+                    if isinstance(entry, dict):
+                        nm = entry.get("name")
+                        if not nm and entry.get("ordinal") is not None:
+                            nm = f"ordinal_{entry['ordinal']}"
+                        if nm:
+                            names.add(str(nm))
+                    elif isinstance(entry, str) and entry:
+                        names.add(entry)
+                return names
+            return set(exp.get("names", []) or [])
+
+        base_exp = _extract_export_names(base_pe)
+        targ_exp = _extract_export_names(targ_pe)
         exp_union = base_exp | targ_exp
         export_jaccard = round(len(base_exp & targ_exp) / len(exp_union), 4) if exp_union else 1.0
         exports_added = sorted(list(targ_exp - base_exp))[:100]

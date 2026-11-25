@@ -1355,112 +1355,136 @@ class ContinuousDeobfuscator:
         return findings
 
     @staticmethod
-    def detect_control_flow_flattening(code_bytes: bytes) -> Dict[str, Any]:
+    def detect_control_flow_flattening(
+        code_bytes: bytes,
+        is_64bit: Optional[bool] = None,
+    ) -> Dict[str, Any]:
         """
         Detects Control Flow Flattening (CFF) dispatcher loops and measures rhythmic cadence.
+        Uses Capstone instruction-boundary decoding when available so immediate/displacement
+        operands inside multi-byte instructions cannot mimic opcodes.
         """
         state_comparisons = []
         state_assignments = []
 
         n = len(code_bytes)
-        i = 0
-        while i < n - 3:
-            matched_step = 1
+        if is_64bit is None:
+            # Infer x64 only when clear 64-bit REX.W stack/frame idioms outweigh 32-bit EBP prologues
+            x64_hints = code_bytes.count(b"\x48\x83\xEC") + code_bytes.count(b"\x48\x89\x5C\x24") + code_bytes.count(b"\x48\x8B")
+            x86_hints = code_bytes.count(b"\x55\x8B\xEC") + code_bytes.count(b"\x8B\xFF\x55\x8B\xEC")
+            effective_64 = (x64_hints > x86_hints * 2 and x64_hints >= 4)
+        else:
+            effective_64 = bool(is_64bit)
 
+        def _match_at(i: int, avail: int) -> int:
             # 1. 32-bit EBP Frame Pointer: CMP [ebp+disp8], imm32 (81 7D disp8 imm32)
-            if i + 6 < n and code_bytes[i] == 0x81 and code_bytes[i+1] == 0x7D:
-                imm = struct.unpack("<I", code_bytes[i+3:i+7])[0]
+            if avail >= 7 and i + 6 < n and code_bytes[i] == 0x81 and code_bytes[i + 1] == 0x7D:
+                imm = struct.unpack("<I", code_bytes[i + 3:i + 7])[0]
                 state_comparisons.append({
                     "offset": i,
                     "state_value": hex(imm),
-                    "stack_var_offset": code_bytes[i+2],
-                    "mechanism": "EBP_DISP8_CMP32"
+                    "stack_var_offset": code_bytes[i + 2],
+                    "mechanism": "EBP_DISP8_CMP32",
                 })
-                matched_step = 7
+                return 7
             # 2. 32-bit EBP Frame Pointer: CMP [ebp+disp8], imm8 (83 7D disp8 imm8)
-            elif i + 3 < n and code_bytes[i] == 0x83 and code_bytes[i+1] == 0x7D:
-                imm = code_bytes[i+3]
+            if avail >= 4 and i + 3 < n and code_bytes[i] == 0x83 and code_bytes[i + 1] == 0x7D:
+                imm = code_bytes[i + 3]
                 state_comparisons.append({
                     "offset": i,
                     "state_value": hex(imm),
-                    "stack_var_offset": code_bytes[i+2],
-                    "mechanism": "EBP_DISP8_CMP8"
+                    "stack_var_offset": code_bytes[i + 2],
+                    "mechanism": "EBP_DISP8_CMP8",
                 })
-                matched_step = 4
+                return 4
             # 3. 32-bit EBP Frame Pointer: MOV [ebp+disp8], imm32 (C7 45 disp8 imm32)
-            elif i + 6 < n and code_bytes[i] == 0xC7 and code_bytes[i+1] == 0x45:
-                imm = struct.unpack("<I", code_bytes[i+3:i+7])[0]
+            if avail >= 7 and i + 6 < n and code_bytes[i] == 0xC7 and code_bytes[i + 1] == 0x45:
+                imm = struct.unpack("<I", code_bytes[i + 3:i + 7])[0]
                 state_assignments.append({
                     "offset": i,
                     "target_state": hex(imm),
-                    "stack_var_offset": code_bytes[i+2],
-                    "mechanism": "EBP_DISP8_MOV32"
+                    "stack_var_offset": code_bytes[i + 2],
+                    "mechanism": "EBP_DISP8_MOV32",
                 })
-                matched_step = 7
-
+                return 7
             # 4. 64-bit RSP Stack Pointer: CMP [rsp+disp8], imm32 (81 7C 24 disp8 imm32)
-            elif i + 7 < n and code_bytes[i] == 0x81 and code_bytes[i+1] == 0x7C and code_bytes[i+2] == 0x24:
-                imm = struct.unpack("<I", code_bytes[i+4:i+8])[0]
+            if avail >= 8 and i + 7 < n and code_bytes[i] == 0x81 and code_bytes[i + 1] == 0x7C and code_bytes[i + 2] == 0x24:
+                imm = struct.unpack("<I", code_bytes[i + 4:i + 8])[0]
                 state_comparisons.append({
                     "offset": i,
                     "state_value": hex(imm),
-                    "stack_var_offset": code_bytes[i+3],
-                    "mechanism": "RSP_DISP8_CMP32"
+                    "stack_var_offset": code_bytes[i + 3],
+                    "mechanism": "RSP_DISP8_CMP32",
                 })
-                matched_step = 8
+                return 8
             # 5. 64-bit RSP Stack Pointer: CMP [rsp+disp8], imm8 (83 7C 24 disp8 imm8)
-            elif i + 4 < n and code_bytes[i] == 0x83 and code_bytes[i+1] == 0x7C and code_bytes[i+2] == 0x24:
-                imm = code_bytes[i+4]
+            if avail >= 5 and i + 4 < n and code_bytes[i] == 0x83 and code_bytes[i + 1] == 0x7C and code_bytes[i + 2] == 0x24:
+                imm = code_bytes[i + 4]
                 state_comparisons.append({
                     "offset": i,
                     "state_value": hex(imm),
-                    "stack_var_offset": code_bytes[i+3],
-                    "mechanism": "RSP_DISP8_CMP8"
+                    "stack_var_offset": code_bytes[i + 3],
+                    "mechanism": "RSP_DISP8_CMP8",
                 })
-                matched_step = 5
+                return 5
             # 6. 64-bit RSP Stack Pointer: MOV [rsp+disp8], imm32 (C7 44 24 disp8 imm32)
-            elif i + 7 < n and code_bytes[i] == 0xC7 and code_bytes[i+1] == 0x44 and code_bytes[i+2] == 0x24:
-                imm = struct.unpack("<I", code_bytes[i+4:i+8])[0]
+            if avail >= 8 and i + 7 < n and code_bytes[i] == 0xC7 and code_bytes[i + 1] == 0x44 and code_bytes[i + 2] == 0x24:
+                imm = struct.unpack("<I", code_bytes[i + 4:i + 8])[0]
                 state_assignments.append({
                     "offset": i,
                     "target_state": hex(imm),
-                    "stack_var_offset": code_bytes[i+3],
-                    "mechanism": "RSP_DISP8_MOV32"
+                    "stack_var_offset": code_bytes[i + 3],
+                    "mechanism": "RSP_DISP8_MOV32",
                 })
-                matched_step = 8
-
+                return 8
             # 7. Register state variable: CMP reg32, imm32 (81 F8..FF imm32)
-            elif i + 5 < n and code_bytes[i] == 0x81 and 0xF8 <= code_bytes[i+1] <= 0xFF:
-                imm = struct.unpack("<I", code_bytes[i+2:i+6])[0]
+            if avail >= 6 and i + 5 < n and code_bytes[i] == 0x81 and 0xF8 <= code_bytes[i + 1] <= 0xFF:
+                imm = struct.unpack("<I", code_bytes[i + 2:i + 6])[0]
                 state_comparisons.append({
                     "offset": i,
                     "state_value": hex(imm),
-                    "register_id": code_bytes[i+1] - 0xF8,
-                    "mechanism": "REG_CMP32"
+                    "register_id": code_bytes[i + 1] - 0xF8,
+                    "mechanism": "REG_CMP32",
                 })
-                matched_step = 6
+                return 6
             # 8. Register state variable: CMP reg32, imm8 (83 F8..FF imm8)
-            elif i + 2 < n and code_bytes[i] == 0x83 and 0xF8 <= code_bytes[i+1] <= 0xFF:
-                imm = code_bytes[i+2]
+            if avail >= 3 and i + 2 < n and code_bytes[i] == 0x83 and 0xF8 <= code_bytes[i + 1] <= 0xFF:
+                imm = code_bytes[i + 2]
                 state_comparisons.append({
                     "offset": i,
                     "state_value": hex(imm),
-                    "register_id": code_bytes[i+1] - 0xF8,
-                    "mechanism": "REG_CMP8"
+                    "register_id": code_bytes[i + 1] - 0xF8,
+                    "mechanism": "REG_CMP8",
                 })
-                matched_step = 3
+                return 3
             # 9. Register state assignment: MOV reg32, imm32 (B8..BF imm32)
-            elif i + 4 < n and 0xB8 <= code_bytes[i] <= 0xBF:
-                imm = struct.unpack("<I", code_bytes[i+1:i+5])[0]
+            if avail >= 5 and i + 4 < n and 0xB8 <= code_bytes[i] <= 0xBF:
+                imm = struct.unpack("<I", code_bytes[i + 1:i + 5])[0]
                 state_assignments.append({
                     "offset": i,
                     "target_state": hex(imm),
                     "register_id": code_bytes[i] - 0xB8,
-                    "mechanism": "REG_MOV32"
+                    "mechanism": "REG_MOV32",
                 })
-                matched_step = 5
+                return 5
+            return 1
 
-            i += matched_step
+        if HAS_CAPSTONE:
+            md = Cs(CS_ARCH_X86, CS_MODE_64 if effective_64 else CS_MODE_32)
+            pos = 0
+            mv = memoryview(code_bytes)
+            while pos < n - 2:
+                decoded_any = False
+                for ins_addr, ins_size, _mnem, _op in md.disasm_lite(mv[pos:], pos):
+                    decoded_any = True
+                    _match_at(ins_addr, ins_size)
+                    pos = ins_addr + ins_size
+                if not decoded_any:
+                    pos += 1
+        else:
+            i = 0
+            while i < n - 3:
+                i += _match_at(i, n - i)
 
         # Noise / entropy rejection: random bytes or compressed payload cannot be CFF
         ent = BinaryFormatInspector.compute_shannon_entropy(code_bytes)
@@ -1485,17 +1509,21 @@ class ContinuousDeobfuscator:
                 return ("reg", entry.get("register_id"))
             return ("unknown", None)
 
+        def _same_function_region(off_a: int, off_b: int) -> bool:
+            lo, hi = (off_a, off_b) if off_a <= off_b else (off_b, off_a)
+            return code_bytes.find(b"\xCC\xCC", lo, hi) == -1
+
         cmps_by_var_entries: Dict[tuple, List[dict]] = {}
         for c in state_comparisons:
             key = _resolve_var_identity(c)
             if key[0] != "unknown":
                 cmps_by_var_entries.setdefault(key, []).append(c)
 
-        assigns_by_var_offsets: Dict[tuple, List[int]] = {}
+        assigns_by_var_entries: Dict[tuple, List[dict]] = {}
         for a in state_assignments:
             key = _resolve_var_identity(a)
             if key[0] != "unknown":
-                assigns_by_var_offsets.setdefault(key, []).append(a["offset"])
+                assigns_by_var_entries.setdefault(key, []).append(a)
 
         has_cff = False
         detected_states = set()
@@ -1512,6 +1540,9 @@ class ContinuousDeobfuscator:
                 while right < len(sorted_entries) and sorted_entries[right]["offset"] <= limit:
                     right += 1
                 window_entries = sorted_entries[left:right]
+                # Keep only comparisons within the same function segment as window_entries[0]
+                if len(window_entries) >= 3 and not _same_function_region(window_entries[0]["offset"], window_entries[-1]["offset"]):
+                    continue
                 win_states = {e["state_value"] for e in window_entries}
                 if len(win_states) >= 3:
                     win_offsets = [e["offset"] for e in window_entries]
@@ -1522,12 +1553,27 @@ class ContinuousDeobfuscator:
                         reg = float(1.0 / (1.0 + (std_int / max(mean_int, 1.0))))
                         best_cadence = max(best_cadence, reg)
 
-                        var_assigns = assigns_by_var_offsets.get(var_key, [])
-                        nearby_assigns = [
-                            ao for ao in var_assigns
-                            if abs(ao - win_offsets[0]) <= 2048 or abs(ao - win_offsets[-1]) <= 2048
+                        var_assign_entries = assigns_by_var_entries.get(var_key, [])
+                        assign_radius = 512 if var_key[0] == "reg" else 2048
+                        nearby_assign_entries = [
+                            ae for ae in var_assign_entries
+                            if (abs(ae["offset"] - win_offsets[0]) <= assign_radius or abs(ae["offset"] - win_offsets[-1]) <= assign_radius)
+                            and _same_function_region(ae["offset"], win_offsets[0])
                         ]
-                        if len(var_assigns) >= 2 and len(nearby_assigns) >= 1 and reg >= 0.35:
+                        min_nearby = 3
+                        if len(nearby_assign_entries) >= min_nearby and reg >= 0.35:
+                            if var_key[0] == "reg":
+                                # Avoid MSVC CRT / switch boolean / accumulator reuse false positives on volatile registers:
+                                # ignore trivial boolean {0, 1} return idioms unless real non-boolean state constants cycle.
+                                cmp_ints = {int(s, 16) for s in win_states}
+                                assign_ints = {int(ae["target_state"], 16) for ae in nearby_assign_entries}
+                                non_trivial_overlap = (cmp_ints & assign_ints) - {0, 1}
+                                win_span = win_offsets[-1] - win_offsets[0]
+                                cmp32_cnt = sum(1 for e in window_entries if e.get("mechanism") == "REG_CMP32")
+                                tight_dispatcher = (win_span <= 192 and cmp32_cnt >= 2 and len(non_trivial_overlap) >= 1)
+                                feedback_loop = (len(non_trivial_overlap) >= 2)
+                                if not (len(assign_ints) >= 2 and (tight_dispatcher or feedback_loop)):
+                                    continue
                             has_cff = True
                             for ws in win_states:
                                 detected_states.add(ws)
@@ -1570,7 +1616,7 @@ class ContinuousDeobfuscator:
         is_64bit: Optional[bool] = None
     ) -> Dict[str, Any]:
         predicates = ContinuousDeobfuscator.analyze_opaque_predicates(code_bytes, is_64bit=is_64bit)
-        cff_analysis = ContinuousDeobfuscator.detect_control_flow_flattening(code_bytes)
+        cff_analysis = ContinuousDeobfuscator.detect_control_flow_flattening(code_bytes, is_64bit=is_64bit)
         dead_bytes = sum(p["length"] for p in predicates)
         return {
             "total_bytes_analyzed": len(code_bytes),

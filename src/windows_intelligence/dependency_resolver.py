@@ -356,6 +356,122 @@ class WindowsDependencyResolver:
         return None
 
     @classmethod
+    def _audit_module_map(
+        cls,
+        modules_map: Dict[str, List[str]],
+        binary_path: str,
+        is_binary_64: bool,
+        search_dirs: List[str],
+        known_dlls: Set[str],
+        manifest_text: str,
+        app_dirs_to_skip: Set[str],
+        is_delay_load: bool = False,
+    ) -> Dict[str, Any]:
+        """Resolves a DLL import dictionary (static IAT or delay-load) against WinSxS, KnownDLLs, and search paths."""
+        resolved_modules = []
+        missing_modules = []
+        architecture_mismatches = []
+        missing_exports = []
+
+        for dll_name, imported_funcs in modules_map.items():
+            is_virtual_api_set = cls.is_api_set(dll_name)
+            is_known = dll_name.lower() in known_dlls
+            search_name = cls.resolve_api_set_target(dll_name) if is_virtual_api_set else dll_name
+
+            # 1. Check Side-by-Side (SxS) assembly context first (e.g. COMCTL32 v6, GDI+, CRT)
+            sxs_path = cls.resolve_sxs_dll(
+                search_name,
+                binary_path=binary_path,
+                is_64bit=is_binary_64,
+                manifest_text=manifest_text
+            )
+            is_sxs = sxs_path is not None
+
+            if sxs_path:
+                located_path = sxs_path
+            else:
+                # KnownDLLs are loaded directly from system directory, bypassing all application directories
+                effective_search_dirs = (
+                    [d for d in search_dirs if os.path.abspath(d) not in app_dirs_to_skip]
+                    if is_known
+                    else search_dirs
+                )
+                located_path = cls.locate_dll(search_name, effective_search_dirs)
+
+            if not located_path:
+                missing_modules.append({
+                    "imported_name": dll_name,
+                    "resolved_as": search_name,
+                    "is_api_set": is_virtual_api_set,
+                    "is_known_dll": is_known,
+                    "is_sxs_assembly": False,
+                    "is_delay_load": is_delay_load,
+                    "functions_count": len(imported_funcs),
+                    "functions_preview": imported_funcs[:5]
+                })
+                continue
+
+            # Verify DLL architecture and exported symbols
+            try:
+                dll_pe = BinaryFormatInspector.inspect(located_path)
+                dll_is_64 = dll_pe.get("pe_type", "").startswith("PE32+")
+                if dll_pe.get("format") == "PE" and dll_is_64 != is_binary_64:
+                    architecture_mismatches.append({
+                        "dll_name": dll_name,
+                        "located_path": located_path,
+                        "is_delay_load": is_delay_load,
+                        "binary_arch": "PE32+ (64-bit)" if is_binary_64 else "PE32 (32-bit)",
+                        "dll_arch": "PE32+ (64-bit)" if dll_is_64 else "PE32 (32-bit)"
+                    })
+
+                if dll_pe.get("format") == "PE" and not is_virtual_api_set:
+                    exported_list = dll_pe.get("exports", {}).get("functions", [])
+                    exported_names: Set[str] = {e["name"] for e in exported_list if e.get("name")}
+                    exported_ordinals: Set[int] = {e["ordinal"] for e in exported_list if e.get("ordinal") is not None}
+
+                    for fn in imported_funcs:
+                        if fn.startswith("Ordinal_"):
+                            try:
+                                ord_num = int(fn.split("_")[1])
+                                if ord_num not in exported_ordinals:
+                                    missing_exports.append({
+                                        "dll_name": dll_name,
+                                        "located_path": located_path,
+                                        "is_delay_load": is_delay_load,
+                                        "missing_symbol": fn
+                                    })
+                            except (IndexError, ValueError):
+                                pass
+                        else:
+                            if fn and fn not in exported_names:
+                                missing_exports.append({
+                                    "dll_name": dll_name,
+                                    "located_path": located_path,
+                                    "is_delay_load": is_delay_load,
+                                    "missing_symbol": fn
+                                })
+
+            except Exception:
+                pass
+
+            resolved_modules.append({
+                "imported_name": dll_name,
+                "is_api_set": is_virtual_api_set,
+                "is_known_dll": is_known,
+                "is_sxs_assembly": is_sxs,
+                "is_delay_load": is_delay_load,
+                "located_path": located_path,
+                "imported_functions_count": len(imported_funcs)
+            })
+
+        return {
+            "resolved": resolved_modules,
+            "missing": missing_modules,
+            "architecture_mismatches": architecture_mismatches,
+            "missing_exports": missing_exports,
+        }
+
+    @classmethod
     def audit_dependencies(
         cls,
         binary_path: str,
@@ -363,7 +479,8 @@ class WindowsDependencyResolver:
         app_dir: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Performs static heuristic verification of an executable's imports against host Windows DLLs.
+        Performs static heuristic verification of an executable's static and delay-load imports
+        against host Windows DLLs.
         Detects:
         - Missing libraries (DLL_NOT_FOUND / 0xC0000135).
         - Architecture mismatch (attempting to load x64 DLL in x86 binary or vice-versa).
@@ -401,6 +518,7 @@ class WindowsDependencyResolver:
             app_dir=app_dir
         )
         imports = custom_imports if custom_imports is not None else pe_info.get("imports", {}).get("modules", {})
+        delay_imports = {} if custom_imports is not None else (pe_info.get("delay_imports", {}) or {}).get("modules", {})
         known_dlls = cls.get_known_dlls()
         manifest_text = cls.extract_manifest_text(binary_path) if os.path.isfile(binary_path) else ""
         app_dirs_to_skip = {
@@ -409,100 +527,46 @@ class WindowsDependencyResolver:
             if d
         }
 
-        resolved_modules = []
-        missing_modules = []
-        architecture_mismatches = []
-        missing_exports = []
+        static_res = cls._audit_module_map(
+            imports,
+            binary_path=binary_path,
+            is_binary_64=is_binary_64,
+            search_dirs=search_dirs,
+            known_dlls=known_dlls,
+            manifest_text=manifest_text,
+            app_dirs_to_skip=app_dirs_to_skip,
+            is_delay_load=False,
+        )
+        delay_res = cls._audit_module_map(
+            delay_imports,
+            binary_path=binary_path,
+            is_binary_64=is_binary_64,
+            search_dirs=search_dirs,
+            known_dlls=known_dlls,
+            manifest_text=manifest_text,
+            app_dirs_to_skip=app_dirs_to_skip,
+            is_delay_load=True,
+        ) if delay_imports else {
+            "resolved": [], "missing": [], "architecture_mismatches": [], "missing_exports": []
+        }
 
-        for dll_name, imported_funcs in imports.items():
-            is_virtual_api_set = cls.is_api_set(dll_name)
-            is_known = dll_name.lower() in known_dlls
-            search_name = cls.resolve_api_set_target(dll_name) if is_virtual_api_set else dll_name
-
-            # 1. Check Side-by-Side (SxS) assembly context first (e.g. COMCTL32 v6, GDI+, CRT)
-            sxs_path = cls.resolve_sxs_dll(
-                search_name,
-                binary_path=binary_path,
-                is_64bit=is_binary_64,
-                manifest_text=manifest_text
-            )
-            is_sxs = sxs_path is not None
-
-            if sxs_path:
-                located_path = sxs_path
-            else:
-                # KnownDLLs are loaded directly from system directory, bypassing all application directories
-                effective_search_dirs = (
-                    [d for d in search_dirs if os.path.abspath(d) not in app_dirs_to_skip]
-                    if is_known
-                    else search_dirs
-                )
-                located_path = cls.locate_dll(search_name, effective_search_dirs)
-
-            if not located_path:
-                missing_modules.append({
-                    "imported_name": dll_name,
-                    "resolved_as": search_name,
-                    "is_api_set": is_virtual_api_set,
-                    "is_known_dll": is_known,
-                    "is_sxs_assembly": False,
-                    "functions_count": len(imported_funcs),
-                    "functions_preview": imported_funcs[:5]
-                })
-                continue
-
-            # Verify DLL architecture
-            try:
-                dll_pe = BinaryFormatInspector.inspect(located_path)
-                dll_is_64 = dll_pe.get("pe_type", "").startswith("PE32+")
-                if dll_pe.get("format") == "PE" and dll_is_64 != is_binary_64:
-                    architecture_mismatches.append({
-                        "dll_name": dll_name,
-                        "located_path": located_path,
-                        "binary_arch": "PE32+ (64-bit)" if is_binary_64 else "PE32 (32-bit)",
-                        "dll_arch": "PE32+ (64-bit)" if dll_is_64 else "PE32 (32-bit)"
-                    })
-
-                # Verify exported functions
-                if dll_pe.get("format") == "PE" and not is_virtual_api_set:
-                    exported_list = dll_pe.get("exports", {}).get("functions", [])
-                    exported_names: Set[str] = {e["name"] for e in exported_list if e.get("name")}
-                    exported_ordinals: Set[int] = {e["ordinal"] for e in exported_list if e.get("ordinal") is not None}
-
-                    for fn in imported_funcs:
-                        if fn.startswith("Ordinal_"):
-                            try:
-                                ord_num = int(fn.split("_")[1])
-                                if ord_num not in exported_ordinals:
-                                    missing_exports.append({
-                                        "dll_name": dll_name,
-                                        "located_path": located_path,
-                                        "missing_symbol": fn
-                                    })
-                            except (IndexError, ValueError):
-                                pass
-                        else:
-                            if fn and fn not in exported_names:
-                                missing_exports.append({
-                                    "dll_name": dll_name,
-                                    "located_path": located_path,
-                                    "missing_symbol": fn
-                                })
-
-            except Exception:
-                pass
-
-            resolved_modules.append({
-                "imported_name": dll_name,
-                "is_api_set": is_virtual_api_set,
-                "is_known_dll": is_known,
-                "is_sxs_assembly": is_sxs,
-                "located_path": located_path,
-                "imported_functions_count": len(imported_funcs)
-            })
+        resolved_modules = static_res["resolved"]
+        missing_modules = static_res["missing"]
+        architecture_mismatches = static_res["architecture_mismatches"]
+        missing_exports = static_res["missing_exports"]
 
         has_critical_failure = (len(missing_modules) > 0 or len(architecture_mismatches) > 0 or len(missing_exports) > 0)
+        has_delay_failure = (
+            len(delay_res["missing"]) > 0
+            or len(delay_res["architecture_mismatches"]) > 0
+            or len(delay_res["missing_exports"]) > 0
+        )
         verdict = "HEALTHY" if not has_critical_failure else "DEPENDENCY_INTEGRITY_FAILURE"
+        delay_verdict = (
+            "NO_DELAY_IMPORTS"
+            if not delay_imports
+            else ("DELAY_DEPENDENCY_ISSUES_DETECTED" if has_delay_failure else "HEALTHY")
+        )
 
         return {
             "status": "success",
@@ -512,15 +576,23 @@ class WindowsDependencyResolver:
             "loader_mode": "WOW64 (32-on-64)" if is_32bit_on_64bit else "Native",
             "known_dlls_enforced": len(known_dlls),
             "verdict": verdict,
+            "delay_dependency_health": delay_verdict,
             "total_imported_dlls": len(imports),
             "resolved_dlls_count": len(resolved_modules),
             "missing_dlls_count": len(missing_modules),
             "architecture_mismatches_count": len(architecture_mismatches),
             "missing_exports_count": len(missing_exports),
             "sxs_assemblies_count": sum(1 for m in resolved_modules if m.get("is_sxs_assembly", False)),
+            "delay_imported_dlls_count": len(delay_imports),
+            "resolved_delay_dlls_count": len(delay_res["resolved"]),
+            "missing_delay_dlls_count": len(delay_res["missing"]),
             "resolved_dlls": resolved_modules,
             "missing_dlls": missing_modules,
             "architecture_mismatches": architecture_mismatches,
             "missing_exports": missing_exports,
+            "resolved_delay_dlls": delay_res["resolved"],
+            "missing_delay_dlls": delay_res["missing"],
+            "delay_architecture_mismatches": delay_res["architecture_mismatches"],
+            "delay_missing_exports": delay_res["missing_exports"],
             "search_directories": search_dirs[:8]
         }

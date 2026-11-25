@@ -104,6 +104,7 @@ WTD_CACHE_ONLY_URL_RETRIEVAL = 0x00001000
 
 # Win32 Trust Error Codes (HRESULT / WinError)
 ERROR_SUCCESS = 0x00000000
+TRUST_E_SUBJECT_FORM_UNKNOWN = 0x800B0003
 TRUST_E_NOSIGNATURE = 0x800B0100
 CERT_E_EXPIRED = 0x800B0101
 CERT_E_UNTRUSTEDROOT = 0x800B0109
@@ -295,6 +296,8 @@ class WindowsSignatureIntelligence:
             risk_flags.append("UNVERIFIED_HEURISTIC_PARSED_SIGNATURE")
         elif trust_stat == "REVOCATION_UNKNOWN":
             risk_flags.append("REVOCATION_CHECK_UNAVAILABLE")
+        elif trust_stat == "NOT_AUTHENTICODE_FORMAT":
+            risk_flags.append("NON_AUTHENTICODE_FILE_FORMAT")
         elif trust_stat == "VERIFICATION_ERROR":
             risk_flags.append("WINTRUST_VERIFICATION_ERROR")
 
@@ -354,6 +357,7 @@ class WindowsSignatureIntelligence:
             "unsigned": 0,
             "tampered": 0,
             "untrusted_or_expired": 0,
+            "unsupported_format": 0,
             "microsoft_system_binaries": 0,
             "scan_errors": 0,
         }
@@ -373,6 +377,8 @@ class WindowsSignatureIntelligence:
                     counts["unsigned"] += 1
                 elif t_stat == "TAMPERED":
                     counts["tampered"] += 1
+                elif t_stat == "NOT_AUTHENTICODE_FORMAT":
+                    counts["unsupported_format"] += 1
                 elif t_stat in ("CORRUPTED_OR_MALFORMED_PE", "MALFORMED"):
                     counts["scan_errors"] += 1
                 else:
@@ -1310,6 +1316,8 @@ class WindowsSignatureIntelligence:
             return "TAMPERED"
         if raw_code == TRUST_E_TIME_STAMP:
             return "INVALID_TIMESTAMP"
+        if raw_code == TRUST_E_SUBJECT_FORM_UNKNOWN:
+            return "NOT_AUTHENTICODE_FORMAT"
         return "VERIFICATION_ERROR"
 
     @staticmethod
@@ -1390,5 +1398,6 @@ class WindowsSignatureIntelligence:
             TRUST_E_EXPLICIT_DISTRUST: "Certificate is explicitly marked as distrusted in Windows certificate store.",
             TRUST_E_TIME_STAMP: "Timestamp counter-signature verification failed.",
             TRUST_E_BAD_DIGEST: "File hash does not match signature (file was tampered with or corrupted).",
+            TRUST_E_SUBJECT_FORM_UNKNOWN: "File format is not a supported Authenticode container (e.g. non-PE binary or data plugin).",
         }
         return mapping.get(code, f"WinVerifyTrust verification error code: {hex(code)}")

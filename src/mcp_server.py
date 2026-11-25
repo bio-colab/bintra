@@ -2147,39 +2147,38 @@ class BintraMcpServer:
             if not payload and not input_file:
                 raise ValueError("Must provide 'payload' object or valid 'input_file'")
 
-            store = GhidraExportStore.from_path(input_file if input_file else payload)
+            with GhidraExportStore.from_path(input_file if input_file else payload) as store:
+                # 1. Targeted single-function deep architectural inspection
+                fn_target = args.get("function_name")
+                if fn_target:
+                    res = store.inspect_function(fn_target)
+                    if not res:
+                        return {"status": "not_found", "function_name": fn_target}
+                    return res
 
-            # 1. Targeted single-function deep architectural inspection
-            fn_target = args.get("function_name")
-            if fn_target:
-                res = store.inspect_function(fn_target)
-                if not res:
-                    return {"status": "not_found", "function_name": fn_target}
-                return res
+                # 2. Advanced search across functions, opcodes, xrefs, and decompiled C
+                query = args.get("query")
+                opcode_filter = args.get("opcode_filter")
+                xref_target = args.get("xref_target")
+                sensitive_only = bool(args.get("sensitive_only", False))
+                if query or opcode_filter or xref_target or sensitive_only:
+                    limit = int(args.get("limit", 50))
+                    offset = int(args.get("offset", 0))
+                    return store.search_functions(
+                        query=query,
+                        opcode=opcode_filter,
+                        xref_target=xref_target,
+                        sensitive_only=sensitive_only,
+                        limit=limit,
+                        offset=offset
+                    )
 
-            # 2. Advanced search across functions, opcodes, xrefs, and decompiled C
-            query = args.get("query")
-            opcode_filter = args.get("opcode_filter")
-            xref_target = args.get("xref_target")
-            sensitive_only = bool(args.get("sensitive_only", False))
-            if query or opcode_filter or xref_target or sensitive_only:
-                limit = int(args.get("limit", 50))
-                offset = int(args.get("offset", 0))
-                return store.search_functions(
-                    query=query,
-                    opcode=opcode_filter,
-                    xref_target=xref_target,
-                    sensitive_only=sensitive_only,
-                    limit=limit,
-                    offset=offset
-                )
+                # 3. Global computational and architectural profile
+                if args.get("profile"):
+                    return store.query_computational_profile()
 
-            # 3. Global computational and architectural profile
-            if args.get("profile"):
-                return store.query_computational_profile()
-
-            # 4. Standard batch mutation plan generation (default)
-            return GhidraAnnotationPlanner.analyze_program_export(store)
+                # 4. Standard batch mutation plan generation (default)
+                return GhidraAnnotationPlanner.analyze_program_export(store)
 
         elif name == "bintra_ghidra_headless":
             from security import ExecutionGuard, Capability
@@ -2264,8 +2263,16 @@ class BintraMcpServer:
             return DiagnosticEvidenceCorrelator.correlate(b, crash_record=c, ghidra_export=g)
 
         elif name == "bintra_win_catalog_cmd":
-            from windows_intelligence import CommandExecutor
-            cmd_id = args.get("command_id", "")
+            from windows_intelligence import CommandCatalog, CommandExecutor
+            cmd_id = str(args.get("command_id", "")).strip()
+            if cmd_id.lower() in ("list", "__list__"):
+                commands = CommandCatalog.list_available_commands()
+                return {
+                    "status": "success",
+                    "action": "list",
+                    "commands_count": len(commands),
+                    "commands": commands,
+                }
             flags = tuple(args.get("extra_flags", [])) if args.get("extra_flags") else None
             return CommandExecutor.execute(cmd_id, extra_flags=flags)
 

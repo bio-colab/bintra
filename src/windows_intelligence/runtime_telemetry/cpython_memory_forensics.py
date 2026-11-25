@@ -178,7 +178,8 @@ class CPythonMemoryForensics:
 
         read_sz = 128 if object_type in ("pyascii", "pylong") else 64
         mem = VirtualMemoryInspector._read_memory_internal(pid, address, read_sz, allow_partial=True)
-        if mem.get("status") != "ok" or not mem.get("data"):
+        _ok_statuses = ("ok", "success", "partial")
+        if mem.get("status") not in _ok_statuses or not mem.get("data"):
             return {
                 "status": "error",
                 "pid": pid,
@@ -193,7 +194,7 @@ class CPythonMemoryForensics:
             keys_ptr = int(parsed.get("ma_keys_ptr", "0x0"), 16)
             if keys_ptr:
                 kmem = VirtualMemoryInspector._read_memory_internal(pid, keys_ptr, 256, allow_partial=True)
-                if kmem.get("status") == "ok" and kmem.get("data"):
+                if kmem.get("status") in _ok_statuses and kmem.get("data"):
                     parsed = cls.inspect_pydict_buffer(raw, keys_raw=kmem["data"], base_address=address)
         elif object_type == "pyascii":
             parsed = cls.inspect_pyascii_buffer(raw, base_address=address)

@@ -2373,44 +2373,42 @@ def _dispatch_cli():
                 print(json.dumps({"status": "ok", "action": "exported_to_sqlite", "sqlite_db": args.to_sqlite}, indent=2))
                 return
 
-            store = GhidraExportStore.from_path(args.input)
+            with GhidraExportStore.from_path(args.input) as store:
+                # 1. Inspect single function
+                if args.function:
+                    res = store.inspect_function(args.function)
+                    if not res:
+                        print(json.dumps({"status": "not_found", "function_name": args.function}, indent=2))
+                    else:
+                        print(json.dumps(res, indent=2))
+                    return
 
-            # 1. Inspect single function
-            if args.function:
-                res = store.inspect_function(args.function)
-                if not res:
-                    print(json.dumps({"status": "not_found", "function_name": args.function}, indent=2))
-                else:
+                # 2. Search / Query functions
+                if args.query or args.opcode or args.xref or args.sensitive_only:
+                    res = store.search_functions(
+                        query=args.query,
+                        opcode=args.opcode,
+                        xref_target=args.xref,
+                        sensitive_only=args.sensitive_only,
+                        limit=args.limit
+                    )
                     print(json.dumps(res, indent=2))
-                return
+                    return
 
-            # 2. Search / Query functions
-            if args.query or args.opcode or args.xref or args.sensitive_only:
-                res = store.search_functions(
-                    query=args.query,
-                    opcode=args.opcode,
-                    xref_target=args.xref,
-                    sensitive_only=args.sensitive_only,
-                    limit=args.limit
-                )
-                print(json.dumps(res, indent=2))
-                return
+                # 3. Global computational profile
+                if args.profile:
+                    res = store.query_computational_profile()
+                    print(json.dumps(res, indent=2))
+                    return
 
-            # 3. Global computational profile
-            if args.profile:
-                res = store.query_computational_profile()
-                print(json.dumps(res, indent=2))
+                # 4. Batch annotation plan (default)
+                plan = GhidraAnnotationPlanner.analyze_program_export(store)
+                if args.output:
+                    SafeFileAccess.write_workspace_file(args.output, json.dumps(plan, indent=2))
+                print(json.dumps(plan, indent=2))
                 return
-
-            # 4. Batch annotation plan (default)
-            plan = GhidraAnnotationPlanner.analyze_program_export(store)
-            if args.output:
-                SafeFileAccess.write_workspace_file(args.output, json.dumps(plan, indent=2))
-            print(json.dumps(plan, indent=2))
-            return
         elif cmd == "ghidra-headless":
-            parser = argparse.ArgumentParser(description="Run Ghidra headless analysis with Bintra bridge script")
-            parser.add_argument("command")
+            parser = argparse.ArgumentParser(prog="bintra ghidra-headless", description="Run Ghidra headless analysis with Bintra bridge script")
             parser.add_argument("--binary", "--file", "--input", dest="binary", required=True, help="Path to target executable (PE/ELF)")
             parser.add_argument("--ghidra-path", default=None, help="Ghidra installation directory (default: auto-discover)")
             parser.add_argument("--project-dir", default=None, help="Ghidra project directory (default: temp)")
@@ -2826,8 +2824,8 @@ def _dispatch_cli():
         ns = ap.parse_args(sys.argv[2:])
         from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
         from ghidra_export_store import GhidraExportStore
-        store = GhidraExportStore.from_path(ns.input)
-        print(json.dumps(GhidraDeepAnalyzer().build_call_graph_and_xrefs(store, target_function=ns.function, max_depth=ns.max_depth), indent=2))
+        with GhidraExportStore.from_path(ns.input) as store:
+            print(json.dumps(GhidraDeepAnalyzer().build_call_graph_and_xrefs(store, target_function=ns.function, max_depth=ns.max_depth), indent=2))
 
     elif cmd == "ghidra-dataflow":
         ap = argparse.ArgumentParser(prog="bintra ghidra-dataflow")
@@ -2837,12 +2835,12 @@ def _dispatch_cli():
         ns = ap.parse_args(sys.argv[2:])
         from ghidra_pcode_vectorizer import GhidraDeepAnalyzer
         from ghidra_export_store import GhidraExportStore
-        store = GhidraExportStore.from_path(ns.input)
-        fn_obj = store.get_function(ns.function)
-        if not fn_obj:
-            print(json.dumps({"status": "not_found", "function": ns.function}, indent=2))
-            sys.exit(1)
-        print(json.dumps(GhidraDeepAnalyzer().slice_data_flow(fn_obj, target_var=ns.var), indent=2))
+        with GhidraExportStore.from_path(ns.input) as store:
+            fn_obj = store.get_function(ns.function)
+            if not fn_obj:
+                print(json.dumps({"status": "not_found", "function": ns.function}, indent=2))
+                sys.exit(1)
+            print(json.dumps(GhidraDeepAnalyzer().slice_data_flow(fn_obj, target_var=ns.var), indent=2))
 
     elif cmd == "ghidra-similar":
         ap = argparse.ArgumentParser(
@@ -2871,14 +2869,14 @@ def _dispatch_cli():
             if not isinstance(ref_pcode, list) or not ref_pcode:
                 print(json.dumps({"status": "error", "message": "P-code reference file must contain a non-empty list of operations."}, indent=2))
                 sys.exit(1)
-        store = GhidraExportStore.from_path(ns.input)
-        sim_res = store.search_similar_functions(
-            reference_function=ns.function,
-            reference_pcode=ref_pcode,
-            threshold=ns.threshold,
-            limit=ns.limit,
-            min_pcode_ops=ns.min_pcode_ops,
-        )
+        with GhidraExportStore.from_path(ns.input) as store:
+            sim_res = store.search_similar_functions(
+                reference_function=ns.function,
+                reference_pcode=ref_pcode,
+                threshold=ns.threshold,
+                limit=ns.limit,
+                min_pcode_ops=ns.min_pcode_ops,
+            )
         if ns.format == "md":
             md_lines = ["# Bintra P-Code Similar Function Search", ""]
             md_lines.append(f"- **Export:** `{ns.input}`")

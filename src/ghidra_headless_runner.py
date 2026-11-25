@@ -31,6 +31,10 @@ SCRIPT_ERROR_MARKERS = [
     "GhidraScriptLoadException",
     "RuntimeException:",
     "ERROR (GhidraScript)",
+    "ERROR: Failed to find a supported JDK",
+    "Failed to find a supported JDK",
+    "JDK 21+ (64-bit) could not be found",
+    "NullPointerException",
 ]
 
 
@@ -152,6 +156,7 @@ class GhidraHeadlessRunner:
         try:
             proc = subprocess.run(
                 cmd,
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

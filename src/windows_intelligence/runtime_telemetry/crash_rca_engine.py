@@ -176,7 +176,13 @@ class CrashRootCauseAnalyzer:
             "memory_spatial_classification": spatial_verdict,
             "disassembly_window": disasm_report,
             "blame_details": blame_analysis,
-            "remediation_advice": cls._generate_remediation(root_cause, culprit_reg, fault_module, fault_rva)
+            "remediation_advice": cls._generate_remediation(
+                root_cause,
+                culprit_reg,
+                fault_module,
+                fault_rva,
+                probable_caller=blame_analysis.get("probable_caller"),
+            )
         }
 
     @classmethod
@@ -897,10 +903,32 @@ class CrashRootCauseAnalyzer:
         root_cause: str,
         culprit_reg: Optional[str],
         module: str,
-        rva: int
+        rva: int,
+        probable_caller: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Synthesizes actionable remediation instructions for the software developer."""
         rva_hex = f"0x{rva:X}"
+        if root_cause in ("NULL_FUNCTION_POINTER_CALL", "INVALID_CONTROL_TRANSFER"):
+            caller_mod = (probable_caller or {}).get("module")
+            caller_rva = (probable_caller or {}).get("module_rva")
+            caller_ret = (probable_caller or {}).get("return_address")
+            if caller_mod and caller_rva:
+                caller_loc = (
+                    f"`{caller_mod}+{caller_rva}` (return address `{caller_ret}`)"
+                    if caller_ret
+                    else f"`{caller_mod}+{caller_rva}`"
+                )
+                if root_cause == "NULL_FUNCTION_POINTER_CALL":
+                    return (
+                        f"Control transferred to NULL/zero through an indirect call, jump, or vtable slot "
+                        f"near probable caller {caller_loc}. Inspect the indirect call site preceding "
+                        f"`{caller_mod}+{caller_rva}` and guard the function/vtable pointer against `nullptr`."
+                    )
+                return (
+                    f"Control transferred to non-executable or unmapped memory near `{module}+{rva_hex}` "
+                    f"from probable caller {caller_loc}. Audit indirect call targets, vtable integrity, "
+                    f"and stack return addresses around `{caller_mod}+{caller_rva}`."
+                )
         if "NULL_POINTER" in root_cause:
             reg_name = culprit_reg or "object pointer"
             return (

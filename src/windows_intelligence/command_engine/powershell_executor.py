@@ -7,10 +7,9 @@ or executing unverified script blocks.
 
 import os
 import json
-import subprocess
 from security import ExecutionGuard, Capability
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
 
 class PowerShellExecutor:

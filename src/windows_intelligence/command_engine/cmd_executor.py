@@ -5,14 +5,12 @@ Executes pre-registered, read-only Windows commands strictly without shell=True,
 enforcing timeouts, build compatibility gates, and typed schema validation.
 """
 
-import os
 import sys
 import time
-import subprocess
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple
 
-from .command_catalog import CommandCatalog, CommandSpec
+from .command_catalog import CommandCatalog
 from .output_parsers import OutputParsers
 
 

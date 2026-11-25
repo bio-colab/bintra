@@ -6,8 +6,8 @@ disabled security controls, DLL search vulnerabilities, and WOW64 view conflicts
 """
 
 import sys
-from typing import Dict, Any, List, Optional
-from .registry_catalog import RegistryCatalog, RegistryKeySpec
+from typing import Dict, Any, Optional
+from .registry_catalog import RegistryCatalog
 from .registry_reader import WindowsRegistryReader
 
 

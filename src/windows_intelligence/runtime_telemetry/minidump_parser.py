@@ -114,7 +114,7 @@ class MiniDumpParser:
         Stream 6 (Exception), Stream 4 (Modules), Stream 7 (SystemInfo),
         Stream 3 (Threads), and Stream 10 (MiscInfo).
         """
-        from security import ExecutionGuard, Capability, SecurityViolationError
+        from security import ExecutionGuard, Capability
         ExecutionGuard.request_access(
             component="minidump_parser",
             operation="parse_minidump",
@@ -486,8 +486,6 @@ class MiniDumpParser:
         vals = struct.unpack(fmt, exc_bytes)
         thread_id = vals[0]
         exc_code = vals[2]
-        exc_flags = vals[3]
-        exc_record = vals[4]
         exc_addr = vals[5]
         num_params = vals[6]
         params = list(vals[8:23])[:min(num_params, 15)]

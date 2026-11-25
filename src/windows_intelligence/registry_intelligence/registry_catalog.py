@@ -6,7 +6,7 @@ significance definitions, target values, and expected data types.
 """
 
 from dataclasses import dataclass
-from typing import Dict, Any, List, Optional, Tuple
+from typing import List, Tuple
 
 
 @dataclass(frozen=True)

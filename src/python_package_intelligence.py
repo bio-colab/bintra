@@ -17,9 +17,7 @@ from __future__ import annotations
 import ast
 import os
 import re
-from collections import defaultdict, deque
-from dataclasses import dataclass, field
-from pathlib import Path
+from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from security import Capability, ExecutionGuard, PathIdentity
@@ -383,7 +381,7 @@ class PythonPackageArchitect:
                                                     "risk": "QUADRATIC_STRING_CONCATENATION_IN_LOOP"
                                                 })
 
-        except Exception as exc:
+        except Exception:
             pass
 
         return {

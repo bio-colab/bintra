@@ -138,9 +138,9 @@ class AuditLogger:
     # SAME hash chain. Startup verification is therefore bounded by the segment size instead
     # of growing with every command ever run (BINTRA_AUDIT_SEGMENT_MB overrides; 0 disables).
     try:
-        _segment_max_bytes = int(float(os.environ.get("BINTRA_AUDIT_SEGMENT_MB", "8")) * 1024 * 1024)
+        _segment_max_bytes = int(float(os.environ.get("BINTRA_AUDIT_SEGMENT_MB", "2")) * 1024 * 1024)
     except ValueError:
-        _segment_max_bytes = 8 * 1024 * 1024
+        _segment_max_bytes = 2 * 1024 * 1024
 
     # Patterns for sensitive credentials to scrub
     _SENSITIVE_PATTERNS = [
@@ -278,16 +278,70 @@ class AuditLogger:
         segs = cls._sealed_segments(target_file)
         if not segs:
             return None
+        cache = cls._load_sealed_cache(target_file)
+        cache_dirty = False
         next_seq = 0
         head_hash = "0" * 64
         last_rec: Optional[Dict[str, Any]] = None
         for seg_path in segs:
-            prev_seq = next_seq
-            next_seq, head_hash, seg_tail = cls._verify_segment_file(seg_path, next_seq, head_hash)
+            prev_seq, prev_hash = next_seq, head_hash
+            key = os.path.basename(seg_path)
+            digest = cls._file_sha256(seg_path)
+            entry = cache.get(key)
+            if (
+                isinstance(entry, dict)
+                and entry.get("sha256") == digest
+                and entry.get("start_seq") == prev_seq
+                and entry.get("start_prev") == prev_hash
+                and isinstance(entry.get("tail"), dict)
+            ):
+                # Sealed segments are immutable: an identical byte-level digest of a segment that
+                # was fully verified from the same chain position proves it is still intact.
+                next_seq, head_hash, seg_tail = entry["next_seq"], entry["head_hash"], entry["tail"]
+            else:
+                next_seq, head_hash, seg_tail = cls._verify_segment_file(seg_path, prev_seq, prev_hash)
+                cache[key] = {
+                    "sha256": digest, "start_seq": prev_seq, "start_prev": prev_hash,
+                    "next_seq": next_seq, "head_hash": head_hash, "tail": seg_tail,
+                }
+                cache_dirty = True
             if next_seq == prev_seq or not seg_tail:
                 raise AuditIntegrityError(f"Sealed audit segment '{seg_path}' is empty or has no readable records.")
             last_rec = seg_tail
+        if cache_dirty:
+            cls._store_sealed_cache(target_file, cache)
         return last_rec
+
+    @staticmethod
+    def _file_sha256(path: str) -> str:
+        h = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    @staticmethod
+    def _sealed_cache_path(target_file: str) -> str:
+        return f"{target_file}.sealedcache.json"
+
+    @classmethod
+    def _load_sealed_cache(cls, target_file: str) -> Dict[str, Any]:
+        try:
+            with open(cls._sealed_cache_path(target_file), "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    @classmethod
+    def _store_sealed_cache(cls, target_file: str, cache: Dict[str, Any]) -> None:
+        tmp = cls._sealed_cache_path(target_file) + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(cache, fh, ensure_ascii=False)
+            os.replace(tmp, cls._sealed_cache_path(target_file))
+        except OSError:
+            pass  # the cache is an optimisation only; verification already succeeded
 
     @classmethod
     def _seal_active_segment_locked(cls, target_file: str) -> Optional[str]:
@@ -308,8 +362,11 @@ class AuditLogger:
         return sealed
 
     @classmethod
-    def _recover_chain_locked(cls, target_file: str) -> Dict[str, Any]:
-        """Must be called while holding cls._lock."""
+    def _recover_chain_locked(cls, target_file: str, allow_seal: bool = True) -> Dict[str, Any]:
+        """
+        Must be called while holding cls._lock. `allow_seal` must only be True for the active
+        journal while the inter-process lock is held (archives are never re-sealed).
+        """
         anchor = cls._sealed_anchor(target_file)
         start_seq = int(anchor["sequence"]) + 1 if anchor else 0
         start_hash = anchor["record_hash"] if anchor else "0" * 64
@@ -335,7 +392,7 @@ class AuditLogger:
         res = {"recovered": True, "records_count": len(records), "head_hash": expected_prev}
         if anchor:
             res["sealed_anchor_sequence"] = anchor["sequence"]
-        sealed = cls._seal_active_segment_locked(target_file)
+        sealed = cls._seal_active_segment_locked(target_file) if allow_seal else None
         if sealed:
             res["sealed_segment"] = sealed
         return res
@@ -367,9 +424,10 @@ class AuditLogger:
         with cls._lock:
             target_file = log_path or cls._log_file
             lock_path = (target_file or "") + ".lock"
-            with _ProcessFileLock(lock_path):
+            with _ProcessFileLock(lock_path) as plock:
                 cls._explicitly_cleared = False
-                return cls._recover_chain_locked(target_file)
+                is_active = bool(cls._log_file) and os.path.abspath(target_file) == os.path.abspath(cls._log_file)
+                return cls._recover_chain_locked(target_file, allow_seal=is_active and plock.acquired)
 
     @classmethod
     def ensure_chain_continuity(cls, log_path: Optional[str] = None, rotate_on_corrupt: bool = False) -> Dict[str, Any]:
@@ -385,13 +443,13 @@ class AuditLogger:
                 return {"recovered": False, "records_count": 0, "skipped": "cleared_test_state"}
 
             lock_path = (target_file or "") + ".lock"
-            with _ProcessFileLock(lock_path):
+            with _ProcessFileLock(lock_path) as plock:
                 res: Dict[str, Any]
                 if cls._sequence > 0 and cls._journal:
                     res = {"recovered": True, "records_count": len(cls._journal), "head_hash": cls._last_hash}
                 else:
                     try:
-                        res = cls._recover_chain_locked(target_file)
+                        res = cls._recover_chain_locked(target_file, allow_seal=plock.acquired)
                     except AuditIntegrityError as err:
                         sealed_segs = cls._sealed_segments(target_file) if target_file else []
                         if not rotate_on_corrupt or (not os.path.exists(target_file) and not sealed_segs):
@@ -482,7 +540,20 @@ class AuditLogger:
 
         with cls._lock:
             lock_path = (cls._log_file or "") + ".lock"
-            with _ProcessFileLock(lock_path):
+            with _ProcessFileLock(lock_path) as plock:
+                if cls._log_file and not plock.acquired and not cls._explicitly_cleared:
+                    # Never append without the inter-process lock: two writers would emit the
+                    # same sequence number and silently break the hash chain on disk. The
+                    # decision is reported (audit marked degraded) but not chained or persisted.
+                    cls._audit_degraded = True
+                    cls._degraded_reason = cls._degraded_reason or f"Audit lock '{lock_path}' not acquired; record not persisted."
+                    return {
+                        "sequence": None, "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "component": clean_component, "operation": clean_op, "target": clean_target,
+                        "requested_capability": requested_capability, "decision": decision.upper(),
+                        "reason": clean_reason, "side_effects": side_effects or [], "result": result.upper(),
+                        "metadata": clean_meta, "persisted": False,
+                    }
                 # Synchronize with on-disk state if another process appended
                 if cls._log_file and not cls._explicitly_cleared:
                     disk_tail = None

@@ -102,7 +102,7 @@ class PolicyEngine:
         if cap == Capability.GHIDRA_PROJECT_MUTATE:
             return AccessDecision(
                 verdict="ALLOW_SCOPED",
-                reason=f"Authorized Ghidra project database mutation in quarantined temp project.",
+                reason="Authorized Ghidra project database mutation in quarantined temp project.",
                 capability=cap,
                 side_effects=["ghidra_project_mutation"]
             )
@@ -116,7 +116,7 @@ class PolicyEngine:
                 if comp != "ghidra_live_bridge" or request.operation != "write_tempdir_discovery_marker":
                     return AccessDecision(
                         verdict="DENY",
-                        reason=f"CAPABILITY_MISMATCH: TEMPDIR_MARKER_WRITE is reserved exclusively for ghidra_live_bridge marker publication.",
+                        reason="CAPABILITY_MISMATCH: TEMPDIR_MARKER_WRITE is reserved exclusively for ghidra_live_bridge marker publication.",
                         capability=cap
                     )
                 expected_temp_marker = os.path.join(tempfile.gettempdir(), ".bintra_bridge.json")

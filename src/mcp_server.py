@@ -17,7 +17,6 @@ from token_telemetry import (
     TokenSessionTracker,
     compact_tool_schema,
     estimate_tokens,
-    estimate_cost_usd,
     prune_payload,
 )
 from typing import Dict, Any, List, Optional
@@ -29,7 +28,6 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 try:
-    import numpy as np
     from binary_neural_engine import (
         BinaryFormatInspector,
         ContinuousDeobfuscator,
@@ -40,15 +38,12 @@ try:
     )
     from bintra_engine import (
         SafetensorsHandler,
-        SubspaceAnalyzer,
-        CircuitDecompiler,
         WeightPatcher,
         WeightSecurityAuditor,
         CrossLayerCircuitAnalyzer,
         AmenabilityDiagnostic,
     )
     from ghidra_pcode_vectorizer import (
-        PcodeVectorizer,
         PcodeFunctionMatcher,
         PcodeDeobfuscator,
         GhidraAnnotationPlanner,
@@ -1923,7 +1918,7 @@ class BintraMcpServer:
             tool_name = f"bintra_{tool_name}"
 
         try:
-            from security import ExecutionGuard, Capability, SecurityViolationError, TargetMutationError, PathIdentity
+            from security import ExecutionGuard, Capability, SecurityViolationError
 
             sec_meta = self.TOOL_SECURITY_METADATA.get(tool_name)
             if not sec_meta:
@@ -2466,7 +2461,7 @@ class BintraMcpServer:
 
         elif name == "bintra_ghidra_live_bridge":
             from ghidra_live_bridge import (
-                GhidraLiveBridgeServer, GhidraLiveBridgeClient,
+                GhidraLiveBridgeClient,
                 get_or_create_bridge, get_active_bridge, stop_active_bridge
             )
             act = args.get("action", "status")
@@ -2877,7 +2872,7 @@ class BintraMcpServer:
 
         elif name == "bintra_binary_diff":
             from pe_deep_forensics import SemanticBinaryDiffer
-            from security import SafeFileAccess, TargetScope, ExecutionGuard, Capability
+            from security import ExecutionGuard, Capability
             mode_val = args.get("mode", "pe")
             b_path = args["baseline_path"]
             t_path = args["target_path"]

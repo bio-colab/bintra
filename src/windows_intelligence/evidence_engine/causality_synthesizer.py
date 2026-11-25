@@ -8,7 +8,6 @@ Implements strict epistemic rigor: partitioning findings into FACTS, OBSERVATION
 """
 
 import os
-import sys
 from typing import Dict, Any, List, Optional
 
 from binary_neural_engine import BinaryFormatInspector

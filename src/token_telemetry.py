@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import re
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 # Pricing in USD per 1,000,000 tokens (input, output)

@@ -5,8 +5,7 @@ Maps Windows Service Control Manager (SCM) service definitions to active process
 and resolves shared service host (svchost.exe) groups to identify which services run inside which processes.
 """
 
-import os
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from ..system_introspection.service_inspector import ServiceManagerInspector
 from .process_inventory import ProcessInventory
 

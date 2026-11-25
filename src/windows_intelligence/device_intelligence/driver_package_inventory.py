@@ -6,7 +6,6 @@ installed OEM and inbox driver packages (.inf, .cat, .sys).
 """
 
 import os
-import glob
 import re
 from typing import Dict, Any, List, Optional
 from ..command_engine.cmd_executor import CommandExecutor

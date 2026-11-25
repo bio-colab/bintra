@@ -12,6 +12,7 @@ import os
 import time
 import json
 import argparse
+from typing import Any, Dict
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
@@ -346,10 +347,9 @@ def _dispatch_cli():
         from windows_intelligence import (
             WindowsOSProfiler, WindowsDependencyResolver, WindowsDeviceInspector,
             WindowsSecurityInspector, WindowsCrashAnalyzer, DiagnosticEvidenceCorrelator,
-            CommandCatalog, CommandExecutor, PowerShellExecutor,
-            RegistryCatalog, WindowsRegistryReader, WindowsRegistryAnalyzer,
+            CommandCatalog, CommandExecutor, WindowsRegistryReader, WindowsRegistryAnalyzer,
             NativeDeviceInspector, KernelDriverInspector, ServiceManagerInspector, ProcessMitigationInspector,
-            MiniDumpParser, EventLogCollector, EtwController, VirtualMemoryInspector, CrashRootCauseAnalyzer,
+            MiniDumpParser, EtwController, VirtualMemoryInspector, CrashRootCauseAnalyzer,
             EtwLiveCaptureSession, EtwTimelineCorrelator,
             ProcessMemoryScanner, PointerScanner, StructureDissector
         )
@@ -1418,7 +1418,7 @@ def _dispatch_cli():
                     f"- **ASLR:** `{mit.get('aslr', {}).get('bottom_up_randomization')}` (High Entropy: `{mit.get('aslr', {}).get('high_entropy')}`)",
                     f"- **CFG:** `{mit.get('cfg', {}).get('enabled')}`",
                     "",
-                    f"## Network & Services",
+                    "## Network & Services",
                     f"- **Active TCP Sockets:** {len(res.get('active_tcp_connections', []))}",
                     f"- **Hosted Services:** {len(res.get('hosted_services', []))}",
                     f"- **Loaded Modules Sample:** {res.get('loaded_modules_count', 0)} total"
@@ -1801,7 +1801,6 @@ def _dispatch_cli():
             }
             scan_mode = mode_map.get(args.mode, "EXACT_VALUE")
 
-            from security import SafeFileAccess, SecurityViolationError
             sid = None
             if args.session_file and os.path.exists(args.session_file):
                 try:
@@ -2034,7 +2033,7 @@ def _dispatch_cli():
             if args.format == "md":
                 if "providers" in report and isinstance(report["providers"], list):
                     lines = [
-                        f"# ETW Registered Providers Enumeration",
+                        "# ETW Registered Providers Enumeration",
                         f"- **Total System Providers:** {report.get('total_system_providers')}",
                         f"- **Matched Providers:** {report.get('matched_count')}",
                         "",
@@ -2275,7 +2274,7 @@ def _dispatch_cli():
 
     if cmd in GHIDRA_COMMANDS:
         from ghidra_pcode_vectorizer import (
-            PcodeVectorizer, PcodeFunctionMatcher, PcodeDeobfuscator, GhidraAnnotationPlanner
+            PcodeFunctionMatcher, PcodeDeobfuscator, GhidraAnnotationPlanner
         )
         if cmd == "match-pcode":
             parser = argparse.ArgumentParser(description="Match two functions using Ghidra P-code")
@@ -2442,7 +2441,7 @@ def _dispatch_cli():
 
             from ghidra_headless_runner import GhidraHeadlessRunner
 
-            print(f"[Bintra] Launching Ghidra Headless Analyzer...")
+            print("[Bintra] Launching Ghidra Headless Analyzer...")
             print(f"[Bintra] Binary: {args.binary}")
             print(f"[Bintra] Script: {args.post_script}")
 
@@ -2499,7 +2498,7 @@ def _dispatch_cli():
             args = parser.parse_args(sys.argv[2:])
 
             from ghidra_live_bridge import (
-                GhidraLiveBridgeServer, GhidraLiveBridgeClient,
+                GhidraLiveBridgeClient,
                 get_or_create_bridge, get_active_bridge, stop_active_bridge
             )
 
@@ -2808,7 +2807,7 @@ def _dispatch_cli():
         ns = ap.parse_args(sys.argv[2:])
         from pe_deep_forensics import SemanticBinaryDiffer
         if ns.mode == "ghidra_export":
-            from security import SafeFileAccess, TargetScope
+            from security import SafeFileAccess
             b_d = json.loads(SafeFileAccess.read_bytes(ns.baseline).decode("utf-8"))
             t_d = json.loads(SafeFileAccess.read_bytes(ns.target).decode("utf-8"))
             res = SemanticBinaryDiffer().diff_function_exports(b_d.get("functions", []), t_d.get("functions", []))

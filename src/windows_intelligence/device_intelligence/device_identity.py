@@ -6,7 +6,7 @@ and revision numbers from Windows Device Instance IDs and Hardware IDs.
 """
 
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
 
 KNOWN_PCI_VENDORS = {

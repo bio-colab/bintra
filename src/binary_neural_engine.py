@@ -17,24 +17,15 @@ import hashlib
 import argparse
 import zipfile
 import mmap
-import math
 import tempfile
 import io
 from typing import Dict, Any, List, Tuple, Optional, Union
 import numpy as np
 try:
-    import capstone
     from capstone import Cs, CS_ARCH_X86, CS_MODE_64, CS_MODE_32, CS_ARCH_ARM64, CS_MODE_ARM
     HAS_CAPSTONE = True
 except ImportError:
     HAS_CAPSTONE = False
-
-try:
-    from ghidra_pcode_vectorizer import (
-        PcodeVectorizer, PcodeFunctionMatcher, PcodeDeobfuscator, GhidraAnnotationPlanner
-    )
-except ImportError:
-    pass
 
 
 def _ensure_utf8_stdio() -> None:
@@ -421,17 +412,6 @@ class BinaryFormatInspector:
             return result
 
     @staticmethod
-    def _read_cstr(f, file_size: int, offset: int, max_len: int = 256) -> str:
-        if offset < 0 or offset >= file_size:
-            return ""
-        f.seek(offset)
-        buf = f.read(min(max_len, file_size - offset))
-        nul = buf.find(b"\x00")
-        if nul != -1:
-            buf = buf[:nul]
-        return buf.decode("latin-1", errors="ignore")
-
-    @staticmethod
     def _parse_pe_rich_header(f, pe_offset: int) -> Dict[str, Any]:
         if pe_offset <= 0x80 or pe_offset > 65536:
             return {"present": False, "entries": []}
@@ -760,7 +740,7 @@ class BinaryFormatInspector:
             # If bit 0 is 0 (legacy MSVC), descriptor fields and thunks are absolute VAs.
             is_rva = bool(attrs & 1)
 
-            def _to_rva(addr_val: int) -> int:
+            def _to_rva(addr_val: int, is_rva: bool = is_rva) -> int:
                 if is_rva or addr_val == 0:
                     return addr_val
                 if image_base > 0 and addr_val >= image_base:
@@ -1596,7 +1576,6 @@ class ContinuousDeobfuscator:
             else:
                 cadence_regularity = 0.0
 
-        all_detected = sorted(list(detected_states if detected_states else set(c["state_value"] for c in state_comparisons)))
 
         return {
             "has_control_flow_flattening": has_cff,
@@ -2410,7 +2389,7 @@ class SurgicalBinaryPatcher:
         out_abs = os.path.abspath(output_path)
 
         try:
-            from security import PathIdentity, TargetMutationError, OutOfScopeError, ExecutionGuard, Capability
+            from security import PathIdentity, TargetMutationError, ExecutionGuard, Capability
             if PathIdentity.is_same_file(src_abs, out_abs):
                 raise TargetMutationError(
                     f"TARGET_WRITE_FORBIDDEN: In-place binary modification is strictly forbidden by Bintra Safety Policy. Destination '{out_abs}' matches source."
@@ -2872,9 +2851,7 @@ class SensoryCortex:
         code_hex: Optional[str] = None
     ) -> Dict[str, Any]:
         from bintra_engine import (
-            SafetensorsHandler, SubspaceAnalyzer, CircuitDecompiler, WeightPatcher,
-            ActivationTraceProber, NeuralBehaviorVerifier, CrossLayerCircuitAnalyzer,
-            AmenabilityDiagnostic, WeightSecurityAuditor
+            SafetensorsHandler, SubspaceAnalyzer, ActivationTraceProber
         )
         if file_path and not os.path.isfile(file_path):
             # Never fabricate a full sensory report for a target that does not exist.

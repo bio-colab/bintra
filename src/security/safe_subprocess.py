@@ -7,15 +7,13 @@ timeout enforcement, and output byte limits to prevent DoS.
 """
 
 import os
-import sys
 import time
 import threading
 import subprocess
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 
 from .execution_guard import ExecutionGuard, SecurityViolationError
 from .capability_registry import Capability
-from .path_identity import PathIdentity
 
 
 class SafeSubprocessBroker:

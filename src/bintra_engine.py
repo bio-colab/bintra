@@ -217,7 +217,7 @@ class SafetensorsHandler:
         out_abs = os.path.abspath(output_path)
 
         try:
-            from security import PathIdentity, TargetMutationError, OutOfScopeError, ExecutionGuard, Capability
+            from security import PathIdentity, TargetMutationError, ExecutionGuard, Capability
             if PathIdentity.is_same_file(src_abs, out_abs):
                 raise TargetMutationError(
                     f"TARGET_WRITE_FORBIDDEN: In-place model weight modification is strictly forbidden by Bintra Safety Policy. Destination '{out_abs}' cannot match source '{src_abs}'."

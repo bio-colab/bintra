@@ -17,9 +17,8 @@ import fnmatch
 import os
 import platform
 import struct
-import sys
 from ctypes import wintypes
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional
 
 from security import Capability, ExecutionGuard, PathIdentity
 

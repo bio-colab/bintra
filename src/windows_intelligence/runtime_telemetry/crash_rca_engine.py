@@ -10,16 +10,14 @@ Strictly read-only; governed by ExecutionGuard and Capability.MINIDUMP_READ.
 
 import os
 import re
-import sys
 from typing import Dict, Any, List, Optional, Tuple, Union
 
 from security.execution_guard import ExecutionGuard
 from security.capability_registry import Capability
 from .minidump_parser import MiniDumpParser
-from .virtual_memory_inspector import VirtualMemoryInspector, ProcessMemoryMapSnapshot
+from .virtual_memory_inspector import VirtualMemoryInspector
 
 try:
-    import capstone
     from capstone import Cs, CS_ARCH_X86, CS_MODE_64, CS_MODE_32
     HAS_CAPSTONE = True
 except ImportError:

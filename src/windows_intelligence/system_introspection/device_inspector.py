@@ -788,7 +788,7 @@ class NativeDeviceInspector:
                         "<IIBB??IIIII", raw, 0
                     )
 
-                    def _extract_str(offset: int) -> str:
+                    def _extract_str(offset: int, raw: bytes = raw) -> str:
                         if 0 < offset < len(raw):
                             end = raw.find(b"\x00", offset)
                             if end != -1:

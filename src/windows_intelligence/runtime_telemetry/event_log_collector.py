@@ -12,7 +12,6 @@ import time
 import datetime
 import ctypes
 from ctypes import wintypes
-import subprocess
 import xml.etree.ElementTree as ET
 from typing import Dict, Any, List, Optional
 

@@ -15,15 +15,14 @@ import math
 import os
 import re
 import struct
-from collections import Counter
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 try:
     import numpy as np
 except ImportError:
     np = None  # type: ignore
 
-from security import ExecutionGuard, Capability, SafeFileAccess, TargetScope
+from security import SafeFileAccess
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +134,6 @@ class PeDeepForensicsInspector:
         self.component_name = component_name
 
     def _read_binary_bytes(self, file_path: str) -> bytes:
-        scope = TargetScope(target_binary_path=file_path)
         return SafeFileAccess.read_bytes(file_path)
 
     def extract_pdata_functions(
@@ -504,7 +502,6 @@ class PeDeepForensicsInspector:
         }
 
         if candidate_pdb and os.path.isfile(candidate_pdb):
-            scope = TargetScope(target_binary_path=candidate_pdb)
             pdb_bytes = SafeFileAccess.read_bytes(candidate_pdb)
             pdb_verification["local_pdb_found"] = True
             pdb_verification["local_pdb_size"] = len(pdb_bytes)
@@ -956,7 +953,6 @@ class SemanticBinaryDiffer:
         """
         from ghidra_pcode_vectorizer import PcodeVectorizer, WeisfeilerLehmanCfgHasher
 
-        vec = PcodeVectorizer()
         wl = WeisfeilerLehmanCfgHasher()
 
         def _prep(fn: Dict[str, Any]) -> Dict[str, Any]:

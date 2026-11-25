@@ -555,8 +555,6 @@ class BinaryTriageOrchestrator:
         pe_inspect = artifacts.get("binary_inspection") or {}
         sig_res = artifacts.get("signature_intelligence") or {}
         slack_res = artifacts.get("slack_and_overlay") or {}
-        pe_forensics = artifacts.get("pe_deep_forensics") or {}
-        deobf_res = artifacts.get("deobfuscation") or {}
         sensory_res = artifacts.get("sensory_perception") or {}
         hybrid_res = artifacts.get("embedded_ai_scan") or {}
 

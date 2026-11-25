@@ -21,7 +21,7 @@ import tempfile
 import threading
 from collections import OrderedDict, deque
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Dict, Any, List, Optional, Tuple, Callable
+from typing import Dict, Any, Optional
 
 from security.execution_guard import ExecutionGuard
 from security.capability_registry import Capability
@@ -573,7 +573,6 @@ class GhidraLiveBridgeServer:
             rva = p.get("base_rva", "0x0")
             expr = p.get("expression", "")
             mod = p.get("base_module", "target.exe")
-            offsets = p.get("offsets", [])
             depth = p.get("depth", 1)
 
             note_lines.append(f"Depth {depth}: {expr} => {target_addr}")

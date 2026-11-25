@@ -17,7 +17,7 @@ import os
 import sqlite3
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Generator, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 
 # Threshold above which JSON exports are transparently cached to SQLite

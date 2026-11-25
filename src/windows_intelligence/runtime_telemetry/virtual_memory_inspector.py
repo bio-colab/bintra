@@ -8,8 +8,6 @@ Strictly read-only; governed by ExecutionGuard and Capability.PROCESS_QUERY.
 """
 
 import os
-import re
-import sys
 import math
 import time
 import uuid

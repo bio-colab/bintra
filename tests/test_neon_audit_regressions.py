@@ -447,8 +447,16 @@ class TestNeonAuditRegressions(unittest.TestCase):
     # ------------------------------------------------------------------
     def test_f007_f013_win32_ctypes_prototypes_declared(self):
         checks = {
-            "src/security/path_identity.py": ["CreateFileW.argtypes", "GetFinalPathNameByHandleW.argtypes", "CloseHandle.argtypes"],
-            "src/security/safe_process_access.py": ["OpenProcess.argtypes", "QueryFullProcessImageNameW.argtypes", "CloseHandle.argtypes", "use_last_error=True"],
+            "src/security/_win32.py": [
+                "CreateFileW.argtypes",
+                "GetFinalPathNameByHandleW.argtypes",
+                "OpenProcess.argtypes",
+                "QueryFullProcessImageNameW.argtypes",
+                "CloseHandle.argtypes",
+                "use_last_error=True",
+            ],
+            "src/security/path_identity.py": ["from ._win32 import get_final_path_win32"],
+            "src/security/safe_process_access.py": ["from ._win32 import ("],
             "src/windows_intelligence/os_profiler.py": ["RtlGetVersion.argtypes", "GetNativeSystemInfo.argtypes", "GetCurrentProcess.restype", "IsWow64Process.argtypes"],
             "src/windows_intelligence/security_inspector.py": ["OpenProcessToken.argtypes", "GetTokenInformation.argtypes", "GetSidSubAuthorityCount.argtypes", "GetSidSubAuthority.argtypes", "CloseHandle.argtypes"],
             "src/windows_intelligence/system_introspection/process_inspector.py": ["GetTokenInformation.argtypes", "CloseHandle.argtypes"],

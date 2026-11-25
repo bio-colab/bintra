@@ -6,11 +6,14 @@ Enforces the Principle of Least Privilege and No Ambient Authority.
 """
 
 from enum import Enum
-from typing import Dict, Set, FrozenSet
+from typing import Dict, FrozenSet, Set
+
+from .config import DEFAULT_COMPONENT_CAPABILITY_NAMES
 
 
 class Capability(str, Enum):
     """Enumeration of granular, typed system capabilities."""
+
     # Target Scope Capabilities (Read-Only)
     FILE_READ = "cap.file.read"
     FILE_HASH = "cap.file.hash"
@@ -54,98 +57,20 @@ PROHIBITED_HAZARDS: FrozenSet[Capability] = frozenset({
 })
 
 
+def _build_default_component_capabilities() -> Dict[str, Set[Capability]]:
+    return {
+        component: {Capability[cap_name] for cap_name in cap_names}
+        for component, cap_names in DEFAULT_COMPONENT_CAPABILITY_NAMES.items()
+    }
+
+
 class CapabilityRegistry:
     """
     Maintains declared capabilities for registered components and providers.
     Prevents ambient privilege inheritance.
     """
 
-    COMPONENT_CAPABILITIES: Dict[str, Set[Capability]] = {
-        # Safe Gateways
-        "safe_file_access": {
-            Capability.FILE_READ,
-            Capability.WORKSPACE_WRITE,
-            Capability.WORKSPACE_TEMP_CLEAN
-        },
-        "safe_registry_access": {Capability.REGISTRY_READ},
-        "safe_process_access": {Capability.PROCESS_QUERY},
-        "safe_subprocess": {Capability.SUBPROCESS_CATALOG_EXEC},
-
-        # System Introspection Providers
-        "binary_inspector": {Capability.FILE_READ, Capability.FILE_HASH},
-        "deobfuscator": {Capability.FILE_READ},
-        "function_matcher": {Capability.FILE_READ},
-        "pe_deep_forensics": {Capability.FILE_READ, Capability.FILE_HASH},
-        "device_inspector": {Capability.DEVICE_QUERY, Capability.DRIVER_QUERY},
-        "driver_inspector": {Capability.DRIVER_QUERY},
-        "process_inspector": {Capability.PROCESS_QUERY},
-        "virtual_memory_inspector": {Capability.PROCESS_QUERY},
-        "service_inspector": {Capability.SERVICE_QUERY},
-        "registry_reader": {Capability.REGISTRY_READ},
-        "event_collector": {Capability.EVENT_LOG_READ},
-        "etw_capture_engine": {Capability.EVENT_LOG_READ},
-        "ghidra_live_bridge": {Capability.FILE_READ, Capability.WORKSPACE_WRITE, Capability.TEMPDIR_MARKER_WRITE},
-        "minidump_parser": {Capability.MINIDUMP_READ, Capability.FILE_READ},
-        "crash_rca_engine": {Capability.MINIDUMP_READ, Capability.FILE_READ},
-        "command_executor": {Capability.SUBPROCESS_CATALOG_EXEC},
-        "cmd_executor": {Capability.SUBPROCESS_CATALOG_EXEC},
-        "powershell_executor": {Capability.SUBPROCESS_CATALOG_EXEC},
-
-        # Mutation / Surgery Engines (Confined to Authorized Workspace Only)
-        "binary_patcher": {Capability.WORKSPACE_WRITE},
-        "weight_patcher": {Capability.WORKSPACE_WRITE},
-
-        # Intelligence Engines
-        "analysis_orchestrator": {Capability.FILE_READ, Capability.FILE_HASH, Capability.MINIDUMP_READ},
-        "evidence_engine": {Capability.FILE_READ, Capability.WORKSPACE_WRITE},
-        "dossier_generator": {Capability.WORKSPACE_WRITE},
-        "causality_synthesizer": {Capability.FILE_READ, Capability.WORKSPACE_WRITE},
-        "device_intelligence": {Capability.DEVICE_QUERY, Capability.DRIVER_QUERY},
-        "signature_intelligence": {Capability.FILE_READ, Capability.DRIVER_QUERY, Capability.DEVICE_QUERY},
-        "process_intelligence": {Capability.PROCESS_QUERY, Capability.FILE_READ},
-        "python_intelligence": {Capability.FILE_READ},
-        "registry_editor": {Capability.REGISTRY_READ, Capability.WORKSPACE_WRITE, Capability.FILE_READ},
-        "ghidra_headless": {
-            Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE,
-            Capability.FILE_READ, Capability.WORKSPACE_WRITE, Capability.WORKSPACE_TEMP_CLEAN
-        },
-        "ghidra_analyzer": {
-            Capability.FILE_READ, Capability.WORKSPACE_WRITE, Capability.WORKSPACE_TEMP_CLEAN
-        },
-        "ghidra_export_store": {
-            Capability.FILE_READ, Capability.WORKSPACE_WRITE, Capability.WORKSPACE_TEMP_CLEAN
-        },
-        "binary_diff": {Capability.FILE_READ},
-
-        # High-Level Invocation Interfaces
-        "mcp_server": {
-            Capability.FILE_READ, Capability.FILE_HASH, Capability.WORKSPACE_WRITE,
-            Capability.REGISTRY_READ, Capability.PROCESS_QUERY, Capability.SERVICE_QUERY,
-            Capability.DEVICE_QUERY, Capability.DRIVER_QUERY, Capability.EVENT_LOG_READ,
-            Capability.MINIDUMP_READ, Capability.SUBPROCESS_CATALOG_EXEC,
-            Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE,
-            Capability.WORKSPACE_TEMP_CLEAN
-        },
-        "cli": {
-            Capability.FILE_READ, Capability.FILE_HASH, Capability.WORKSPACE_WRITE,
-            Capability.REGISTRY_READ, Capability.PROCESS_QUERY, Capability.SERVICE_QUERY,
-            Capability.DEVICE_QUERY, Capability.DRIVER_QUERY, Capability.EVENT_LOG_READ,
-            Capability.MINIDUMP_READ, Capability.SUBPROCESS_CATALOG_EXEC,
-            Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE,
-            Capability.WORKSPACE_TEMP_CLEAN
-        },
-
-        # Test Fixtures & Internal Testing
-        "test_suite": {
-            Capability.FILE_READ, Capability.FILE_HASH, Capability.WORKSPACE_WRITE,
-            Capability.WORKSPACE_TEMP_CLEAN, Capability.REGISTRY_READ, Capability.PROCESS_QUERY,
-            Capability.SUBPROCESS_CATALOG_EXEC, Capability.GHIDRA_HEADLESS_EXEC, Capability.GHIDRA_PROJECT_MUTATE
-        },
-        "sec_test": {
-            Capability.FILE_READ, Capability.WORKSPACE_WRITE, Capability.WORKSPACE_TEMP_CLEAN,
-            Capability.SUBPROCESS_CATALOG_EXEC
-        }
-    }
+    COMPONENT_CAPABILITIES: Dict[str, Set[Capability]] = _build_default_component_capabilities()
 
     @classmethod
     def get_capabilities(cls, component_name: str) -> Set[Capability]:

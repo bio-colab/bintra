@@ -233,9 +233,16 @@ class RuntimeTelemetryToolsMixin:
 
     def _tool_profile_process(self, name: str, args: Dict[str, Any]) -> Any:
         """bintra_profile_process"""
+        pid = int(args["pid"])
+        if pid <= 0:
+            raise ValueError("Valid 'pid' (> 0) is required.")
+        samples = max(2, min(int(args.get("samples_count", 10)), 120))
+        interval = max(0.01, min(float(args.get("interval_seconds", 0.2)), 10.0))
+        if (samples - 1) * interval > 60.0:
+            interval = round(60.0 / max(1, samples - 1), 3)
         from windows_intelligence.process_intelligence import ProcessLongitudinalProfiler
         return ProcessLongitudinalProfiler.profile_pid_longitudinal(
-            pid=int(args["pid"]),
-            samples_count=int(args.get("samples_count", 10)),
-            interval_seconds=float(args.get("interval_seconds", 0.2))
+            pid=pid,
+            samples_count=samples,
+            interval_seconds=interval,
         )

@@ -6,7 +6,7 @@ Standard JSON-RPC 2.0 stdio server providing agent-native reverse engineering
 tools for AI models (Antigravity, Claude Code, Codex, Cursor, Devin, etc.).
 
 Zero external dependencies: runs on Python standard library + numpy.
-Protocol Version: 2024-11-05
+Protocol Versions: 2024-11-05 through 2026-07-28 (stateless DiscoverResult + per-request _meta).
 """
 
 import os
@@ -202,6 +202,12 @@ class BintraMcpServer(
         req_ver = None
         if isinstance(params, dict):
             req_ver = params.get("io.modelcontextprotocol/protocolVersion") or params.get("protocolVersion")
+            init_caps = params.get("capabilities")
+            if isinstance(init_caps, dict):
+                self.current_client_capabilities = init_caps
+            init_info = params.get("clientInfo")
+            if isinstance(init_info, dict):
+                self.current_client_info = init_info
         if req_ver is not None:
             if req_ver in SUPPORTED_PROTOCOL_VERSIONS:
                 negotiated_version = req_ver
@@ -217,6 +223,7 @@ class BintraMcpServer(
         return {
             "protocolVersion": negotiated_version,
             "supportedProtocolVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
+            "supportedVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
             "capabilities": {
                 "tools": {
                     "listChanged": False
@@ -229,6 +236,10 @@ class BintraMcpServer(
                     "listChanged": False
                 }
             },
+            "instructions": (
+                "Read-only by default reverse engineering and Windows forensics MCP server. "
+                "Mutations are strictly confined to authorized host workspaces."
+            ),
             "serverInfo": {
                 "name": SERVER_NAME,
                 "version": SERVER_VERSION
@@ -236,22 +247,52 @@ class BintraMcpServer(
         }
 
     def handle_server_discover(self, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Stateless MCP 2026-07-28 server discovery handler."""
+        """Stateless MCP 2026-07-28 DiscoverResult handler."""
+        self._capture_client_meta(params if isinstance(params, dict) else None)
         return {
+            "resultType": "complete",
             "name": SERVER_NAME,
             "version": SERVER_VERSION,
             "protocolVersion": LATEST_PROTOCOL_VERSION,
+            "supportedVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
             "supportedProtocolVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
             "capabilities": {
                 "tools": {"listChanged": False},
                 "resources": {"subscribe": False, "listChanged": False},
                 "prompts": {"listChanged": False},
             },
+            "instructions": (
+                "Bintra MCP server: send stateless requests with _meta.io.modelcontextprotocol/protocolVersion "
+                "(or legacy initialize). File mutations stay strictly confined to authorized workspace directories."
+            ),
+            "ttlMs": 3600000,
+            "cacheScope": "public",
             "serverInfo": {
                 "name": SERVER_NAME,
                 "version": SERVER_VERSION,
             },
+            "_meta": {
+                "io.modelcontextprotocol/serverInfo": {
+                    "name": SERVER_NAME,
+                    "version": SERVER_VERSION,
+                }
+            },
         }
+
+    def _capture_client_meta(self, meta_container: Optional[Dict[str, Any]], msg_container: Optional[Dict[str, Any]] = None) -> Optional[str]:
+        """Extract MCP 2026-07-28 _meta protocol version, client capabilities, and client info."""
+        meta = meta_container.get("_meta") if isinstance(meta_container, dict) else None
+        if not meta and isinstance(msg_container, dict):
+            meta = msg_container.get("_meta")
+        if not isinstance(meta, dict):
+            return None
+        client_caps = meta.get("io.modelcontextprotocol/clientCapabilities") or meta.get("clientCapabilities")
+        if isinstance(client_caps, dict):
+            self.current_client_capabilities = client_caps
+        client_info = meta.get("io.modelcontextprotocol/clientInfo") or meta.get("clientInfo")
+        if isinstance(client_info, dict):
+            self.current_client_info = client_info
+        return meta.get("io.modelcontextprotocol/protocolVersion") or meta.get("protocolVersion")
 
     def handle_initialized_notification(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
@@ -311,6 +352,9 @@ class BintraMcpServer(
         }
         if cursor is not None and next_offset < len(tools):
             result["nextCursor"] = str(next_offset)
+        elif cursor is None:
+            result["ttlMs"] = 3600000
+            result["cacheScope"] = "public"
         return result
 
     @classmethod
@@ -333,7 +377,7 @@ class BintraMcpServer(
         }
 
     def handle_resources_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        return {"resources": list(self.MCP_RESOURCES)}
+        return {"resources": list(self.MCP_RESOURCES), "ttlMs": 3600000, "cacheScope": "public"}
 
     def handle_resources_read(self, params: Dict[str, Any]) -> Dict[str, Any]:
         uri = (params or {}).get("uri")
@@ -358,6 +402,7 @@ class BintraMcpServer(
         else:
             raise ValueError(f"Unknown Bintra MCP resource URI: '{uri}'.")
 
+        is_public_resource = uri in ("bintra://capabilities", "bintra://workflows/playbooks")
         return {
             "contents": [
                 {
@@ -365,11 +410,13 @@ class BintraMcpServer(
                     "mimeType": "application/json",
                     "text": json.dumps(payload, indent=2, ensure_ascii=False),
                 }
-            ]
+            ],
+            "ttlMs": 3600000 if is_public_resource else 0,
+            "cacheScope": "public" if is_public_resource else "private",
         }
 
     def handle_prompts_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        return {"prompts": list(self.MCP_PROMPTS)}
+        return {"prompts": list(self.MCP_PROMPTS), "ttlMs": 3600000, "cacheScope": "public"}
 
     def handle_prompts_get(self, params: Dict[str, Any]) -> Dict[str, Any]:
         params = params or {}
@@ -634,38 +681,56 @@ class BintraMcpServer(
 
         is_notification = ("id" not in msg)
         msg_id = msg.get("id")
+        if "jsonrpc" in msg and msg.get("jsonrpc") != "2.0":
+            if not is_notification:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": msg_id,
+                    "error": {
+                        "code": -32600,
+                        "message": f"Invalid Request: unsupported jsonrpc version {msg.get('jsonrpc')!r}"
+                    }
+                }
+            return None
+
         method = msg.get("method")
+        if not isinstance(method, str) or not method:
+            if not is_notification:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": msg_id,
+                    "error": {
+                        "code": -32600,
+                        "message": "Invalid Request: missing or invalid 'method'"
+                    }
+                }
+            return None
+
         params = msg.get("params", {})
 
         if not isinstance(params, (dict, list)):
             params = {}
 
-        # Stateless MCP 2026-07-28: per-request protocolVersion check via _meta
-        meta = params.get("_meta") if isinstance(params, dict) else None
-        if not meta and isinstance(msg, dict):
-            meta = msg.get("_meta")
-        if meta and isinstance(meta, dict):
-            meta_ver = meta.get("io.modelcontextprotocol/protocolVersion") or meta.get("protocolVersion")
-            client_caps = meta.get("io.modelcontextprotocol/clientCapabilities") or meta.get("clientCapabilities")
-            if client_caps and isinstance(client_caps, dict):
-                self.current_client_capabilities = client_caps
-            if meta_ver is not None and meta_ver not in SUPPORTED_PROTOCOL_VERSIONS:
-                if not is_notification:
-                    return {
-                        "jsonrpc": "2.0",
-                        "id": msg_id,
-                        "error": {
-                            "code": -32022,
-                            "message": f"Unsupported protocol version: '{meta_ver}'. Supported versions: {list(SUPPORTED_PROTOCOL_VERSIONS)}",
-                            "data": {
-                                "supported": list(SUPPORTED_PROTOCOL_VERSIONS),
-                                "requested": meta_ver,
-                                "supportedProtocolVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
-                                "latestProtocolVersion": LATEST_PROTOCOL_VERSION,
-                            }
+        # Stateless MCP 2026-07-28: per-request protocolVersion & client metadata check via _meta
+        meta_ver = self._capture_client_meta(params if isinstance(params, dict) else None, msg)
+        if meta_ver is not None and meta_ver not in SUPPORTED_PROTOCOL_VERSIONS:
+            if not is_notification:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": msg_id,
+                    "error": {
+                        "code": -32022,
+                        "message": f"Unsupported protocol version: '{meta_ver}'. Supported versions: {list(SUPPORTED_PROTOCOL_VERSIONS)}",
+                        "data": {
+                            "supported": list(SUPPORTED_PROTOCOL_VERSIONS),
+                            "supportedVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
+                            "requested": meta_ver,
+                            "supportedProtocolVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
+                            "latestProtocolVersion": LATEST_PROTOCOL_VERSION,
                         }
                     }
-                return None
+                }
+            return None
 
         if method not in self.handlers:
             if not is_notification:
@@ -699,6 +764,7 @@ class BintraMcpServer(
                         "message": str(ve),
                         "data": {
                             "supported": list(SUPPORTED_PROTOCOL_VERSIONS),
+                            "supportedVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
                             "requested": params.get("io.modelcontextprotocol/protocolVersion") or params.get("protocolVersion") if isinstance(params, dict) else None,
                             "supportedProtocolVersions": list(SUPPORTED_PROTOCOL_VERSIONS),
                             "latestProtocolVersion": LATEST_PROTOCOL_VERSION,

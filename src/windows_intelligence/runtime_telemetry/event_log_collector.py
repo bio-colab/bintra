@@ -197,11 +197,6 @@ class EventLogCollector:
         return cls._execute_wevtutil_fallback(channel, xpath, max_events)
 
     @classmethod
-    def _execute_wevtutil_query(cls, channel: str, xpath: str, max_events: int = 20) -> List[ET.Element]:
-        """Backwards-compatible wrapper delegating to _execute_event_query."""
-        return cls._execute_event_query(channel, xpath, max_events)
-
-    @classmethod
     def query_events(
         cls,
         channel: str = "Application",

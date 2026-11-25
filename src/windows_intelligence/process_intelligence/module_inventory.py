@@ -39,20 +39,15 @@ class ModuleInventory:
 
     @classmethod
     def _get_kernel32(cls):
-        if os.name != "nt":
+        k32 = ProcessInventory._get_kernel32()
+        if not k32:
             return None
-        k32 = ctypes.windll.kernel32
-        k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
-        k32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
 
         k32.Module32FirstW.restype = wintypes.BOOL
         k32.Module32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MODULEENTRY32W)]
 
         k32.Module32NextW.restype = wintypes.BOOL
         k32.Module32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MODULEENTRY32W)]
-
-        k32.CloseHandle.restype = wintypes.BOOL
-        k32.CloseHandle.argtypes = [wintypes.HANDLE]
         return k32
 
     @classmethod

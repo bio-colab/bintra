@@ -222,6 +222,16 @@ class TestProductionBaselineSmoke(unittest.TestCase):
             cg_from_path = GhidraDeepAnalyzer().build_call_graph_and_xrefs(str(json_exp))
             self.assertEqual(cg_from_path["functions_indexed"], 1)
 
+        from ghidra_export_store import SENSITIVE_API_PATTERNS
+        from windows_intelligence.process_intelligence.module_inventory import ModuleInventory
+        from windows_intelligence.runtime_telemetry.event_log_collector import EventLogCollector
+
+        self.assertIs(GhidraDeepAnalyzer.SENSITIVE_API_PATTERNS, SENSITIVE_API_PATTERNS)
+        self.assertFalse(hasattr(EventLogCollector, "_execute_wevtutil_query"))
+        ModuleInventory._get_kernel32()
+        missing_dmp = WindowsCrashAnalyzer.parse_minidump(str(self.tmp_dir / "missing.dmp"))
+        self.assertEqual(missing_dmp["status"], "error")
+
 
 if __name__ == "__main__":
     unittest.main()

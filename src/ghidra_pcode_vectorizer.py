@@ -1100,13 +1100,7 @@ class GhidraDeepAnalyzer:
       4. Pure-Python MSVC C++ symbol demangling for native Windows binaries.
     """
 
-    SENSITIVE_API_PATTERNS = (
-        "LoadLibrary", "GetProcAddress", "VirtualAlloc", "VirtualProtect",
-        "CreateFile", "WriteFile", "ReadFile", "RegOpenKey", "RegSetValue",
-        "CreateProcess", "WinExec", "ShellExecute", "WSASocket", "connect",
-        "InternetOpen", "HttpSendRequest", "CryptDecrypt", "BCryptDecrypt",
-        "RtlCopyMemory", "memcpy", "strcpy", "sprintf",
-    )
+    from ghidra_export_store import SENSITIVE_API_PATTERNS  # single source of truth
 
     @staticmethod
     def demangle_msvc_symbol(sym: str) -> str:

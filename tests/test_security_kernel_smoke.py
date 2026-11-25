@@ -138,9 +138,13 @@ class TestSecurityKernelSmoke(_IsolatedSecurityTestBase):
         self.assertTrue(PathIdentity.is_within_directory(self.target_file, self.target_dir))
         self.assertFalse(PathIdentity.is_within_directory(self.target_file, self.workspace_dir))
 
-        for bad in (r"\\.\PhysicalDrive0", r"\\?\C:\Windows"):
+        for bad in (r"\\.\PhysicalDrive0", r"\\?\C:\Windows", "//./PhysicalDrive0", "  //?/C:/Windows"):
             with self.assertRaises(ValueError):
                 PathIdentity.canonicalize(bad)
+
+        # Nearest-ancestor resolution preserves canonical physical path even for uncreated children
+        uncreated_child = os.path.join(self.workspace_dir, "nested_new", "leaf.bin")
+        self.assertTrue(PathIdentity.is_within_directory(uncreated_child, self.workspace_dir))
 
         if sys.platform == "win32":
             with self.assertRaises(ValueError):
@@ -187,6 +191,18 @@ class TestSecurityKernelSmoke(_IsolatedSecurityTestBase):
         self.assertEqual(integrity_bad["status"], "success")
         self.assertFalse(integrity_bad["is_intact"])
         self.assertTrue(integrity_bad["tamper_detected"])
+
+        # Replacing target file with a directory reports tampered gracefully without IsADirectoryError
+        dir_target = os.path.join(self.target_dir, "replaced.bin")
+        with open(dir_target, "wb") as fh:
+            fh.write(b"REAL")
+        scope_dir = TargetScope(target_binary_path=dir_target, workspace_dir=self.workspace_dir)
+        os.remove(dir_target)
+        os.makedirs(dir_target, exist_ok=True)
+        integrity_dir = scope_dir.verify_target_integrity(dir_target)
+        self.assertEqual(integrity_dir["status"], "tampered")
+        self.assertFalse(integrity_dir["is_intact"])
+        self.assertTrue(integrity_dir["tamper_detected"])
 
     def test_policy_engine_and_execution_guard(self) -> None:
         scope = TargetScope(
@@ -242,18 +258,26 @@ class TestSecurityKernelSmoke(_IsolatedSecurityTestBase):
         )
         self.assertEqual(d_ws.verdict, "ALLOW_SCOPED")
 
-        # Sensitive credential path deny
-        d_sam = PolicyEngine.evaluate(
-            AccessRequest(
-                "safe_file_access",
-                "read",
-                r"C:\Windows\System32\config\SAM",
-                Capability.FILE_READ,
-                "READ",
-            ),
+        # Write without TargetScope must fail closed
+        d_no_scope = PolicyEngine.evaluate(
+            AccessRequest("safe_file_access", "write", ws_out, Capability.WORKSPACE_WRITE, "WRITE"),
             scope=None,
         )
-        self.assertEqual(d_sam.verdict, "DENY")
+        self.assertEqual(d_no_scope.verdict, "DENY")
+        self.assertIn("SCOPE_REQUIRED", d_no_scope.reason)
+
+        # Sensitive credential path deny (SAM + SYSTEM + NTDS)
+        for cred_path in (
+            r"C:\Windows\System32\config\SAM",
+            r"C:\Windows\System32\config\SYSTEM",
+            r"C:\Windows\NTDS\ntds.dit",
+        ):
+            d_cred = PolicyEngine.evaluate(
+                AccessRequest("safe_file_access", "read", cred_path, Capability.FILE_READ, "READ"),
+                scope=None,
+            )
+            self.assertEqual(d_cred.verdict, "DENY")
+            self.assertIn("FORBIDDEN_SYSTEM_READ", d_cred.reason)
 
         # Temp marker write allow only for ghidra_live_bridge + .bintra_bridge.json
         marker_path = os.path.join(tempfile.gettempdir(), ".bintra_bridge.json")

@@ -8,17 +8,29 @@ must pass through this gateway to ensure Complete Mediation.
 
 import threading
 from contextlib import contextmanager
-from typing import Optional, Dict, Any
+from typing import Any, Dict, FrozenSet, Optional
 
-from .capability_registry import Capability
-from .target_scope import TargetScope
-from .path_identity import PathIdentity
-from .policy_engine import PolicyEngine, AccessRequest, AccessDecision
 from .audit_logger import AuditLogger
+from .capability_registry import Capability
+from .path_identity import PathIdentity
+from .policy_engine import AccessDecision, AccessRequest, PolicyEngine
+from .target_scope import TargetScope
+
+_FILESYSTEM_CAPABILITIES: FrozenSet[Capability] = frozenset({
+    Capability.FILE_READ,
+    Capability.FILE_HASH,
+    Capability.MINIDUMP_READ,
+    Capability.WORKSPACE_WRITE,
+    Capability.WORKSPACE_TEMP_CLEAN,
+    Capability.TEMPDIR_MARKER_WRITE,
+})
+
+_FILESYSTEM_MODES: FrozenSet[str] = frozenset({"READ", "WRITE", "DELETE", "MODIFY"})
 
 
 class SecurityViolationError(PermissionError):
     """Raised when an operation is rejected by the Bintra Safety Kernel."""
+
     def __init__(self, message: str, decision: Optional[AccessDecision] = None):
         super().__init__(message)
         self.decision = decision
@@ -26,12 +38,10 @@ class SecurityViolationError(PermissionError):
 
 class TargetMutationError(SecurityViolationError):
     """Raised when an operation attempts to mutate or write to a target binary."""
-    pass
 
 
 class OutOfScopeError(SecurityViolationError):
     """Raised when an operation targets an unapproved path outside authorized boundaries."""
-    pass
 
 
 class ExecutionGuard:
@@ -39,7 +49,6 @@ class ExecutionGuard:
     Central Reference Monitor enforcing mandatory access mediation across all tools.
     """
 
-    _lock = threading.Lock()
     _default_scope = TargetScope()
     _thread_local = threading.local()
 
@@ -69,6 +78,20 @@ class ExecutionGuard:
             cls._thread_local.scope = prev
 
     @classmethod
+    def _requires_path_canonicalization(cls, capability: Capability, access_mode: str, raw_target: str) -> bool:
+        if capability in _FILESYSTEM_CAPABILITIES:
+            return True
+        return access_mode.upper() in _FILESYSTEM_MODES and not raw_target.startswith("\\\\")
+
+    @classmethod
+    def _raise_for_denial(cls, decision: AccessDecision) -> None:
+        if "TARGET_WRITE_FORBIDDEN" in decision.reason or "TARGET_DIRECTORY_WRITE" in decision.reason:
+            raise TargetMutationError(decision.reason, decision)
+        if "WRITE_OUTSIDE_WORKSPACE" in decision.reason or "OUTSIDE_WORKSPACE" in decision.reason:
+            raise OutOfScopeError(decision.reason, decision)
+        raise SecurityViolationError(decision.reason, decision)
+
+    @classmethod
     def request_access(
         cls,
         component: str,
@@ -77,7 +100,7 @@ class ExecutionGuard:
         capability: Capability,
         access_mode: str = "READ",
         metadata: Optional[Dict[str, Any]] = None,
-        raise_on_deny: bool = True
+        raise_on_deny: bool = True,
     ) -> AccessDecision:
         """
         Primary entry point for Reference Monitor mediation.
@@ -86,28 +109,17 @@ class ExecutionGuard:
         """
         meta = metadata or {}
         scope = cls.get_current_scope()
+        raw_target = str(target)
+        clean_target = raw_target
 
-        # Canonicalize target for filesystem capabilities (never exempt raw NT/UNC paths)
-        _FS_CAPABILITIES = {
-            Capability.FILE_READ,
-            Capability.FILE_HASH,
-            Capability.MINIDUMP_READ,
-            Capability.WORKSPACE_WRITE,
-            Capability.WORKSPACE_TEMP_CLEAN,
-            Capability.TEMPDIR_MARKER_WRITE,
-        }
-        clean_target = str(target)
-        if (
-            capability in _FS_CAPABILITIES
-            or (access_mode in ("READ", "WRITE", "DELETE", "MODIFY") and not clean_target.startswith("\\\\"))
-        ):
+        if cls._requires_path_canonicalization(capability, access_mode, raw_target):
             try:
                 clean_target = PathIdentity.canonicalize(target)
             except Exception as exc:
                 decision = AccessDecision(
                     verdict="DENY",
-                    reason=f"INVALID_PATH: {str(exc)}",
-                    capability=capability
+                    reason=f"INVALID_PATH: {exc}",
+                    capability=capability,
                 )
                 AuditLogger.log_decision(
                     component=component,
@@ -116,7 +128,7 @@ class ExecutionGuard:
                     decision="DENY",
                     reason=decision.reason,
                     requested_capability=capability.value if capability else None,
-                    result="DENIED"
+                    result="DENIED",
                 )
                 if raise_on_deny:
                     raise SecurityViolationError(decision.reason, decision)
@@ -128,11 +140,10 @@ class ExecutionGuard:
             target=clean_target,
             requested_capability=capability,
             access_mode=access_mode,
-            metadata=meta
+            metadata=meta,
         )
 
         decision = PolicyEngine.evaluate(request, scope)
-
         AuditLogger.log_decision(
             component=component,
             operation=operation,
@@ -142,15 +153,10 @@ class ExecutionGuard:
             requested_capability=capability.value if capability else None,
             side_effects=decision.side_effects,
             result="ALLOWED" if decision.is_allowed else "DENIED",
-            metadata=meta
+            metadata=meta,
         )
 
         if not decision.is_allowed and raise_on_deny:
-            if "TARGET_WRITE_FORBIDDEN" in decision.reason or "TARGET_DIRECTORY_WRITE" in decision.reason:
-                raise TargetMutationError(decision.reason, decision)
-            elif "WRITE_OUTSIDE_WORKSPACE" in decision.reason or "OUTSIDE_WORKSPACE" in decision.reason:
-                raise OutOfScopeError(decision.reason, decision)
-            else:
-                raise SecurityViolationError(decision.reason, decision)
+            cls._raise_for_denial(decision)
 
         return decision

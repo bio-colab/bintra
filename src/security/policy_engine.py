@@ -1,21 +1,48 @@
 # -*- coding: utf-8 -*-
 """
 Bintra Policy Engine.
-Evaluates system access requests against the 5 Inviolable Rules,
+Evaluates system access requests against the Inviolable Safety Rules,
 CapabilityRegistry grants, and Default Deny matrix.
 Enforces read target scope boundaries and workspace write confinement.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional
-from .capability_registry import Capability, PROHIBITED_HAZARDS, CapabilityRegistry
-from .target_scope import TargetScope
+from typing import Any, Dict, FrozenSet, List, Optional
+
+from .capability_registry import PROHIBITED_HAZARDS, Capability, CapabilityRegistry
+from .config import FORBIDDEN_CREDENTIAL_MARKERS, default_ghidra_bridge_marker_path
 from .path_identity import PathIdentity
+from .target_scope import TargetScope
+
+_READ_CAPABILITIES: FrozenSet[Capability] = frozenset({
+    Capability.FILE_READ,
+    Capability.FILE_HASH,
+    Capability.REGISTRY_READ,
+    Capability.PROCESS_QUERY,
+    Capability.SERVICE_QUERY,
+    Capability.DEVICE_QUERY,
+    Capability.DRIVER_QUERY,
+    Capability.EVENT_LOG_READ,
+    Capability.MINIDUMP_READ,
+})
+
+_FILESYSTEM_READ_CAPABILITIES: FrozenSet[Capability] = frozenset({
+    Capability.FILE_READ,
+    Capability.FILE_HASH,
+    Capability.MINIDUMP_READ,
+})
+
+_SUBPROCESS_OPERATIONS: FrozenSet[str] = frozenset({
+    "run_subprocess",
+    "execute_command",
+    "execute_catalog_command",
+})
 
 
 @dataclass(frozen=True)
 class AccessRequest:
     """Structured description of an attempted operating system interaction."""
+
     component: str
     operation: str
     target: str
@@ -27,6 +54,7 @@ class AccessRequest:
 @dataclass(frozen=True)
 class AccessDecision:
     """The authoritative determination returned by the Safety Kernel."""
+
     verdict: str  # "ALLOW" | "ALLOW_SCOPED" | "DENY"
     reason: str
     capability: Optional[Capability] = None
@@ -37,6 +65,14 @@ class AccessDecision:
         return self.verdict in ("ALLOW", "ALLOW_SCOPED")
 
 
+def _cap_label(cap: Optional[Capability]) -> str:
+    return cap.value if hasattr(cap, "value") else str(cap)
+
+
+def _deny(reason: str, cap: Optional[Capability]) -> AccessDecision:
+    return AccessDecision(verdict="DENY", reason=reason, capability=cap)
+
+
 class PolicyEngine:
     """
     Evaluates every AccessRequest against formal non-destructive security rules.
@@ -44,59 +80,36 @@ class PolicyEngine:
     """
 
     @classmethod
-    def evaluate(cls, request: AccessRequest, scope: Optional[TargetScope] = None) -> AccessDecision:
-        """
-        Evaluates an access request deterministically.
-        """
-        cap = request.requested_capability
-        mode = request.access_mode.upper()
-        target = request.target
-        comp = request.component
-
-        # Rule 1: Prohibited hazards are unconditionally denied
+    def _evaluate_prerequisites(cls, request: AccessRequest, cap: Capability) -> Optional[AccessDecision]:
         if cap in PROHIBITED_HAZARDS:
-            return AccessDecision(
-                verdict="DENY",
-                reason=f"Hazardous capability '{cap.value if hasattr(cap, 'value') else cap}' is unconditionally forbidden by Bintra Safety Policy.",
-                capability=cap
+            return _deny(
+                f"Hazardous capability '{_cap_label(cap)}' is unconditionally forbidden by Bintra Safety Policy.",
+                cap,
             )
 
-        # Rule 2: Shell=True or arbitrary command strings are unconditionally denied
-        if request.operation in ("run_subprocess", "execute_command", "execute_catalog_command"):
+        if request.operation in _SUBPROCESS_OPERATIONS:
             if request.metadata.get("shell") is True:
-                return AccessDecision(
-                    verdict="DENY",
-                    reason="Arbitrary shell execution (shell=True) is unconditionally prohibited.",
-                    capability=cap
-                )
+                return _deny("Arbitrary shell execution (shell=True) is unconditionally prohibited.", cap)
             if not request.metadata.get("is_catalog_command", False):
-                return AccessDecision(
-                    verdict="DENY",
-                    reason="Only cataloged, pre-approved commands are permitted for subprocess execution.",
-                    capability=cap
-                )
+                return _deny("Only cataloged, pre-approved commands are permitted for subprocess execution.", cap)
 
-        # Rule 3: Component Capability Verification (No Ambient Authority)
-        if not CapabilityRegistry.has_capability(comp, cap):
-            return AccessDecision(
-                verdict="DENY",
-                reason=f"CAPABILITY_NOT_GRANTED: Component '{comp}' lacks declared capability '{cap.value if hasattr(cap, 'value') else cap}'.",
-                capability=cap
+        if not CapabilityRegistry.has_capability(request.component, cap):
+            return _deny(
+                f"CAPABILITY_NOT_GRANTED: Component '{request.component}' lacks declared capability '{_cap_label(cap)}'.",
+                cap,
             )
+        return None
 
-        # Rule 3b: Ghidra Headless Gated Process Execution
+    @classmethod
+    def _evaluate_ghidra_capabilities(cls, request: AccessRequest, cap: Capability) -> Optional[AccessDecision]:
         if cap == Capability.GHIDRA_HEADLESS_EXEC:
             if request.metadata.get("shell") is True:
-                return AccessDecision(
-                    verdict="DENY",
-                    reason="Arbitrary shell execution (shell=True) is unconditionally prohibited.",
-                    capability=cap
-                )
+                return _deny("Arbitrary shell execution (shell=True) is unconditionally prohibited.", cap)
             return AccessDecision(
                 verdict="ALLOW_SCOPED",
-                reason=f"Authorized Ghidra headless analysis on target: '{target}'.",
+                reason=f"Authorized Ghidra headless analysis on target: '{request.target}'.",
                 capability=cap,
-                side_effects=["ghidra_headless_execution"]
+                side_effects=["ghidra_headless_execution"],
             )
 
         if cap == Capability.GHIDRA_PROJECT_MUTATE:
@@ -104,139 +117,166 @@ class PolicyEngine:
                 verdict="ALLOW_SCOPED",
                 reason="Authorized Ghidra project database mutation in quarantined temp project.",
                 capability=cap,
-                side_effects=["ghidra_project_mutation"]
+                side_effects=["ghidra_project_mutation"],
+            )
+        return None
+
+    @classmethod
+    def _evaluate_tempdir_marker_write(
+        cls,
+        request: AccessRequest,
+        cap: Capability,
+        scope: Optional[TargetScope],
+    ) -> AccessDecision:
+        target = request.target
+        if request.component != "ghidra_live_bridge" or request.operation != "write_tempdir_discovery_marker":
+            return _deny(
+                "CAPABILITY_MISMATCH: TEMPDIR_MARKER_WRITE is reserved exclusively for ghidra_live_bridge marker publication.",
+                cap,
             )
 
-        # Rule 4: Target binary and target directory write protection
-        if mode in ("WRITE", "DELETE", "MODIFY"):
-            # Dedicated strictly scoped capability for Ghidra bridge discovery marker in tempdir
-            if mode == "WRITE" and cap == Capability.TEMPDIR_MARKER_WRITE:
-                import os
-                import tempfile
-                if comp != "ghidra_live_bridge" or request.operation != "write_tempdir_discovery_marker":
-                    return AccessDecision(
-                        verdict="DENY",
-                        reason="CAPABILITY_MISMATCH: TEMPDIR_MARKER_WRITE is reserved exclusively for ghidra_live_bridge marker publication.",
-                        capability=cap
-                    )
-                expected_temp_marker = os.path.join(tempfile.gettempdir(), ".bintra_bridge.json")
-                if not PathIdentity.is_same_file(target, expected_temp_marker):
-                    return AccessDecision(
-                        verdict="DENY",
-                        reason=f"TEMPDIR_PATH_FORBIDDEN: TEMPDIR_MARKER_WRITE may target only '{expected_temp_marker}', got '{target}'.",
-                        capability=cap
-                    )
-                if scope and (scope.is_target_file(target) or scope.is_target_directory(target)):
-                    return AccessDecision(
-                        verdict="DENY",
-                        reason=f"TARGET_WRITE_FORBIDDEN: Marker path '{target}' conflicts with protected target scope.",
-                        capability=cap
-                    )
-                return AccessDecision(
-                    verdict="ALLOW_SCOPED",
-                    reason=f"Authorized bridge discovery marker write in tempdir: '{target}'.",
-                    capability=cap,
-                    side_effects=["tempdir_marker_write"]
-                )
-
-            # Enforce capability matching
-            if mode in ("WRITE", "MODIFY") and cap != Capability.WORKSPACE_WRITE:
-                return AccessDecision(
-                    verdict="DENY",
-                    reason=f"CAPABILITY_MISMATCH: Mode '{mode}' requires Capability.WORKSPACE_WRITE, got '{cap.value if hasattr(cap, 'value') else cap}'.",
-                    capability=cap
-                )
-            if mode == "DELETE" and cap != Capability.WORKSPACE_TEMP_CLEAN:
-                return AccessDecision(
-                    verdict="DENY",
-                    reason=f"CAPABILITY_MISMATCH: Mode 'DELETE' requires Capability.WORKSPACE_TEMP_CLEAN, got '{cap.value if hasattr(cap, 'value') else cap}'.",
-                    capability=cap
-                )
-
-            if scope and scope.is_target_file(target):
-                return AccessDecision(
-                    verdict="DENY",
-                    reason=f"TARGET_WRITE_FORBIDDEN: Target file '{target}' is strictly immutable.",
-                    capability=cap
-                )
-
-            if scope and scope.is_target_directory(target):
-                return AccessDecision(
-                    verdict="DENY",
-                    reason=f"TARGET_DIRECTORY_WRITE_FORBIDDEN: Writing inside target directory '{target}' is prohibited.",
-                    capability=cap
-                )
-
-            # Rule 5: Workspace confinement for all writes
-            if scope:
-                if not scope.is_inside_workspace(target):
-                    return AccessDecision(
-                        verdict="DENY",
-                        reason=f"WRITE_OUTSIDE_WORKSPACE: Path '{target}' is outside authorized workspace '{scope.workspace_dir}'.",
-                        capability=cap
-                    )
-
-            # Rule 6: Deletion restricted to Bintra session files within workspace
-            if mode == "DELETE" and scope:
-                if not scope.is_session_file(target):
-                    return AccessDecision(
-                        verdict="DENY",
-                        reason=f"UNAUTHORIZED_DELETION: Can only delete files created by Bintra in current session: '{target}'.",
-                        capability=cap
-                    )
-
-            # Workspace write allowed with scope restriction
-            return AccessDecision(
-                verdict="ALLOW_SCOPED",
-                reason=f"Authorized write confined to workspace: '{target}'.",
-                capability=cap,
-                side_effects=["workspace_mutation"]
+        expected_temp_marker = default_ghidra_bridge_marker_path()
+        if not PathIdentity.is_same_file(target, expected_temp_marker):
+            return _deny(
+                f"TEMPDIR_PATH_FORBIDDEN: TEMPDIR_MARKER_WRITE may target only '{expected_temp_marker}', got '{target}'.",
+                cap,
             )
 
-        # Rule 7: Read-only operations within authorized capabilities & read scope enforcement
-        if mode in ("READ", "QUERY"):
-            if cap in (
-                Capability.FILE_READ, Capability.FILE_HASH, Capability.REGISTRY_READ,
-                Capability.PROCESS_QUERY, Capability.SERVICE_QUERY, Capability.DEVICE_QUERY,
-                Capability.DRIVER_QUERY, Capability.EVENT_LOG_READ, Capability.MINIDUMP_READ
-            ):
-                # If target is a filesystem path, validate read scope and prevent forbidden credential reads
-                if cap in (Capability.FILE_READ, Capability.FILE_HASH, Capability.MINIDUMP_READ) and target:
-                    norm_target = str(target).replace("/", "\\").lower()
-                    if "\\windows\\system32\\config\\sam" in norm_target or "\\windows\\system32\\config\\security" in norm_target:
-                        return AccessDecision(
-                            verdict="DENY",
-                            reason=f"FORBIDDEN_SYSTEM_READ: Direct access to security credential store '{target}' is prohibited.",
-                            capability=cap
-                        )
-                    if scope and getattr(scope, "strict_read_scope", False):
-                        if not scope.is_authorized_read_target(target):
-                            return AccessDecision(
-                                verdict="DENY",
-                                reason=f"OUT_OF_SCOPE_READ: File '{target}' is outside designated read target scope.",
-                                capability=cap
-                            )
+        if scope and (scope.is_target_file(target) or scope.is_target_directory(target)):
+            return _deny(
+                f"TARGET_WRITE_FORBIDDEN: Marker path '{target}' conflicts with protected target scope.",
+                cap,
+            )
 
-                return AccessDecision(
-                    verdict="ALLOW",
-                    reason=f"Authorized read-only query for {cap.value if hasattr(cap, 'value') else cap}.",
-                    capability=cap,
-                    side_effects=[]
-                )
-
-        # Rule 8: Pre-approved catalog subprocess execution
-        if mode == "EXECUTE":
-            if cap == Capability.SUBPROCESS_CATALOG_EXEC and request.metadata.get("is_catalog_command"):
-                return AccessDecision(
-                    verdict="ALLOW",
-                    reason="Authorized catalog command execution.",
-                    capability=cap,
-                    side_effects=[]
-                )
-
-        # Default: Deny
         return AccessDecision(
-            verdict="DENY",
-            reason=f"DEFAULT_DENY: Operation '{request.operation}' with capability '{cap}' and mode '{mode}' is not permitted.",
-            capability=cap
+            verdict="ALLOW_SCOPED",
+            reason=f"Authorized bridge discovery marker write in tempdir: '{target}'.",
+            capability=cap,
+            side_effects=["tempdir_marker_write"],
+        )
+
+    @classmethod
+    def _evaluate_mutation_request(
+        cls,
+        request: AccessRequest,
+        mode: str,
+        cap: Capability,
+        scope: Optional[TargetScope],
+    ) -> AccessDecision:
+        if mode == "WRITE" and cap == Capability.TEMPDIR_MARKER_WRITE:
+            return cls._evaluate_tempdir_marker_write(request, cap, scope)
+
+        if mode in ("WRITE", "MODIFY") and cap != Capability.WORKSPACE_WRITE:
+            return _deny(
+                f"CAPABILITY_MISMATCH: Mode '{mode}' requires Capability.WORKSPACE_WRITE, got '{_cap_label(cap)}'.",
+                cap,
+            )
+        if mode == "DELETE" and cap != Capability.WORKSPACE_TEMP_CLEAN:
+            return _deny(
+                f"CAPABILITY_MISMATCH: Mode 'DELETE' requires Capability.WORKSPACE_TEMP_CLEAN, got '{_cap_label(cap)}'.",
+                cap,
+            )
+
+        if scope is None:
+            return _deny(
+                f"SCOPE_REQUIRED: Mode '{mode}' requires an active TargetScope boundary.",
+                cap,
+            )
+
+        target = request.target
+        if scope.is_target_file(target):
+            return _deny(
+                f"TARGET_WRITE_FORBIDDEN: Target file '{target}' is strictly immutable.",
+                cap,
+            )
+
+        if scope.is_target_directory(target):
+            return _deny(
+                f"TARGET_DIRECTORY_WRITE_FORBIDDEN: Writing inside target directory '{target}' is prohibited.",
+                cap,
+            )
+
+        if not scope.is_inside_workspace(target):
+            return _deny(
+                f"WRITE_OUTSIDE_WORKSPACE: Path '{target}' is outside authorized workspace '{scope.workspace_dir}'.",
+                cap,
+            )
+
+        if mode == "DELETE" and not scope.is_session_file(target):
+            return _deny(
+                f"UNAUTHORIZED_DELETION: Can only delete files created by Bintra in current session: '{target}'.",
+                cap,
+            )
+
+        return AccessDecision(
+            verdict="ALLOW_SCOPED",
+            reason=f"Authorized write confined to workspace: '{target}'.",
+            capability=cap,
+            side_effects=["workspace_mutation"],
+        )
+
+    @classmethod
+    def _evaluate_read_query_request(
+        cls,
+        request: AccessRequest,
+        cap: Capability,
+        scope: Optional[TargetScope],
+    ) -> Optional[AccessDecision]:
+        if cap not in _READ_CAPABILITIES:
+            return None
+
+        target = request.target
+        if cap in _FILESYSTEM_READ_CAPABILITIES and target:
+            norm_target = str(target).replace("/", "\\").lower()
+            if any(marker in norm_target for marker in FORBIDDEN_CREDENTIAL_MARKERS):
+                return _deny(
+                    f"FORBIDDEN_SYSTEM_READ: Direct access to security credential store '{target}' is prohibited.",
+                    cap,
+                )
+            if scope and getattr(scope, "strict_read_scope", False) and not scope.is_authorized_read_target(target):
+                return _deny(
+                    f"OUT_OF_SCOPE_READ: File '{target}' is outside designated read target scope.",
+                    cap,
+                )
+
+        return AccessDecision(
+            verdict="ALLOW",
+            reason=f"Authorized read-only query for {_cap_label(cap)}.",
+            capability=cap,
+            side_effects=[],
+        )
+
+    @classmethod
+    def evaluate(cls, request: AccessRequest, scope: Optional[TargetScope] = None) -> AccessDecision:
+        """Evaluates an access request deterministically."""
+        cap = request.requested_capability
+        mode = request.access_mode.upper()
+
+        prereq_denial = cls._evaluate_prerequisites(request, cap)
+        if prereq_denial is not None:
+            return prereq_denial
+
+        ghidra_decision = cls._evaluate_ghidra_capabilities(request, cap)
+        if ghidra_decision is not None:
+            return ghidra_decision
+
+        if mode in ("WRITE", "DELETE", "MODIFY"):
+            return cls._evaluate_mutation_request(request, mode, cap, scope)
+
+        if mode in ("READ", "QUERY"):
+            read_decision = cls._evaluate_read_query_request(request, cap, scope)
+            if read_decision is not None:
+                return read_decision
+
+        if mode == "EXECUTE" and cap == Capability.SUBPROCESS_CATALOG_EXEC and request.metadata.get("is_catalog_command"):
+            return AccessDecision(
+                verdict="ALLOW",
+                reason="Authorized catalog command execution.",
+                capability=cap,
+                side_effects=[],
+            )
+
+        return _deny(
+            f"DEFAULT_DENY: Operation '{request.operation}' with capability '{cap}' and mode '{mode}' is not permitted.",
+            cap,
         )

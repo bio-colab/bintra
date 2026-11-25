@@ -7,8 +7,9 @@ and protection against NTFS Junctions, Symbolic Links, and Alternate Data Stream
 
 import os
 import sys
-import ctypes
 from typing import Optional
+
+from ._win32 import get_final_path_win32
 
 
 class PathIdentity:
@@ -33,19 +34,44 @@ class PathIdentity:
         # Guard against Alternate Data Streams (ADS)
         cls._validate_no_ads(path)
 
-        # Guard against raw device namespace escapes
-        if path.startswith(("\\\\.\\", "\\\\?\\")):
+        # Guard against raw device / NT namespaces (including forward-slash and leading-whitespace variants)
+        normalized_prefix = path.lstrip().replace("/", "\\")
+        if normalized_prefix.startswith(("\\\\.\\", "\\\\?\\")):
             raise ValueError("Direct device and raw NT namespaces are prohibited.")
 
         norm_path = os.path.normpath(os.path.abspath(path))
 
-        # On Windows, resolve reparse points (symlinks/junctions) via GetFinalPathNameByHandleW
-        if sys.platform == "win32" and os.path.exists(norm_path):
+        # On Windows, resolve reparse points (symlinks/junctions) via GetFinalPathNameByHandleW,
+        # walking up to the nearest existing ancestor when the leaf path does not yet exist.
+        if sys.platform == "win32":
+            resolved = cls._resolve_win32_with_ancestors(norm_path)
+            if resolved:
+                return resolved
+
+        return os.path.realpath(norm_path)
+
+    @classmethod
+    def _resolve_win32_with_ancestors(cls, norm_path: str) -> Optional[str]:
+        if os.path.exists(norm_path):
             final_path = cls._get_final_path_win32(norm_path)
             if final_path:
                 return final_path
+            return None
 
-        return os.path.realpath(norm_path)
+        probe = norm_path
+        pending_parts = []
+        while True:
+            parent = os.path.dirname(probe)
+            if parent == probe:
+                break
+            pending_parts.append(os.path.basename(probe))
+            probe = parent
+            if os.path.exists(probe):
+                final_ancestor = cls._get_final_path_win32(probe)
+                if final_ancestor:
+                    return os.path.normpath(os.path.join(final_ancestor, *reversed(pending_parts)))
+                break
+        return None
 
     @classmethod
     def _validate_no_ads(cls, path: str) -> None:
@@ -59,64 +85,7 @@ class PathIdentity:
     @classmethod
     def _get_final_path_win32(cls, file_path: str) -> Optional[str]:
         """Queries kernel for the true final volume path via GetFinalPathNameByHandleW."""
-        try:
-            from ctypes import wintypes
-
-            k32 = ctypes.windll.kernel32
-            k32.CreateFileW.argtypes = [
-                wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
-                wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE
-            ]
-            k32.CreateFileW.restype = wintypes.HANDLE
-            k32.GetFinalPathNameByHandleW.argtypes = [
-                wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD
-            ]
-            k32.GetFinalPathNameByHandleW.restype = wintypes.DWORD
-            k32.CloseHandle.argtypes = [wintypes.HANDLE]
-            k32.CloseHandle.restype = wintypes.BOOL
-
-            FILE_READ_ATTRIBUTES = 0x0080
-            FILE_SHARE_READ = 0x0001
-            FILE_SHARE_WRITE = 0x0002
-            FILE_SHARE_DELETE = 0x0004
-            OPEN_EXISTING = 3
-            FILE_FLAG_BACKUP_SEMANTICS = 0x02000000  # Allows opening directories as well as files
-            INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
-
-            handle = k32.CreateFileW(
-                file_path,
-                FILE_READ_ATTRIBUTES,
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                None,
-                OPEN_EXISTING,
-                FILE_FLAG_BACKUP_SEMANTICS,
-                None
-            )
-            if not handle or handle == INVALID_HANDLE_VALUE or handle == -1:
-                return None
-
-            try:
-                buf_len = 1024
-                buf = ctypes.create_unicode_buffer(buf_len)
-                # VOLUME_NAME_DOS = 0x0
-                res = k32.GetFinalPathNameByHandleW(handle, buf, buf_len, 0)
-                if res >= buf_len and res <= 32768:
-                    buf_len = res + 1
-                    buf = ctypes.create_unicode_buffer(buf_len)
-                    res = k32.GetFinalPathNameByHandleW(handle, buf, buf_len, 0)
-                if 0 < res < buf_len:
-                    clean = buf.value
-                    # Strip \\?\ prefix returned by Win32
-                    if clean.startswith("\\\\?\\UNC\\"):
-                        clean = "\\\\" + clean[8:]
-                    elif clean.startswith("\\\\?\\"):
-                        clean = clean[4:]
-                    return os.path.normpath(clean)
-            finally:
-                k32.CloseHandle(handle)
-        except Exception:
-            pass
-        return None
+        return get_final_path_win32(file_path)
 
     @classmethod
     def is_within_directory(cls, candidate_path: str, parent_directory: str) -> bool:
@@ -141,9 +110,15 @@ class PathIdentity:
             can_b = cls.canonicalize(path_b)
             if os.path.normcase(can_a) == os.path.normcase(can_b):
                 return True
-            # Check filesystem inode / device identity (handles hard links across Windows NTFS and POSIX)
             if os.path.exists(can_a) and os.path.exists(can_b):
                 return os.path.samefile(can_a, can_b)
             return False
         except Exception:
             return False
+
+    @classmethod
+    def is_same_or_within(cls, candidate_path: str, parent_directory: str) -> bool:
+        """Returns True if candidate_path equals or lies inside parent_directory."""
+        return cls.is_same_file(candidate_path, parent_directory) or cls.is_within_directory(
+            candidate_path, parent_directory
+        )

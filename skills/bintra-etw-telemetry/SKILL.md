@@ -50,9 +50,14 @@ Every captured `EtwEventRecord` carries an explicit `"source"` provenance tag:
 ```
 *(Supports `action`: `"audit"`, `"session"`, `"providers"`, `"provider_info"`, `"active_kernel"` with optional `session_name`, `guid`, `query`, `limit`.)*
 
-**CLI Command:**
+**CLI Commands:**
 ```powershell
+# Active ETW sessions & kernel/TDH provider inspection:
 bintra etw-audit --format json
+bintra etw-audit --session Bintra_Diagnostic_Trace --format json
+bintra etw-audit --providers --query Kernel --limit 50 --format json
+bintra etw-audit --provider-info "{22FB2CD6-0E7B-422B-A0C7-2FAD1FD0E716}" --format json
+bintra etw-audit --active-kernel --limit 50 --format json
 ```
 
 ### Task B: Capturing & Correlating Pre-Crash Event Timelines
@@ -68,6 +73,7 @@ bintra etw-audit --format json
   }
 }
 ```
+*(Capture `duration_seconds` is capped at `300.0` seconds. Captured timelines can also be pushed into a live Ghidra session via `bintra_ghidra_live_bridge` with `action: "inject_etw"` and `timeline_report`.)*
 
 **CLI Command:**
 ```powershell

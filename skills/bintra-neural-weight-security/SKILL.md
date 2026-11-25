@@ -64,7 +64,7 @@ flowchart TD
     
     subgraph SurgeryFlow[Column Direction Subtraction]
         G1[Identify Pathological Attractor Tensor e.g. mlp.down_proj]
-        G2[Call bintra_patch_weights with column_direction_subtract]
+        G2["Apply column_direction_subtract (bintra_patch_weights / patch-weights)"]
         G3[Write Patched Safetensors to Dedicated Workspace]
         G4[Verify Frobenius Perturbation Delta < epsilon]
     end
@@ -112,7 +112,7 @@ bintra wsp-audit --model "C:\path\to\model.safetensors"
 
 **Key Diagnostic Output Keys (`bintra_wsp_audit` / `wsp-audit`):**
 - `effective_rank_analysis.effective_rank` (plus `.participation_ratio`, `.max_possible_rank`, `.inferred_domain_profile`): Spectral entropy measure of weight diversity.
-- `zero_eval_security_audit.potential_backdoor_detected` (plus `.max_neuron_norm_zscore`, `.suspect_trigger_neurons`): Heuristic flag checking two conditions ($> 4.5\sigma$ row/neuron norm outlier **and** elevated spike concentration); benign dense outliers in normalization/outlier channels can elevate z-scores and require inspecting `suspect_trigger_neurons` before concluding malicious compromise.
+- `zero_eval_security_audit.potential_backdoor_detected` (plus `.max_neuron_norm_zscore`, `.suspect_trigger_neurons`, `.max_input_channel_norm_zscore`, `.suspect_input_channel_neurons`, `.suspect_axes`): Heuristic dual-axis check inspecting both row/output-neuron norm outliers and column/input-channel norm outliers ($> 4.5\sigma$ with elevated spike concentration); benign dense outliers in normalization or attention-sink channels can elevate z-scores and require inspecting `suspect_trigger_neurons`, `suspect_input_channel_neurons`, and `suspect_axes` before concluding malicious compromise.
 - `surgical_amenability.is_amenable_to_weight_surgery` (plus `.wsp_prognosis`, `.recommended_num_columns`, `.spectral_dominance_ratio`): Assesses whether the model is amenable to localized column intervention vs capability deficit.
 - `cross_layer_induction.copying_heads_detected` / `.copying_head_density` (when 2+ tensors exist): Cross-layer induction alignment metrics.
 
@@ -146,12 +146,17 @@ bintra patch-weights `
   --num-columns 64
 ```
 
-**Additional Weight-Space CLI Diagnostics (`bintra`):**
-- `bintra subspace --model <m> --tensor <t> [--mode svd_modes|sparse_extremes|coordinate_slice]`
-- `bintra decompile --model <m> --tensor <t> [--circuit-type attention_head|mlp_projection|layer_norm_drift]`
+**Additional Weight-Space CLI Diagnostics & Prompt (`bintra` / MCP):**
+- MCP Prompt `audit_neural_weights`: Guided workflow chaining `bintra_wsp_audit` and `bintra_patch_weights` inspection without mutating source models.
+- `bintra subspace --model <m> --tensor <t> [--mode svd_modes|sparse_extremes|coordinate_slice] [--top-k 8]`
+- `bintra decompile --model <m> --tensor <t> [--layer 0] [--head 0] [--num-heads 16] [--circuit-type attention_head|mlp_projection|layer_norm_drift]` *(alias: `decompile-circuit`)*
 - `bintra diff-weights --baseline <orig> --patched <new> --tensor <t>` (`frobenius_relative_shift`, `is_within_safety_bound`)
-- `bintra probe-trace --model <m> --prompt "<text>"` (seeded SVD operator simulation)
-- `bintra verify-behavior --baseline <orig> --patched <new>` (`is_equilibrium_preserved`, `max_frobenius_relative_shift`)
+- `bintra probe-trace --model <m> --prompt "<text>" [--max-tokens 32]` (seeded SVD operator simulation)
+- `bintra verify-behavior --baseline <orig> --patched <new> [--tolerance 0.005]` (`is_equilibrium_preserved`, `max_frobenius_relative_shift`)
+- *(Archived experimental lineage — [SCOPE.md](../../SCOPE.md): `bintra synthesize-weights` is decoupled from core v1.1 scope and requires explicit `--archived-lineage` opt-in.)*
+
+> [!NOTE]
+> **Fail-Closed Audit Persistence:** Mutating operations (`bintra patch-weights`) initialize `AuditLogger` fail-closed before writing output files; audit initialization failures abort with `AUDIT_INIT_FAILED` (exit code `1`).
 
 **Output Keys (`bintra_patch_weights` / `patch-weights`):**
 - `output_path`, `output_sha256`, `patched_tensor_names`: Patched workspace artifact and integrity digest.

@@ -86,9 +86,20 @@ bintra patch-binary `
   --offset 0x1A40 `
   --patch-hex "90 90"
 
-# 3. Verify the patched binary integrity
+# 3. Direct engine alias (`patch`) & force override flag when intentionally altering stack layout
+bintra patch `
+  --source "C:\path\to\target.exe" `
+  --output ".\workspace\target_patched.exe" `
+  --offset 0x1A40 `
+  --patch-hex "90 90" `
+  --force
+
+# 4. Verify the patched binary integrity
 bintra inspect --file ".\workspace\target_patched.exe"
 ```
+
+- **Flag Aliases & Safe Auto-Output (`patch-binary`):** `bintra patch-binary` normalizes `--file`, `--binary`, and `--input` to `--source`, and `--patch` to `--patch-hex`. If `--output` is omitted on `patch-binary`, it defaults to `<workspace>/patched_<basename>` inside `ExecutionGuard.get_current_scope().workspace_dir` (while rejecting in-place or target-directory writes if an explicit `--output` violates confinement). Passing `--force` (alias `--no-enforce-nociception`) overrides the nociceptive stack balance guard.
+- **Fail-Closed Audit Logging:** Mutating commands initialize `AuditLogger` fail-closed before applying disk writes; initialization failure aborts immediately with `AUDIT_INIT_FAILED` (exit code `1`).
 
 ---
 
@@ -111,7 +122,7 @@ When vibe-coding patches for the user, use these canonical, stack-safe patterns:
 ## 5. Post-Patch Verification Checklist
 
 After `bintra_patch_binary` or `patch-binary` completes, inspect these exact returned fields:
-1. `is_safe` / `is_stack_safe`: `true` (heuristic stack balance guard passed).
+1. `is_safe` / `is_stack_safe` & `pain_score` / `nociceptive_pain_score` / `nociceptive_hazards`: `is_stack_safe: true` and hazard breakdown confirming stack frame proprioception passed (blocks when `enforce_nociception=True` and `pain_score >= 0.6`).
 2. `pe_checksum_recalculated` & `new_pe_checksum`: `true` and updated PE header checksum hex.
 3. `original_sha256` & `patched_sha256`: Distinct digests confirming source binary remained untouched (`Safety Kernel` `source_file` immutability).
 4. `output_file`: Destination path inside the authorized workspace directory (alongside `file_offset`, `virtual_rva`, `target_section`, and `is_in_executable_section`).

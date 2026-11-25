@@ -1,9 +1,10 @@
-# Ghidra Integration Architecture & Operational Guide (v1.0.0)
+# Ghidra Integration Architecture & Operational Guide (v1.1.0)
 
 ## Overview
-Bintra provides two complementary integration architectures with Ghidra (target 12.1.x / 11.x):
-1. **Asynchronous Localhost IPC Bridge (`ghidra_live_bridge.py` & `BintraLiveBridgeService.py`):** Authenticated localhost JSON-RPC 2.0 server at `127.0.0.1:41718` (`ThreadingMixIn` concurrent HTTP, 5.0s socket timeout, 2 MiB body limit returning HTTP 413, bounded command queue capped at 2000 entries with `queue_overflow_count`). Enqueues Crash RCA attributions, VAD memory maps, reconstructed C data structures (`address_space: "va"`), multi-level pointer scan paths (`address_space: "va"`), and ETW timelines for atomic commit when `BintraLiveBridgeService.py` polls `ghidra.poll_commands` inside Ghidra (~1.0s loop) using `currentProgram.startTransaction(...)`. Workspace markers use confined `.bintra_bridge.json`, while optional system temp markers are mediated via `Capability.TEMPDIR_MARKER_WRITE` (disable with `--no-temp-marker` or `"publish_temp_marker": false`).
-2. **File-Exchange + Headless Orchestration (`BintraGhidraBridge.java` & `cli.py ghidra-headless`):** Automates offline batch deobfuscation, High P-Code extraction, and mutation plan generation via Ghidra's `analyzeHeadless.bat`.
+Bintra provides three complementary integration surfaces with Ghidra (target 12.1.x / 11.x):
+1. **Asynchronous Localhost IPC Bridge (`ghidra_live_bridge.py` & `BintraLiveBridgeService.py`):** Authenticated localhost JSON-RPC 2.0 server at `127.0.0.1:41718` (`ThreadingMixIn` concurrent HTTP, 5.0s socket timeout, 2 MiB body limit returning HTTP 413, bounded command queue capped at 2000 entries with `queue_overflow_count`). Supports diagnostic injection (`bintra.inject_*`), live function fetching (`bintra.request_live_function_fetch` queuing `FETCH_FUNCTION_DEEP`), and cached query RPCs (`bintra.query_call_graph`, `bintra.query_data_flow`, `bintra.query_decompiled_c`, `ghidra.query_cached_functions`). Commits happen when `BintraLiveBridgeService.py` polls `ghidra.poll_commands` inside Ghidra (~1.0s loop) using `currentProgram.startTransaction(...)`. Workspace markers use confined `.bintra_bridge.json`, while optional system temp markers are mediated via `Capability.TEMPDIR_MARKER_WRITE` (disable with `--no-temp-marker` or `"publish_temp_marker": false`).
+2. **Indexed Export Store & Offline Analysis (`ghidra_export_store.py`, `ghidra_pcode_vectorizer.py`, `analysis_orchestrator.py`):** `GhidraExportStore` unifies `.json`, streamed `.jsonl`, and SQLite `.db` caches (`SQLITE_AUTO_INGEST_THRESHOLD_BYTES = 2 MiB`) for `ghidra-analyze`, `ghidra-callgraph`, `ghidra-dataflow`, `ghidra-similar`, `diff-binaries --mode ghidra_export`, and provenance-checked `fuse-evidence`.
+3. **Headless Orchestration (`BintraGhidraBridge.java` & `ghidra_headless_runner.py`):** `GhidraHeadlessRunner` wraps `analyzeHeadless` / `analyzeHeadless.bat` with transient project isolation (`GhidraProjectGuard`), bounded timeouts (returning exit code `124` on timeout), script error detection (`script_error_detected`), and metrics parsing.
 
 ---
 
@@ -57,9 +58,13 @@ sequenceDiagram
 | **Ghidra Live Service** | [`ghidra_scripts/BintraLiveBridgeService.py`](../../../ghidra_scripts/BintraLiveBridgeService.py) | Python/PyGhidra background script polling the bridge (~1.0s) and committing atomic Ghidra transactions with explicit `rva`/`va` resolution. |
 | **Native Java Bridge** | [`ghidra_scripts/BintraGhidraBridge.java`](../../../ghidra_scripts/BintraGhidraBridge.java) | Zero-external-dependency Java `GhidraScript` for offline P-Code extraction and batch mutation. |
 | **Python / PyGhidra Bridge** | [`ghidra_scripts/bintra_extract_pcode.py`](../../../ghidra_scripts/bintra_extract_pcode.py) | Python variant for Jython / PyGhidra headless environments. |
-| **CLI Analysis Engine** | `python src/cli.py ghidra-analyze` | Batch-processes exported Ghidra JSON files, runs algebraic deobfuscation, and outputs mutation plans. |
-| **Headless CLI Orchestrator** | `python src/cli.py ghidra-headless` | Wraps Ghidra's `analyzeHeadless.bat` into a single, automated Bintra command for Windows. |
-| **Bridge CLI Controller** | `python src/cli.py ghidra-bridge` | Manages bridge daemon (`--start`, `--daemon`, `--stop`, `--status`, `--no-temp-marker`) and queued diagnostic injections. |
+| **Export Store Engine** | [`src/ghidra_export_store.py`](../../../src/ghidra_export_store.py) | `GhidraExportStore`: unified `.json`, streaming `.jsonl`, and SQLite `.db` indexed storage (`> 2 MiB` auto-ingest). |
+| **Headless Runner Engine** | [`src/ghidra_headless_runner.py`](../../../src/ghidra_headless_runner.py) | `GhidraHeadlessRunner`: shared CLI & MCP `analyzeHeadless` launcher with `GhidraProjectGuard`, timeout (`124`), and error tracking. |
+| **P-Code Vectorizer** | [`src/ghidra_pcode_vectorizer.py`](../../../src/ghidra_pcode_vectorizer.py) | 64-D High P-Code + CFG topology embeddings and `PcodeSimilarityIndex` nearest-routine search. |
+| **CLI Analysis Engine** | `bintra ghidra-analyze` | Batch-processes `.json`/`.jsonl`/`.db` exports, filters by `--query`/`--opcode`/`--xref`/`--sensitive-only`, converts `--to-sqlite`, or generates mutation plans. |
+| **Topology / Slice / Clone CLI** | `bintra ghidra-callgraph`, `ghidra-dataflow`, `ghidra-similar` | Offline call graphs, SSA def-use slices, and 64-D P-Code similarity search (supports `fuse-evidence` SHA-256 provenance verification). |
+| **Headless CLI Orchestrator** | `bintra ghidra-headless` | Wraps `GhidraHeadlessRunner` (`--timeout`, `--max-cpu`, `--keep-project`, `--post-script`, `--apply`). |
+| **Bridge CLI Controller** | `bintra ghidra-bridge` | Manages bridge daemon (`--start`, `--daemon`, `--stop`, `--status`, `--no-temp-marker`) and queued diagnostic injections. |
 
 ---
 
@@ -110,12 +115,14 @@ To deobfuscate and annotate a binary on Windows in a single automated step:
 python src/cli.py ghidra-headless --binary "C:\path\to\target.exe" --apply
 ```
 
-### Method C: Offline File Exchange
-If analyzing binaries across isolated machines or air-gapped environments:
+### Method C: Offline File Exchange, Query & Similarity Search
+If analyzing exported Ghidra programs across isolated machines or large `.jsonl` / `.db` stores:
 ```powershell
-# 1. Analyze exported P-code JSON
-python src/cli.py ghidra-analyze --input exported_pcode.json --output mutation_plan.json
+# 1. Analyze exported P-code JSON / JSONL / DB, or index to SQLite
+bintra ghidra-analyze --input exported_pcode.json --output mutation_plan.json --to-sqlite .\workspace\prog.db
 
-# 2. Inspect generated mutation plan
-cat mutation_plan.json
+# 2. Query call graphs, SSA data-flow slices, and behavioral P-code clones
+bintra ghidra-callgraph --input .\workspace\prog.db --function target_fn --max-depth 4
+bintra ghidra-dataflow --input .\workspace\prog.db --function target_fn --var param_1
+bintra ghidra-similar --input .\workspace\prog.db --function target_fn --threshold 0.75 --min-pcode-ops 5
 ```

@@ -68,15 +68,15 @@ from security import ExecutionGuard, Capability
 Bintra provides **7 specialized sub-skills** (plus the [`bintra`](skills/bintra/SKILL.md) master router = 8 total skills):
 
 1. **[`bintra-binary-dissection`](skills/bintra-binary-dissection/SKILL.md):**  
-   Anatomy inspection, ASLR/DEP/CFG mitigations, REX-aware opaque predicates, CFF dispatcher loops, cross-architecture matching (x86-64 vs ARM64), 10 Metaphorical Senses.
+   Unified `triage`, PE32/PE32+/ELF anatomy & ASLR/DEP/CFG mitigations, `.pdata`/RTTI/PDB deep forensics, semantic binary diffing, slack/overlay inspection (`slack-audit`), Python `.pyc` bytecode forensics (`py-bytecode`), REX-aware opaque predicates, CFF dispatcher loops, cross-arch matching (x86-64 vs ARM64), 10 Metaphorical Senses.
 2. **[`bintra-safe-binary-patching`](skills/bintra-safe-binary-patching/SKILL.md):**  
-   Safe byte modification, stack frame balance proprioception ($\Delta RSP/RBP$ guard), automated PE checksum recalculation, strict workspace isolation.
+   Safe byte modification, stack frame balance proprioception ($\Delta RSP/RBP$ guard), automated PE checksum recalculation, strict workspace isolation, fail-closed `AuditLogger` persistence.
 3. **[`bintra-windows-troubleshooter`](skills/bintra-windows-troubleshooter/SKILL.md):**  
-   Crash diagnostics (0xc0000005, NULL dereference), MiniDump (.dmp) inspection, Restart Manager file locks, loaded DLL tracking, driver problem codes (`CM_PROB_*`).
+   Crash diagnostics (0xc0000005, `access_violation_details`), MiniDump (.dmp) & WER inspection, Restart Manager file locks, DLL/API-Set/SxS dependency resolution, COM/LPT ports, PnP topology & hardware-to-ring0 dissection, dual-view registry, Authenticode/Catalog verification (`sig-verify`/`sig-audit`), causal evidence fusion (`fuse-evidence`).
 4. **[`bintra-neural-weight-security`](skills/bintra-neural-weight-security/SKILL.md):**  
-   Safetensors weight auditing without execution, backdoor/trojan outlier neurons ($>4.5\sigma$), spectral effective rank, selective column direction subtraction without training.
+   Safetensors weight auditing without execution, dual-axis row/column trojan outliers ($>4.5\sigma$), spectral effective rank, selective column direction subtraction without training, `audit_neural_weights` prompt.
 5. **[`bintra-live-runtime-analysis`](skills/bintra-live-runtime-analysis/SKILL.md):**  
-   Passive VAD layout (`VirtualQueryEx`), read-only `PROCESS_VM_READ` First/Next scans (`session_id`, zero-fill-free reads), depth 1-3 pointer path discovery, 4-byte-granularity struct dissection, Crash RCA.
+   Passive VAD layout (`VirtualQueryEx`), read-only `PROCESS_VM_READ` First/Next scans (`session_id`, zero-fill-free reads), depth 1-3 pointer path discovery, 4-byte-granularity struct dissection, longitudinal `proc-profile` leak diagnosis, CPython memory forensics (`py-mem-inspect`), Crash RCA.
 6. **[`bintra-etw-telemetry`](skills/bintra-etw-telemetry/SKILL.md):**  
    Native `OpenTraceW`/`ProcessTrace` ETW consumption (elevated), `WEVTAPI` Event Log + Toolhelp32 `IMAGE_LOAD` fallback, explicit source provenance, strict PID filtering, temporal crash correlation.
 7. **[`bintra-ghidra-integration`](skills/bintra-ghidra-integration/SKILL.md):**  
@@ -112,39 +112,74 @@ Bintra provides **7 specialized sub-skills** (plus the [`bintra`](skills/bintra/
 | `sense` | Holistic 10-sense perception | `--file <path>` or `--hex "<bytes>"` | `active_senses_count`, `overall_sensory_efficiency`, `senses` |
 | `match-pcode` | Architecture-invariant P-code matching | `--func1 <file.json> --func2 <file.json>` | `pcode_cosine_similarity`, `is_semantic_match`, `confidence` |
 | `deobfuscate-pcode`| Simplify P-code dead branches | `--file <pcode.json>` | `is_obfuscated`, `opaque_predicates_count`, `prunable_operations` |
-| `ghidra-analyze`| Batch-analyze exported Ghidra P-Code | `--input <export.json> --output <plan.json>` | `analyzed_functions`, `rename_actions`, `comment_actions`, `summary` |
-| `ghidra-headless`| Run Ghidra headless deobfuscation | `--binary <path> [--apply]` | Executes `BintraGhidraBridge.java` via `analyzeHeadless.bat` |
-| `wsp-audit` | Audit embedded weights | `--model <model.safetensors>` | `primary_tensor`, `effective_rank_analysis`, `surgical_amenability`, `zero_eval_security_audit` |
-| `patch-weights` | Column direction subtraction | `--source <in> --output <out> --tensor <t>` | `output_path`, `output_sha256`, `patched_tensor_names`, `metrics` |
+| `ghidra-plan` | Generate Ghidra database mutation plan | `--address <addr> --name <name> [--return-type void] [--comment <txt>]` | Target address, recovered symbol, signature & comment plan |
+| `ghidra-analyze`| Batch-analyze/query Ghidra P-Code export | `--input <export.json\|.jsonl\|.db> [--output <plan.json>] [--to-sqlite <db>] [--query <q>] [--opcode <op>] [--xref <sym>] [--function <fn>] [--sensitive-only] [--profile] [--limit 50]` | `analyzed_functions`, `rename_actions`, `comment_actions`, `summary` |
+| `ghidra-headless`| Run Ghidra headless deobfuscation | `--binary <path> [--ghidra-path <dir>] [--project-dir <dir>] [--post-script BintraGhidraBridge.java] [--apply] [--timeout 300] [--max-cpu <n>] [--keep-project]` | `exit_code`, `is_timeout`, `script_error_detected`, `analyzed_functions_count` |
+| `wsp-audit` | Audit embedded weights | `--model <model.safetensors> [--tensor <name>]` | `primary_tensor`, `effective_rank_analysis`, `surgical_amenability`, `zero_eval_security_audit` |
+| `patch-weights` | Column direction subtraction | `--source <in> --output <out> --tensor <t> [--operation column_direction_subtract] [--num-columns 64]` | `output_path`, `output_sha256`, `patched_tensor_names`, `metrics` |
+| `subspace` | SVD / sparse weight subspace extraction | `--model <m> --tensor <t> [--mode svd_modes\|sparse_extremes\|coordinate_slice] [--top-k 8]` | Extracted singular modes / subspace coordinates |
+| `decompile` | Decompile attention/MLP/LN weight circuit | `--model <m> --tensor <t> [--layer 0] [--head 0] [--num-heads 16] [--circuit-type <c>]` *(alias: `decompile-circuit`)* | Reconstructed pseudocode circuit representation |
+| `diff-weights` | Compare baseline vs patched tensors | `--baseline <orig> --patched <new> --tensor <t>` | Frobenius relative shift & safety bound report |
+| `probe-trace` | Seeded spectral SVD operator trace | `--model <m> --prompt "<text>" [--max-tokens 32]` | Layer-wise operator trace telemetry |
+| `verify-behavior`| Verify weight equilibrium & Lipschitz bound | `--baseline <orig> --patched <new> [--tolerance 0.005]` | `is_equilibrium_preserved`, `max_frobenius_relative_shift` |
 | `win-audit` | Profile host OS, graphics, security | `[--binary <path>] [--format json\|md]` | `os`, `devices`, `security` |
-| `resolve-deps` | Safe DLL search order & exports audit | `--binary <path> [--format json\|md]` | `verdict`, `loader_mode`, `resolved_dlls`, `missing_dlls` |
+| `resolve-deps` | Safe DLL search order & exports audit | `--binary <path> [--app-dir <dir>] [--format json\|md]` | `verdict`, `loader_mode`, `resolved_dlls`, `missing_dlls` |
 | `wer-inspect` | Scan WER archives & Event Log 1000 | `[--binary <name>] [--format json\|md]` | `wer_reports`, `event_log_errors`, `minidumps` |
-| `diagnose` | Correlate OS, crash & PE into Dossier | `--binary <path> [--crash-json <f.json>] [--ghidra-json <f.json>]` | `verdict`, `severity`, `epistemic_classification`, `root_cause_summary`, `binary_mapping` |
-| `win-cmd` | Execute read-only command from catalog | `[command_id] [--format json\|md]` | `status`, `command_id`, `duration_ms` / `error` |
-| `reg-audit` | Dual-view 11-domain registry audit | `[--domain <name>] [--format json\|md]` | `status`, `domains` / `domain`, `keys_inspected`, `discrepancies` |
-| `hw-audit` | Inspect PnP hardware & CM_PROB_* codes | `[--problems-only] [--format json\|md]` | `status`, `is_hardware_healthy`, `display_adapters`, `problem_devices` |
+| `diagnose` | Correlate OS, crash & PE into Dossier | `--binary <path> [--crash-json <f.json>] [--ghidra-json <f.json>] [--format json\|md]` | `verdict`, `severity`, `epistemic_classification`, `root_cause_summary`, `binary_mapping` |
+| `evidence-graph`| Directed causality EvidenceGraph | `--target <path> [--format json\|mermaid]` | Formal `evidence_graph` / Mermaid diagram |
+| `fuse-evidence` | Fuse PE, Crash RCA & Ghidra with quarantine | `[--binary <exe>] [--dmp <dmp>] [--ghidra-json <exp>] [--function <fn>]` | Provenance-verified fused `evidence_graph` |
+| `win-cmd` | Execute read-only command from catalog | `[list \| <command_id>] [--format json\|md]` | `status`, `command_id`, `duration_ms` / `error` |
+| `process-mitigations` | Inspect target PID security mitigations | `--pid <pid>` | ASLR, DEP, CFG, and exploit mitigation flags |
+| `reg-audit` | Dual-view 11-domain registry audit | `[--domain <name>] [--binary <path>] [--format json\|md]` | `status`, `domains` / `domain`, `keys_inspected`, `discrepancies` |
+| `reg-read` | Read registry key across 64/32/dual views | `--key <subkey> [--hive HKLM\|...] [--view dual\|64\|32\|native] [--format md\|json]` *(alias: `registry-read`)* | Registry values, subkeys & view comparison *(default `md`)* |
+| `reg-search` | Deep search across registry keys & values | `--query <q> [--hive HKLM] [--root-key <k>] [--max-depth 3] [--limit 50] [--format md\|json]` | Matching keys, value names & data *(default `md`)* |
+| `reg-export` | Export registry key to `.reg` format 5.00 | `--key <subkey> [--hive HKLM] [--output <file.reg>] [--recursive] [--max-depth 1] [--view 64\|32]` | Version 5.00 `.reg` export content / path |
+| `reg-import` | Parse `.reg` file & audit live registry drift | `<file.reg> [--diff] [--view 64\|32] [--format md\|json]` | Parsed entries & live registry drift report *(default `md`)* |
+| `hw-audit` | Inspect PnP hardware & CM_PROB_* codes | `[--problems-only] [--class-filter <c>] [--storage] [--format json\|md]` | `status`, `is_hardware_healthy`, `display_adapters`, `problem_devices` |
+| `port-audit` | Audit COM/LPT ports & USB serial bridges | `[--port COM1] [--type all\|serial\|parallel] [--no-modem-status] [--format json\|md]` | `status`, `host_os`, `serial_ports_count`, `serial_ports`, `parallel_ports_count`, `parallel_ports` |
+| `hw-tree` | Authoritative PnP bus hierarchy tree | `[--bus USB\|PCI\|ACPI] [--problems-only] [--format tree\|json\|mermaid] [--max-devices 300]` | `status`, `format`, `total_nodes`, `root_nodes_count`, `roots`, `rendered` *(default `tree`)* |
+| `hw-net` | Audit live network adapters & NDIS links | `[--virtual] [--format json\|md]` | `status`, `total_adapters`, `adapters`, `epistemic_classification` |
+| `hw-dissect` | Multi-layer hardware-to-ring0 dossier | `[keyword] [--format json\|md]` | DevNode-to-driver-to-KASLR dissection report |
+| `net-conns` | Live TCP/UDP table with owning PIDs | `[--pid <pid>] [--format json\|md]` | `status`, `filter_pid`, `total_connections`, `ipv4_count`, `ipv6_count`, `connections` |
 | `driver-audit` | Kernel drivers & image base introspection | `[--format json\|md]` | `total_drivers_loaded`, `graphics_drivers`, `audio_drivers`, `drivers_sample` |
 | `service-audit` | Interrogate SCM service states | `[--format json\|md]` | `total_services_enumerated`, `running_services_count`, `stopped_services_count` |
-| `dmp-inspect` | Multi-stream MiniDump & AV analysis | `[--file <f>] [--scan] [--format json\|md]` | `status`, `system_info`, `exception_info` *(or `total_dumps_discovered`, `crash_reports`)* |
-| `etw-audit` | Audit ETW sessions & providers | `[--session <s>] [--format json\|md]` | `standard_sessions_probed`, `active_sessions`, `providers` |
+| `sig-verify` | Authenticode & `.cat` catalog trust check | `<file> [--no-catalog] [--verify-revocation] [--format json\|md]` | `signature_present`, `is_signed`, `catalog_verified`, `found_in_catalog`, `catalog_hash_algorithm` |
+| `sig-audit` | Bulk directory signature trust triage | `<dir> [--pattern *.sys] [--recursive] [--limit 100] [--format json\|md]` | Directory summary & WHQL/OEM signature classifications |
+| `dmp-inspect` | Multi-stream MiniDump & AV analysis | `[--file <f>] [--scan] [--format json\|md]` | `status`, `system_info`, `exception_info` (`access_violation_details`) |
+| `etw-audit` | Audit ETW sessions & TDH providers | `[--session <s>] [--providers] [--query <q>] [--provider-info <guid>] [--active-kernel] [--limit 50] [--format json\|md]` | `standard_sessions_probed`, `active_sessions`, `providers` |
 | `file-locks` | Detect processes holding file locks | `--file <path>` | `status`, `is_locked`, `usage_classifications`, `locking_processes` |
 | `proc-modules` | Find processes hosting loaded DLL | `--module <name>` | `status`, `query`, `hosting_processes_count`, `hosting_processes` |
-| `sys-perf` | Task Manager Performance tab metrics | `[--format md\|json]` | `status`, `cpu_utilization_percent`, `memory`, `uptime`, `topology` |
-| `proc-list` | Live Task Manager process table | `[--limit N] [--sort s] [--query q]` | `status`, `total_processes`, `matched_processes`, `processes` |
-| `proc-search` | Search processes by keyword / PID | `--query <q> [--limit N]` | `status`, `total_processes`, `matched_processes`, `processes` |
-| `proc-info` | Deep Task Manager telemetry for PID | `--pid <pid>` | `status`, `memory`, `cpu_and_timing`, `io_counters`, `security`, `mitigations` |
-| `dev-match` | Match PnP devices with Driver Store | `[--query <name>] [--problems-only]` | `status`, `devices_audited`, `driver_packages_cataloged`, `device_reports` |
-| `vad-inspect` | Passive virtual memory (VAD) inspection | `--pid <pid> [--address 0x...] [--regions]` | `status`, `is_simulated`, `architecture`, `summary`, `module_count` |
-| `mem-scan` | Read-only value scan (`PROCESS_VM_READ`) | `--pid <pid> --type <t> --mode <m> [--value <v>] [--session-file <f>]` | `session_id`, `data_type`, `scan_type`, `total_candidates`, `candidates_sample` |
-| `pointer-scan` | Backward pointer path resolver (depth 1-3) | `--pid <pid> --target 0x... [--max-depth 1\|2\|3]` | `pid`, `target_address`, `max_depth_searched`, `heuristic`, `paths_count`, `paths` |
-| `dissect-struct`| 4-byte-granularity struct field inference | `--pid <pid> --address 0x... [--size 64]` | `status`, `heuristic`, `fields_count`, `fields`, `c_struct_definition` |
-| `crash-rca` | MiniDump + disassembly root-cause blame | `--dmp <file.dmp> [--binary <exe>]` | `exception_code`, `access_type`, `root_cause_classification`, `confidence`, `culprit_register`, `disassembly_window.code_source`, `blame_details.computed_address` / `probable_caller` |
-| `etw-capture` | Hybrid ETW / Event Log timeline capture | `--session-name <s> [--pid <pid>] [--duration 2.0]` | `session_info`, `events_count`, `event_sources`, `temporal_verdict` |
-| `proc-profile` | Longitudinal process profiler & leak diagnoser | `-p <pid> [-n 10] [-i 0.2] [--format json\|md]` | `status`, `verdict`, `private_bytes_slope`, `working_set_slope`, `handles_slope` |
-| `slack-audit` | Binary slack space & overlay forensic auditor | `-f <path> [--format json\|md]` | `status`, `file_type`, `has_overlay`, `has_slack`, `verdict` |
-| `triage` | Unified binary triage dossier | `-f <path> [--format json\|md] [--skip-deobf] [--skip-sensory] [--skip-hybrid-scan]` | `status`, `file_name`, `target_sha256`, `stage_statuses`, `failed_stages`, `summary`, `evidence_graph` |
-| `ghidra-similar` | P-Code behavioral similar-function search | `--input <export> [--function <name>\|--pcode-file <f.json>] [--threshold 0.75] [--limit 20]` | `status`, `indexed_functions`, `matches` |
+| `sys-perf` | Task Manager Performance tab metrics | `[--format md\|json]` | `status`, `cpu_utilization_percent`, `memory`, `uptime`, `topology` *(default `md`)* |
+| `proc-list` | Live Task Manager process table | `[--limit N] [--sort s] [--query q] [--resolve-users] [--format md\|json]` | `status`, `total_processes`, `matched_processes`, `processes` *(default `md`)* |
+| `proc-search` | Search processes by keyword / PID | `--query <q> [--limit N] [--format md\|json]` | `status`, `total_processes`, `matched_processes`, `processes` *(default `md`)* |
+| `proc-info` | Deep Task Manager telemetry for PID | `--pid <pid> [--format md\|json]` | `status`, `memory`, `cpu_and_timing`, `io_counters`, `security`, `mitigations` *(default `md`)* |
+| `dev-classes` | Device Manager setup class hierarchy | `[--format md\|json]` | Class groups & problem tallies *(default `md`)* |
+| `dev-list` | Enriched active PnP device table | `[--class-filter <c>] [--problems-only] [--limit 50] [--format md\|json]` | Active devices with driver metadata *(default `md`)* |
+| `dev-search` | Search PnP devices, vendors & HW IDs | `<query> [--limit 50] [--format md\|json]` | Matched devices *(default `md`)* |
+| `dev-info` | Full Device Manager properties dossier | `<device> [--format md\|json]` | General, Driver, Hardware IDs & topology *(default `md`)* |
+| `dev-match` | Match PnP devices with Driver Store | `[--query <name>] [--class-filter <c>] [--problems-only]` | `status`, `devices_audited`, `driver_packages_cataloged`, `device_reports` |
+| `vad-inspect` | Passive virtual memory (VAD) inspection | `--pid <pid> [--address 0x...] [--regions] [--format json\|md]` | `status`, `is_simulated`, `architecture`, `summary`, `module_count` |
+| `mem-scan` | Read-only value scan (`PROCESS_VM_READ`) | `--pid <pid> --type <t> --mode <m> [--value <v>] [--session-file <f>] [--format json\|md]` | `session_id`, `data_type`, `scan_type`, `total_candidates`, `candidates_sample` |
+| `pointer-scan` | Backward pointer path resolver (depth 1-3) | `--pid <pid> --target 0x... [--max-depth 1\|2\|3] [--max-offset 4096] [--format json\|md]` | `pid`, `target_address`, `max_depth_searched`, `heuristic`, `paths_count`, `paths` |
+| `dissect-struct`| 4-byte-granularity struct field inference | `--pid <pid> --address 0x... [--size 64] [--name ObjectLayout] [--format json\|c\|md]` | `status`, `heuristic`, `fields_count`, `fields`, `c_struct_definition` |
+| `crash-rca` | MiniDump + disassembly root-cause blame | `--dmp <file.dmp> [--binary <exe>] [--format json\|md]` | `exception_code`, `access_type`, `root_cause_classification`, `confidence`, `culprit_register`, `disassembly_window.code_source`, `image_identity` |
+| `etw-capture` | Hybrid ETW / Event Log timeline capture | `--session-name <s> [--pid <pid>] [--duration 2.0] [--format json\|md]` | `session_info`, `events_count`, `event_sources`, `temporal_verdict` |
+| `proc-profile` | Longitudinal process profiler & leak diagnoser | `--pid <pid> [--samples 10] [--interval 0.2] [--format json\|md]` *(aliases: `process-profile`, `leak-audit`)* | `status`, `target_pid`, `total_samples`, `behavior_classification`, `metrics_summary` (`delta_*`, `slope_*`, `gdi_handles`, `user_handles`), `samples` |
+| `slack-audit` | Binary slack space & overlay forensic auditor | `--file <path> [--format json\|md]` *(aliases: `overlay-inspect`, `inspect-slack`)* | `status`, `format`, `file_size`, `has_trailing_slack`, `slack_bytes_count`, `slack_entropy`, `slack_type` |
+| `triage` | Unified binary triage dossier | `--file <path> [--dmp <dmp>] [--ghidra <exp>] [--format json\|md] [--output <path>] [--skip-deobf] [--skip-sensory] [--skip-hybrid-scan]` | `status`, `file_name`, `target_sha256`, `stage_statuses`, `failed_stages`, `partial_stages`, `summary`, `evidence_graph` |
+| `pe-forensics` | Offline `.pdata`, MSVC RTTI & local PDB audit | `--file <path> [--pdb <path.pdb>] [--limit 500]` | `status`, `file`, `sha256`, `architecture`, `pdata_functions`, `msvc_rtti`, `pdb_correlation`, `slack_and_overlay` |
+| `diff-binaries` | Semantic diff of PEs or Ghidra exports | `--baseline <a.bin> --target <b.bin> [--mode pe\|ghidra_export]` | WL-CFG + P-Code cosine + API/String anchor similarity diff |
+| `py-bytecode` | `.pyc`/`.py`/PyInstaller bytecode disassembly | `--file <path> [--compare-with <p2>] [--limit 50] [--threshold 15]` *(alias: `py-dissect`)* | `status`, `file`, `sha256`, `code_objects_analyzed`, `total_basic_blocks`, `functions` |
+| `py-mem-inspect`| Live CPython object inspection (`PROCESS_VM_READ`) | `--pid <pid> --address 0x... [--type pyobject\|pydict\|pyascii\|pylong]` | Live decoded CPython object telemetry |
+| `ghidra-callgraph`| Offline Ghidra caller/callee & API reachability | `--input <export.json\|.jsonl\|.db> [--function <name>] [--max-depth 4]` | Call graph edges, `CALLIND` sites, XREFs & sensitive API paths |
+| `ghidra-dataflow`| Intra-procedural High P-Code SSA slice | `--input <export.json\|.jsonl\|.db> --function <name> [--var <v>]` | Backward/forward SSA slices & Decompiler C correlation |
+| `ghidra-similar` | P-Code behavioral similar-function search | `--input <export> [--function <name>\|--pcode-file <f.json>] [--threshold 0.75] [--limit 20] [--min-pcode-ops 1] [--format json\|md]` | `status`, `indexed_functions`, `matches` |
 | `ghidra-bridge` | Authenticated localhost Ghidra JSON-RPC | `--start\|--daemon\|--status\|--stop\|--annotate-* [--no-temp-marker]` | `is_running`, `port`, `ghidra_client_connected`, `queued_commands` |
+| `capabilities` | Host-aware MCP/CLI capability manifest | `[--platform all\|cross_platform\|windows_native\|ghidra_required]` | `status`, `host_os`, `total_tools`, `tools`, `recommended_workflows` |
+| `mcp` | Launch JSON-RPC 2.0 stdio MCP server | `bintra mcp` *(alias: `mcp-server` / `bintra-mcp`)* | Stdio MCP JSON-RPC 2.0 server loop |
+| `update` | Check or apply fast-forward git updates | `[--check \| --yes] [--branch main] [--ref <tag_or_sha>]` *(alias: `self-update`)* | Update check (`rc=2` if updates exist) / pull status |
+
+*(Archived experimental lineage outside core v1.1 scope per `SCOPE.md`: `bintra synthesize-weights --archived-lineage ...`.)*
 
 > **Audit Integrity & Failure Disclosures:** Mutation commands (`patch`, `patch-binary`, `patch-weights`, confirmed `update --yes`) fail closed (`AUDIT_INIT_FAILED`) if the hash-chained audit log cannot be recovered or written. Read-only commands surface persistent log degradation via `"audit_degraded": true` and `audit_degraded_reason`.
 
@@ -189,7 +224,7 @@ Bintra provides **7 specialized sub-skills** (plus the [`bintra`](skills/bintra/
 
 ## 6. Deep Reverse Engineering & AI Discoverability Additions (v1.1 Upgrade)
 
-All 7 new tools below are **strictly read-only** (`cap.file.read`) and work **cross-platform** on static PE binaries and Ghidra JSON exports:
+All 8 read-only Deep Reverse Engineering & Discoverability tools below (`cap.file.read`) operate **cross-platform** on static PE binaries and Ghidra exports (alongside `bintra_python_bytecode` and `bintra_cpython_memory_forensics` in Tier 4):
 
 | MCP Tool | CLI Command | Purpose |
 |:---|:---|:---|

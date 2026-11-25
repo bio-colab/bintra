@@ -1,6 +1,6 @@
 # Bintra Safety Policy & Non-Destructive Execution Contract
 
-**Version:** 1.0.0  
+**Version:** 1.1.0  
 **Status:** Active & Mandatory  
 **Applies To:** All MCP Tools, Unified CLI Subcommands, Intelligence Providers, and Autonomous Agents
 
@@ -24,7 +24,7 @@
 5. **Complete Mediation & Audit:** Every OS interaction is inspected, evaluated, and recorded by the central Safety Kernel (`ExecutionGuard`). Both permitted and denied operations produce hash-chained, tamper-evident audit logs.
    - **Strict Mutation Fail-Closed:** Mutating CLI paths (`patch-binary`, `patch-weights`, confirmed `update --yes`) refuse execution (`AUDIT_INIT_FAILED`) if the persistent audit log cannot be initialized, verified, or written.
    - **Explicit Degradation Telemetry:** Read-only diagnostic runs surface audit persistence failures via `"audit_degraded": true` and `stderr` warnings rather than failing silently.
-   - **Scoped Operational Exceptions:** Explicitly documented exceptions outside the catalog/workspace envelope are self-update (`update --yes`), `ghidra-bridge --daemon` launch + `Capability.TEMPDIR_MARKER_WRITE` marker (opt-out via `--no-temp-marker`), `ghidra-headless`, `~/.bintra/logs/audit.jsonl` (plus immutable sealed segments `audit.jsonl.sealed.<first>-<last>.jsonl` that continue the same hash chain once the active journal exceeds `BINTRA_AUDIT_SEGMENT_MB`, default 8 MB), and non-writing Restart Manager handle probes; none weaken target binary immutability (see `SECURITY.md`).
+   - **Scoped Operational Exceptions:** Explicitly documented exceptions outside the catalog/workspace envelope are self-update (`update --yes`), `ghidra-bridge --daemon` launch + `Capability.TEMPDIR_MARKER_WRITE` marker (opt-out via `--no-temp-marker`), `ghidra-headless`, `~/.bintra/logs/audit.jsonl` (plus immutable sealed segments `audit.jsonl.sealed.<first>-<last>.jsonl` that continue the same hash chain once the active journal exceeds `BINTRA_AUDIT_SEGMENT_MB`, default 8 MB, with all sealed segments and the active journal verified chronologically from genesis), and non-writing Restart Manager handle probes; none weaken target binary immutability (see `SECURITY.md`).
 
 ---
 

@@ -32,10 +32,13 @@ Use this skill whenever an agent or engineer needs to inspect the virtual memory
 |:---|:---|:---|:---|
 | **VAD Space Map** | `bintra_vad_inspect` | `vad-inspect --pid <pid> [--address 0x...] [--regions]` | `status`, `is_simulated`, `architecture`, `summary`, `module_count` |
 | **Read-Only Value Scan** | `bintra_memory_scan` | `mem-scan --pid <pid> --type <t> --mode <m> --value <v>` | `session_id`, `data_type`, `scan_type`, `total_candidates`, `candidates_sample` |
-| **Pointer Chain Resolution** | `bintra_pointer_scan` | `pointer-scan --pid <pid> --target 0x... --max-depth 2` | `pid`, `target_address`, `max_depth_searched`, `alignment`, `heuristic`, `paths_count`, `paths` |
-| **Structure Dissection** | `bintra_struct_dissect` | `dissect-struct --pid <pid> --address 0x... --size 64` | `status`, `heuristic`, `fields_count`, `fields`, `c_struct_definition`, `is_partial` |
-| **Crash RCA (DMP+ASM)** | `bintra_crash_rca` | `crash-rca --dmp <file.dmp> [--binary <exe>]` | `exception_code`, `access_type`, `root_cause_classification`, `confidence`, `culprit_register` |
-| **Failure Evidence Graph** | `bintra_evidence_graph` | `diagnose --binary <exe> [--crash-json <f>]` | `verdict`, `severity`, `epistemic_classification`, `evidence_graph`, `mermaid_diagram` |
+| **Pointer Chain Resolution** | `bintra_pointer_scan` | `pointer-scan --pid <pid> --target 0x... [--max-depth 2] [--max-offset 4096]` | `pid`, `target_address`, `max_depth_searched`, `alignment`, `heuristic`, `paths_count`, `paths` |
+| **Structure Dissection** | `bintra_struct_dissect` | `dissect-struct --pid <pid> --address 0x... [--size 64] [--name ObjectLayout] [--format json\|c\|md]` | `status`, `heuristic`, `fields_count`, `fields`, `c_struct_definition`, `is_partial` |
+| **Longitudinal Resource Profiler** | `bintra_profile_process` | `proc-profile --pid <pid> [--samples 10] [--interval 0.2] [--format json\|md]` | `behavior_classification` (`STABLE_EQUILIBRIUM`, `SATURATION_PLATEAU`), `metrics_summary` (`delta_*`, `slope_*`, `gdi_handles`, `user_handles`), `samples` |
+| **CPython Memory Forensics** | `bintra_cpython_memory_forensics` | `py-mem-inspect --pid <pid> --address 0x... --type <pyobject\|pydict\|pyascii\|pylong>` | `status`, `object_type`, decoded live `PyObject`/`PyDict`/`PyASCIIObject`/`PyLong` layout |
+| **Process Inventory & Perf** | `bintra_process_resource_audit` | `proc-list --format json`, `proc-search --query <q> --format json`, `proc-info --pid <pid> --format json`, `sys-perf --format json` | Process list, commit/handles/threads, per-process telemetry *(default `--format md`)* |
+| **Crash RCA (DMP+ASM)** | `bintra_crash_rca` | `crash-rca --dmp <file.dmp> [--binary <exe>]` | `exception_code`, `access_type`, `root_cause_classification`, `confidence`, `culprit_register`, `image_identity` |
+| **Failure Evidence Graph** | `bintra_evidence_graph` | `evidence-graph --target <exe> [--format json\|mermaid]` / `diagnose --binary <exe>` | `verdict`, `severity`, `epistemic_classification`, `evidence_graph`, `mermaid_diagram` |
 
 ---
 
@@ -94,9 +97,13 @@ bintra mem-scan --pid 1234 --type int32 --mode changed --session-file .\workspac
    - Evaluates objects at 4-byte granularity with 64-bit pointer / `.rdata` vftable lookahead and emits per-field `size_bytes`, `confidence`, and `alternatives`.
    - Always inspect `"heuristic": true`, `"is_partial"`, `"bytes_read"` vs `"bytes_requested"`, and `"alternatives"` before treating inferred scalar types (`int32_t`, `float`, `uint64_t`) as final C types without PDB/DWARF symbols.
 3. **Crash Root Cause Analysis (`bintra_crash_rca` / `crash-rca`):**
-   - Code bytes come from the dump's own memory first (`code_source: DUMP_MEMORY`), else from the on-disk image of the *faulting module* only, verified against the dump's TimeDateStamp/SizeOfImage (`image_identity`); a mismatched image is refused. A register is blamed only if `base + index*scale + disp` reproduces the fault address exactly (`computed_address`), otherwise `OPERAND_CONTEXT_MISMATCH`. Execute faults on NULL/invalid IPs report `NULL_FUNCTION_POINTER_CALL` / `INVALID_CONTROL_TRANSFER` with the top-of-stack `probable_caller`; non-AV codes (stowed WinRT, abort, fast-fail with sub-code, heap corruption, ...) are classified from the exception code.
-   - Cross-checks parsed MiniDump exception `operation` / `access_type`, Capstone instruction decoding, and register blame heuristics against memory spatial boundaries. Inspect `confidence` and `memory_spatial_classification` to separate high-confidence NULL dereferences (`< 0x10000`) from dynamic heap/stack faults.
+   - Code bytes come from the dump's own memory first (`image_identity: "RUNTIME_BYTES"`), else from the on-disk image of the *faulting module* only. Strong build identity (`CodeView RSDS` GUID/Age or non-zero PE `CheckSum` + `TimeDateStamp` + `SizeOfImage`) is required to return `"VERIFIED"` (`CONFIDENT_DETERMINISTIC`); `TimeDateStamp + SizeOfImage` alone returns `"HEADER_MATCH_ONLY"` (treated as unverified / `HIGH_HEURISTIC` or `MEDIUM_HEURISTIC`), and mismatched images are refused.
+   - A register is blamed only if `base + index*scale + disp` reproduces the fault address exactly (`computed_address`), otherwise `OPERAND_CONTEXT_MISMATCH`. Execute faults on NULL/invalid IPs report `NULL_FUNCTION_POINTER_CALL` / `INVALID_CONTROL_TRANSFER` with the top-of-stack `probable_caller`; non-AV codes (stowed WinRT, abort, fast-fail with sub-code, heap corruption, ...) are classified from the exception code.
+   - Cross-checks parsed MiniDump exception `operation` / `access_type` (`access_violation_details`), Capstone instruction decoding, and register blame heuristics against memory spatial boundaries. Inspect `confidence` and `memory_spatial_classification` to separate high-confidence NULL dereferences (`< 0x10000`) from dynamic heap/stack faults.
+4. **Longitudinal Resource Profiler (`bintra_profile_process` / `proc-profile`) & Process Exit Contract:**
+   - `bintra_profile_process` bounds `samples_count` to `[2, 120]` (default `10`) and `interval_seconds` to `[0.01, 10.0]` (default `0.2`), sampling Private Bytes, kernel handles, GDI handles (`GR_GDIOBJECTS`), and USER handles (`GR_USEROBJECTS`) via Win32 regression slopes to distinguish `STABLE_EQUILIBRIUM` and `SATURATION_PLATEAU` from active leaks.
+   - On dead/non-existent PIDs or failed memory inspection, CLI commands exit non-zero (`1`).
 
-## Offline MiniDump Memory & VAD Streams
+## Offline MiniDump Memory, Process & Registry Helpers
 - `MiniDumpParser` parses Streams 5, 9, and 16 plus module `CvRecord` (RSDS/NB10 PDB) and `VS_FIXEDFILEINFO`, enabling `read_memory_from_dump()` offline.
-- `bintra process-mitigations --pid <pid>` and `bintra registry-read --hive HKLM --key <subkey>` expose mitigation and registry inspection on the CLI.
+- `bintra process-mitigations --pid <pid>` inspects ASLR/DEP/CFG/CIG process mitigations; `bintra registry-read --hive HKLM --key <subkey> --format json` (alias `reg-read`, default `md`) exposes dual-view registry inspection on the CLI.

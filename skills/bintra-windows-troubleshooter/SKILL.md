@@ -142,8 +142,8 @@ bintra dmp-inspect --file "C:\path\to\crash.dmp"
 ```
 
 **How to Interpret the Root Cause for the User (`exception_info`):**
-- `exception_info.is_null_pointer_dereference`: The app attempted to read/write address `< 0x10000` (e.g. `[rax+0x18]` where `rax=0`). Inspect `access_type` / `operation` and `exception_address`.
-- `exception_info.access_type` (and `operation`): When `0xc0000005` shows `"EXECUTE"` on a non-executable address or unmapped/data page, invoke `bintra_crash_rca` (which inspects disassembly, registers, and VAD/protection semantics) to assess DEP or invalid branch faults via `root_cause_classification`.
+- `exception_info.access_violation_details.is_null_pointer_dereference`: The app attempted to read/write address `< 0x10000` (e.g. `[rax+0x18]` where `rax=0`). Inspect `exception_info.access_violation_details.access_type` / `.operation` and `exception_info.exception_address`.
+- `exception_info.access_violation_details.access_type` (and `.operation`): When `0xc0000005` shows `"EXECUTE"` on a non-executable address or unmapped/data page, invoke `bintra_crash_rca` (which inspects disassembly, registers, and VAD/protection semantics) to assess DEP or invalid branch faults via `root_cause_classification`.
 
 ---
 
@@ -161,7 +161,8 @@ bintra dmp-inspect --file "C:\path\to\crash.dmp"
 
 **CLI Command:**
 ```powershell
-bintra resolve-deps --binary "C:\path\to\app.exe"
+# Supports positional path or --binary / --file, plus optional --app-dir for local Side-by-Side / app-directory search order
+bintra resolve-deps --binary "C:\path\to\app.exe" [--app-dir "C:\path\to\app_dir"] [--format json|md]
 ```
 
 Resolves required imported DLLs, handles `api-ms-win-*` API-Sets, and verifies if required export functions are present.
@@ -190,22 +191,28 @@ Exposes PnP device instance IDs, active problem codes (`CM_PROB_FAILED_START`, `
 
 ---
 
-### Task F: Correlating Failure Dossiers & Deep OS Audits
+### Task F: Correlating Failure Dossiers, Hardware/Network Topology & Deep OS Audits
 
-- **Evidence Correlation (`bintra_correlate_failure_evidence` / `diagnose`):**
+- **Evidence Correlation & Causal Fusion:**
   ```powershell
-  # Pass a JSON crash record (--crash-json), NOT a raw .dmp file (use dmp-inspect / crash-rca for .dmp):
-  bintra diagnose --binary "C:\path\to\app.exe" [--crash-json .\crash_record.json] [--ghidra-json .\pcode.json]
+  # Pass a JSON crash record (--crash-json) to diagnose; for raw .dmp files use triage, fuse-evidence, dmp-inspect, or crash-rca:
+  bintra diagnose --binary "C:\path\to\app.exe" [--crash-json .\crash_record.json] [--ghidra-json .\pcode.json] [--format json|md]
+  bintra evidence-graph --target "C:\path\to\app.exe" [--format json|mermaid]
+  bintra fuse-evidence --binary "C:\path\to\app.exe" --dmp .\crash.dmp [--ghidra-json .\export.json] [--function <name>]
+  bintra triage --file "C:\path\to\app.exe" [--dmp .\crash.dmp] [--format md --output .\workspace\triage.md]
   ```
-  Returns `verdict`, `severity`, `epistemic_classification` (`facts`, `observations`, `hypotheses`, `unknowns`), `root_cause_summary`, `binary_mapping`, `evidence_graph`, and `mermaid_diagram`.
-- **Registry, Hardware, Drivers, Services, Signatures, & Read-Only Catalog Commands:**
-  - `bintra_registry_audit` (`reg-audit [--domain ...]`)
-  - `bintra_hardware_audit` (`hw-audit [--problems-only]`)
-  - `bintra_driver_audit` (`driver-audit`)
-  - `bintra_service_audit` (`service-audit`)
-  - `sig-verify <file_path>` (Cryptographic signature verification: Embedded Authenticode & Security Catalogs `.cat`)
-  - `sig-audit <dir_path> [--pattern <pat>] [--recursive] [--limit <n>]` (Bulk directory digital trust triage)
-  - `bintra_win_catalog_cmd` (`win-cmd [command_id]`)
+  - `bintra_correlate_failure_evidence` (`diagnose`): Returns `verdict`, `severity`, `epistemic_classification` (`facts`, `observations`, `hypotheses`, `unknowns`), `root_cause_summary`, `binary_mapping`, `evidence_graph`, and `mermaid_diagram`.
+  - `bintra_fuse_evidence` (`fuse-evidence`): Merges PE deep forensics, Crash RCA, and Ghidra graphs with SHA-256 provenance quarantine.
+- **Registry, Hardware, Ports, Network, Device Manager, Drivers, Services, Signatures & Triage:**
+  - `bintra_registry_audit`: `reg-audit [--domain <DOM>] [--binary <path>] [--format json|md]`, `reg-read --key <subkey> [--hive HKLM|HKCU|HKCR|HKU|HKCC] [--view dual|64|32|native] --format json`, `reg-search <query> --format json`, `reg-export --key <subkey> [--output <p.reg>] [--recursive]`, `reg-import <p.reg> [--diff] --format json` *(note: `reg-read`/`reg-search`/`reg-import` default to `--format md`)*.
+  - `bintra_hardware_audit` (`hw-audit [--problems-only] [--class-filter <class>] [--storage]`), `bintra_hardware_topology` (`hw-tree [--bus <USB|PCI|ACPI>] [--problems-only] [--format tree|json|mermaid]`, defaults to `tree`), `bintra_port_audit` (`port-audit [--port <COM1>] [--type all|serial|parallel] [--no-modem-status]`).
+  - `bintra_network_audit` (`hw-net [--virtual]`), `bintra_network_hardware_dissect` (`hw-dissect [keyword]`), `bintra_network_connections` (`net-conns [--pid <pid>]`).
+  - `bintra_device_driver_intelligence` (`dev-match [--query <q>] [--class-filter <c>] [--problems-only]`, `dev-classes --format json`, `dev-list --format json`, `dev-search <q> --format json`, `dev-info <device> --format json`; Device Manager commands default to `--format md`).
+  - `bintra_driver_audit` (`driver-audit`), `bintra_service_audit` (`service-audit`), `bintra process-mitigations --pid <pid>`.
+  - `bintra_profile_process` (`proc-profile --pid <pid> [--samples 10] [--interval 0.2]`), `bintra_inspect_slack_space` (`slack-audit --file <path>`).
+  - `sig-verify <file_path> [--no-catalog] [--verify-revocation] [--format json|md]` (also accepts `--file`/`-f`/`--binary`/`-b`/`--path`/`-p`/`--target`/`-t`; Authenticode & `.cat` catalog trust).
+  - `sig-audit <dir_path> [--pattern *.sys] [--recursive] [--limit 100] [--format json|md]` (bulk directory signature triage).
+  - `bintra_win_catalog_cmd` (`win-cmd [list | <command_id>]`).
 
 > [!NOTE]
 > **Platform Caveat:** All Windows NT introspection engines degrade fail-closed on non-Windows hosts (Linux/macOS CI), returning `status: "not_applicable"` with clear explanatory notes rather than raising platform errors.

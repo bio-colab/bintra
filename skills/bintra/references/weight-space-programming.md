@@ -13,7 +13,7 @@ Based on MIT CSAIL research (*"Sparks of Weight-Space Programming: LLMs can nati
 >
 > 1. **Inspecting Embedded Neural Runtimes:** Modern Windows executables (multimedia suites, simulation engines, endpoint agents) embed neural weights in `.rsrc` or `.rodata` sections. Bintra inspects, extracts, and analyzes these models without running unsafe host binaries.
 > 2. **Auditing Without Evaluation (Security & Backdoors):** Detecting hidden Trojan triggers, abnormal rank-1 spikes, and unauthorized decision paths in embedded models prior to execution.
-> 3. **Zero-Gradient Surgical Intervention:** Performing precision modifications on linear projection tables, heuristic matrices, and embedded weights (e.g. `column_direction_subtract` editing 0.016% of weights) without requiring full retraining datasets or compilation toolchains.
+> 3. **Zero-Gradient Surgical Intervention:** Performing precision modifications on linear projection tables, heuristic matrices, and embedded weights (e.g. `column_direction_subtract` editing ~1.56% of weights — 64 of 4096 columns) without requiring full retraining datasets or compilation toolchains. (See [SCOPE.md](../../../SCOPE.md) regarding archived `WeightSpaceCompiler` / `synthesize-weights` status.)
 > 4. **Cross-Architecture & Continuous Semantic Representation:** Transferring the continuous representation concepts (SVD decomposition, effective rank, behavioral trajectory modeling) to native machine code instructions (x86-64 / ARM64).
 
 ---
@@ -28,7 +28,7 @@ Based on MIT CSAIL research (*"Sparks of Weight-Space Programming: LLMs can nati
 
 2. **Fixing Neural & Linear Weights Surgically (Minimal Perturbation):**
    - **Conditional Sub-Circuit Grafting (Exp 4):** Grafting minimal conditional bypass paths (<= 3.5% weights) into dormant/low-energy units to override specific failure states while leaving default execution intact.
-   - **Selective Column Direction Subtraction (Exp 8):** Tracing pathological loop directions to specific linear projection layers and subtracting that direction exclusively from the top $K$ output columns (e.g., 64 columns; 0.016% of total weights), avoiding disruption to non-looping features.
+   - **Selective Column Direction Subtraction (Exp 8):** Tracing pathological loop directions to specific linear projection layers and subtracting that direction exclusively from the top $K$ output columns (e.g., 64 of 4096 columns; 1.56% of total columns), avoiding disruption to non-looping features.
    - **Obstacle Removal vs. Capability Creation (Amenability Diagnostics):** Distinguishing between removable attractor loops (high spectral dominance $\sigma_0 / \sigma_1$, looping states) and intrinsic capability deficits where weight editing cannot synthesize missing information.
 
 3. **Weight Synthesis & Zero-Evaluation Security Auditing (Exp 5, 6 & Security):**

@@ -38,9 +38,12 @@ Architecture details: see [`ghidra-bridge-status.md`](../bintra/references/ghidr
 | Task | MCP Tool | CLI Command (`bintra`) |
 |:---|:---|:---|
 | **P-Code Semantic Match** | `bintra_match_pcode` | `match-pcode --func1 <f1.json> --func2 <f2.json>` |
-| **P-Code Deobfuscation** | `bintra_deobfuscate_pcode` | `deobfuscate-pcode --file <pcode.json>` |
-| **Batch Plan Generation** | `bintra_ghidra_analyze` | `ghidra-analyze --input <export.json> --output <plan.json>` |
-| **Headless Analyzer** | `bintra_ghidra_headless` | `ghidra-headless --binary <target.exe> [--apply]` |
+| **P-Code Deobfuscation** | `bintra_deobfuscate_pcode` | `deobfuscate-pcode [--file <pcode.json> \| --pcode '<json>']` |
+| **Mutation Plan Builder** | `bintra_ghidra_analyze` / CLI planner | `ghidra-plan --address <addr> --name <name> [--return-type void] [--comment <txt>]` |
+| **Batch Analyze & Query** | `bintra_ghidra_analyze` | `ghidra-analyze --input <export.json\|.jsonl\|.db> [--output <plan.json>] [--to-sqlite <db>] [--query <q>] [--opcode <op>] [--xref <sym>] [--function <name>] [--sensitive-only] [--profile] [--limit 50]` |
+| **Headless Analyzer** | `bintra_ghidra_headless` | `ghidra-headless --binary <target.exe> [--ghidra-path <dir>] [--project-dir <dir>] [--project-name <n>] [--post-script BintraGhidraBridge.java] [--apply] [--timeout 300] [--max-cpu <n>] [--keep-project]` |
+| **Ghidra Export Diff** | `bintra_binary_diff` | `diff-binaries --baseline <a.json> --target <b.json> --mode ghidra_export` |
+| **Causal Evidence Fusion** | `bintra_fuse_evidence` | `fuse-evidence [--binary <exe>] [--dmp <crash.dmp>] [--ghidra-json <export>] [--function <name>]` |
 
 > **PowerShell Rule:** Never pass large P-Code JSON arrays inline on PowerShell command lines; write them to workspace files and use `--func1` / `--file` paths.
 
@@ -84,11 +87,15 @@ bintra ghidra-bridge --stop --port 41718
 
 ---
 
-## Deep Read-Only Ghidra Extensions (v1.1)
-- **Offline / Exported Topology & Data-Flow:**
-  - `bintra_ghidra_call_graph` (`bintra ghidra-callgraph --input <export.json>`): Extracts caller/callee edges, indirect `CALLIND` sites, XREFs, and sensitive Win32 API reachability paths.
-  - `bintra_ghidra_data_flow` (`bintra ghidra-dataflow --input <export.json> --function <name>`): Performs intra-procedural High P-Code SSA backward/forward def-use slicing and correlates Decompiler C pseudocode & local variables.
-  - `bintra_ghidra_similar_functions` (`bintra ghidra-similar --input <export.json> --function <name>`): Behavioral nearest-routine search — ranks every function in the export against a reference (in-export function or external P-code stream from `--pcode-file <ref.json>`) using 64-D High P-Code cosine similarity. Use it to locate clone routines, inlined variants, and ported logic; tune `--threshold` (default 0.75) and `--min-pcode-ops` (raise to skip thunks).
+## Deep Read-Only Ghidra Extensions, Provenance Quarantine & Headless Bounds (v1.1)
+- **Offline / Exported Topology & Data-Flow (`GhidraExportStore` supports `.json`, streamed `.jsonl`, and SQLite `.db`):**
+  - `bintra_ghidra_call_graph` (`bintra ghidra-callgraph --input <export> [--function <name>] [--max-depth 4]`): Extracts caller/callee edges, indirect `CALLIND` sites, XREFs, and sensitive Win32 API reachability paths.
+  - `bintra_ghidra_data_flow` (`bintra ghidra-dataflow --input <export> --function <name> [--var <v>]`): Performs intra-procedural High P-Code SSA backward/forward def-use slicing and correlates Decompiler C pseudocode & local variables.
+  - `bintra_ghidra_similar_functions` (`bintra ghidra-similar --input <export> [--function <name> | --pcode-file <ref.json>] [--threshold 0.75] [--limit 20] [--min-pcode-ops 1] [--format json|md]`): Behavioral nearest-routine search via `PcodeSimilarityIndex` (64-D High P-Code cosine similarity; raise `--min-pcode-ops` to skip thunks).
+- **Evidence Fusion & Provenance Quarantine (`bintra_fuse_evidence` / `fuse-evidence`):**
+  - Requires cryptographic `sha256` match against the target PE before admitting a Ghidra export as causal evidence (`CAUSALLY_VALIDATED` / `CAUSALLY_VALIDATED_FAULT_PATHWAY`). Mismatched hashes, mismatched filenames, or exports lacking `sha256` metadata are quarantined (`PROVENANCE_HASH_MISMATCH`, `PROVENANCE_NAME_MISMATCH`, `UNVERIFIED_NO_METADATA`, `UNVERIFIED_PROVENANCE_QUARANTINED`) rather than promoted to causal claims.
+- **Headless Runner Contract (`GhidraHeadlessRunner`):**
+  - Bounded timeout defaults to `300s` (returning `exit_code: 124`, `is_timeout: true`, `is_error: true` on expiration) and scans stdout/stderr for Ghidra script errors (`script_error_detected: true` forces exit `1`), always cleaning transient `GhidraProjectGuard` directories unless `--keep-project` / `delete_project: false` is set.
 - **Live Bridge Read-Only Queries (`ghidra_live_bridge.py` & `BintraLiveBridgeService.py`):**
   - `bintra.request_live_function_fetch` queues `FETCH_FUNCTION_DEEP` in Ghidra to push `callees`, `xrefs`, `decompiled_c`, `signature`, and `pcode_ops`.
   - `bintra.query_call_graph`, `bintra.query_data_flow`, and `bintra.query_decompiled_c` query cached live functions over authenticated localhost JSON-RPC.

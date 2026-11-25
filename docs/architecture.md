@@ -127,15 +127,15 @@ graph TD
   3. **جسر Ghidra المحلي الموثق (`GhidraLiveBridgeServer` و `BintraLiveBridgeService.py`):** خادم HTTP JSON-RPC 2.0 متعدد الخيوط (`ThreadingMixIn`) على `127.0.0.1:41718` يعمل بنمط الطابور والاستطلاع (`1.0s` polling) مع توثيق إلزامي (`AUTH_REQUIRED`) وصلاحية `cap.tempdir.marker.write` لحقن ملاحظات VAD وهياكل C وعلامات Crash RCA داخل قاعدة بيانات Ghidra بأمان.
 
 ### أداة 8: `bintra_triage_binary` و `BinaryTriageOrchestrator` (محرك الفرز الموحد ورسم الأدلة البياني السببي)
-* **المشكلة:** معاناة المحلل أو الوكيل الذكي من التشتت التحليلي واستهلاك استدعاءات متكررة غير مترابطة لفحص ملف تنفيذي واحد (فحص PE، استخراج RTTI، فحص التوقيعات، فحص التعتيم، تحليل الانهيار، ثم تشريح Ghidra).
+* **المشكلة:** معاناة المحلل أو الوكيل الذكي من التشتت التحليلي واستهلاك استدعاءات متكررة غير مترابطة لفحص ملف تنفيذي واحد (فحص PE، استخراج RTTI، فحص التوقيعات، فحص التعتيم، الحواس العشر، حشو الملفات/Overlays، تحليل الانهيار، ثم تشريح Ghidra).
 * **آلية العمل المعمارية الموحدة (`src/analysis_orchestrator.py`):**
-  1. **مسار عمل موحد عابر للواجهات:** يجمع 7 محركات تحليل في خط أنابيب واحد تحت حراسة `ExecutionGuard` الصارمة، متاح بالتساوي عبر سطر الأوامر (`bintra triage`) وخادم MCP (`bintra_triage_binary`).
-  2. **التحقق المشفر من مصدر الأدلة (Provenance Verification):** فحص هوية ملفات تصدير Ghidra ومطابقة تجزئة SHA-256 أو اسم البرنامج مع الملف التنفيذي المستهدف لضمان عدم ربط أدلة من ملفات غريبة في رسم العلاقات.
+  1. **مسار عمل موحد عابر للواجهات:** يجمع مراحل الفحص المتكاملة (فحص PE، التشريح العميق `.pdata`/RTTI/PDB، التحقق من Authenticode، كشف التعمية، القشرة الحسية العشر، فحص نماذج الذكاء الاصطناعي المدمجة، وفحص slack/overlay مع ربط Crash RCA و Ghidra اختيارياً) في خط أنابيب واحد تحت حراسة `ExecutionGuard` الصارمة، متاح بالتساوي عبر سطر الأوامر (`bintra triage`) وخادم MCP (`bintra_triage_binary`).
+  2. **التحقق المشفر من مصدر الأدلة (Provenance Verification):** فحص هوية ملفات تصدير Ghidra ومطابقة تجزئة SHA-256 أو اسم البرنامج مع الملف التنفيذي المستهدف مع عزل التقارير غير الموثقة (`PROVENANCE_HASH_MISMATCH` / `UNVERIFIED_PROVENANCE_QUARANTINED`) لمنع ربط أدلة من ملفات غريبة في رسم العلاقات.
   3. **الفصل الإبستمولوجي الصارم في المخرجات:** تصنيف النتائج إلى "حقائق قطعية مشاهدة" (Observed Facts)، و"مؤشرات استدلالية ظنية" (Heuristic Indicators)، و"خطوات تحقيقية موصى بها" (Recommended Next Steps).
-  4. **رسم الأدلة البياني السببي (Evidence Graph):** ربط أبعاد التحليل (PE Forensics, Authenticode Trust, Obfuscation Signals, Crash Events, Ghidra Topologies) بعلاقات سببية واضحة مع تحديد مصدر الدليل (`evidence_source`)، ومستوى التحقق (`verification_level`)، والدلالة المعنوية للعلاقة (`relation_semantic`)، ودرجة الثقة المعايرة (`epistemic_confidence`).
-  5. **اكتمال ثالوث MCP الحديث (SOTA MCP Triad):** تقديم 51 أداة موسومة بـ `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentHint`)، مع 4 موارد حية (`resources/list`, `resources/read`)، و4 قوالب توجيه لسير العمل (`prompts/list`, `prompts/get`)، ودعم التفاوض على إصدارات البروتوكول وإرجاع `structuredContent`.
+  4. **رسم الأدلة البياني السببي (Evidence Graph):** ربط أبعاد التحليل (PE Forensics, Authenticode Trust, Obfuscation Signals, Sensory/Embedded AI, Slack/Overlays, Crash Events, Ghidra Topologies) بعلاقات سببية واضحة مع تحديد مصدر الدليل (`evidence_source`)، ومستوى التحقق (`verification_level`)، والدلالة المعنوية للعلاقة (`relation_semantic`)، ودرجة الثقة المعايرة (`epistemic_confidence`).
+  5. **اكتمال ثالوث MCP الحديث (SOTA MCP Triad):** تقديم 51 أداة موسومة بـ `annotations` (`readOnlyHint`, `destructiveHint`, `idempotentHint`) بينها `bintra_ghidra_similar_functions` و `bintra_profile_process` و `bintra_inspect_slack_space` و `bintra_list_capabilities` (مع `outputSchema`)، مع 4 موارد حية (`resources/list`, `resources/read`)، و 5 قوالب توجيه لسير العمل (`prompts/list`, `prompts/get`: `triage_pe_binary`, `root_cause_crash`, `audit_windows_host`, `diff_binary_versions`, `audit_neural_weights`)، ودعم الترقيم عبر `cursor`/`nextCursor` والتفاوض على إصدارات البروتوكول وإرجاع `structuredContent`.
 
-> للاطلاع على منظومة القياس الحي وفحص الذاكرة (`bintra_vad_inspect`, `bintra_memory_scan`, `bintra_pointer_scan`, `bintra_struct_dissect`, `bintra_crash_rca`, `bintra_etw_capture`) وأدوات استخبارات ويندوز الـ 34 كاملةً، راجع [`RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md`](RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md).
+> للاطلاع على منظومة القياس الحي وفحص الذاكرة (`bintra_vad_inspect`, `bintra_memory_scan`, `bintra_pointer_scan`, `bintra_struct_dissect`, `bintra_crash_rca`, `bintra_etw_capture`, `bintra_profile_process`, `bintra_cpython_memory_forensics`) ومنظومة أدوات استخبارات ويندوز والتشخيص الكاملة (ضمن منظومة الـ 51 أداة في MCP)، راجع [`RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md`](RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md).
 
 ---
 
@@ -155,7 +155,7 @@ graph TD
 
 1. **مواصفة المهارة الرئيسية والمهارات التخصصية:** اعتماد [`SKILL.md`](../skills/bintra/SKILL.md) كموجه موحد يغطي تحليل PE وواجهات ويندوز والقياس الحي.
 2. **محرك البايثون التنفيذي:** تزويد [`binary_neural_engine.py`](../src/binary_neural_engine.py) و[`bintra_engine.py`](../src/bintra_engine.py) بقدرات فحص الملفات التنفيذية، وكشف الشروط الصماء، والترقيع الجراحي، وتحليل الأوزان الهجينة.
-3. **التحقق التلقائي العابر للمنصات:** التحقق من المحركات عبر حزمة اختبارات شاملة (`440+` اختباراً) على ويندوز ولينكس.
+3. **التحقق التلقائي العابر للمنصات:** التحقق من المحركات عبر حزمة اختبارات شاملة (`466` اختباراً ضمن غطاء `440+` اختباراً على ويندوز ولينكس).
 
 ---
 
@@ -240,6 +240,6 @@ graph TD
    الاستغناء عن الأدوات الخارجية بالاعتماد التام على دوال Windows الأصلية (مثل `RstrtMgr.dll` لكشف أقفال الملفات بديلاً لـ `handle.exe`).
 
 ## Read-Only Reverse Engineering & Hardware Subsystem Upgrades
-- **PE/COFF Directory Coverage (`src/binary_neural_engine.py`):** `BinaryFormatInspector._parse_pe()` extracts Rich Header (`_parse_pe_rich_header`), TLS callbacks (`_parse_pe_tls`), Load Config (`_parse_pe_load_config`), Authenticode (`_parse_pe_security`), and CLR metadata (`_parse_pe_clr`) alongside chunked C-string reads and vectorized checksums.
+- **PE/COFF Directory Coverage (`src/binary_neural_engine.py`):** `BinaryFormatInspector.inspect()` extracts Rich Header, TLS callbacks, Load Config, Authenticode certificates, and CLR/.NET metadata alongside chunked C-string reads and vectorized checksums.
 - **P-Code & Live Bridge (`src/ghidra_pcode_vectorizer.py`, `src/ghidra_live_bridge.py`):** `PcodeVectorizer.vectorize_high_function()` folds `ControlFlowGraphAnalyzer` cyclomatic complexity and back-edge density into 64-D embeddings; `GhidraLiveBridgeServer` exposes `ghidra.query_cached_functions` with lock-protected LRU state and `deque` command buffering.
 - **Hardware & Offline Driver Correlation (`src/windows_intelligence/device_intelligence/`, `system_introspection/device_inspector.py`):** `NativeDeviceInspector` decodes `CM_PROB_*` codes and frees `HDEVINFO` handles via `SetupDiDestroyDeviceInfoList`; `DriverPackageInventory.parse_inf_text()` and `DriverMatcher.match_offline_device_to_infs()` enable cross-platform `.inf` Driver Rank matching.

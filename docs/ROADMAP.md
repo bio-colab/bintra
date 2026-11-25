@@ -22,7 +22,7 @@
 
 ## 2. مراجعة نتائج التدقيق المستقل وحقائق الأداء (Audit Ground Truth Reconciliation)
 
-بناءً على نتائج التدقيق التقني المستقل وحزم الاختبارات الشاملة (440+ اختباراً مؤتمتاً شاملاً لوحدات ويندوز والتدقيق العابر للمنصات)، تم حسم الفجوات بين الادعاءات السابقة والسلوك الفعلي وتثبيتها كالآتي:
+بناءً على نتائج التدقيق التقني المستقل وحزم الاختبارات الشاملة (`466` اختباراً مؤتمتاً عبر `440+` تغطية أساسية لوحدات ويندوز والتدقيق العابر للمنصات)، تم حسم الفجوات بين الادعاءات السابقة والسلوك الفعلي وتثبيتها كالآتي:
 
 | المكون / التقنية | الحالة السابقة قبل المراجعة | الحالة المحققة والمثبتة في v1.0.0 | التوجه والتوصية |
 |---|---|---|---|
@@ -73,10 +73,10 @@
 
 ```mermaid
 flowchart TD
-    M1["المرحلة 1 (منجزة في v1.0.0)<br>✓ اكتمال محركات السلامة والترقيع الجراحي<br>✓ إصلاح CFF وتطويقه بالنافذة الموضعية<br>✓ الامتثال لمعيار JSON-RPC 2.0 (34 أداة / 195 اختباراً آنذاك، والآن 51 أداة / 440+ اختباراً)"]
-    M2["المرحلة 2 (مكتملة التأسيس في v1.0.0 — القياس الحي)<br>✓ VAD + قراءة PROCESS_VM_READ + مستهلك ETW الهجين<br>✓ MiniDump Crash RCA متكامل مع فحص VAD<br>• توسعة TDH لأحداث DXGI / Direct3D11"]
-    M3["المرحلة 3 (قيد التطوير القادم — NTAPI & PDB)<br>• دمج هياكل phnt لفحص PEB / TEB الداخلي<br>• ترطيب رموز PDB محلياً دون شبكة لتسمية الدوال"]
-    M4["المرحلة 4 (جسر Ghidra — منجز في v1.0.0 بنمط الطابور)<br>✓ خادم HTTP JSON-RPC 2.0 موثق مع استطلاع 1.0s و rva/va<br>• تطوير إعادة كتابة SSA CFF تلقائياً داخل Ghidra 12.x"]
+    M1["المرحلة 1 (منجزة في v1.0.0)<br>✓ اكتمال محركات السلامة والترقيع الجراحي<br>✓ إصلاح CFF وتطويقه بالنافذة الموضعية<br>✓ الامتثال لمعيار JSON-RPC 2.0 (34 أداة / 195 اختباراً آنذاك، والآن 51 أداة / 466 اختباراً)"]
+    M2["المرحلة 2 (مكتملة في v1.0.0 ومتوسعة في v1.1.0 — القياس الحي)<br>✓ VAD + قراءة PROCESS_VM_READ + مستهلك ETW الهجين<br>✓ MiniDump Crash RCA مع تحقق CheckSum/RSDS وربط VAD<br>✓ محلل الموارد الطولي proc-profile وفاحص CPython الذاكري<br>• توسعة TDH لأحداث DXGI / Direct3D11"]
+    M3["المرحلة 3 (منجزة في v1.1.0 مع توسع مستقبلي لـ NTAPI)<br>✓ التشريح العميق .pdata و MSVC RTTI وربط PDB/RSDS محلياً دون شبكة<br>✓ الفرز الموحد (triage) ورسم الأدلة السببي مع عزل provenance<br>• توسيع هياكل phnt لفحص PEB / TEB الداخلي"]
+    M4["المرحلة 4 (جسر Ghidra — منجز في v1.0.0 وموسّع في v1.1.0)<br>✓ خادم HTTP JSON-RPC 2.0 موثق مع استطلاع 1.0s و rva/va<br>✓ مخزن SQLite/JSONL، رسم الاستدعاءات/تدفق البيانات، والبحث السلوكي ghidra-similar<br>• تطوير إعادة كتابة SSA CFF تلقائياً داخل Ghidra 12.x"]
 
     M1 --> M2
     M2 --> M3
@@ -84,14 +84,14 @@ flowchart TD
 ```
 
 ### تفاصيل المراحل الجارية والقادمة:
-1. **المرحلة 2: تتبع الأحداث الحي (Live ETW & Telemetry - مُسَلَّم في v1.0.0 مع توسع TDH):**
-   - تم تسليم [`etw_capture_engine.py`](../src/windows_intelligence/runtime_telemetry/etw_capture_engine.py) بالربط مع `EvidenceGraph` و `MiniDumpParser`، ويبقى توسيع فك شيفرات TDH المتخصصة لأحداث GPU/DXGI ضمن الإصدار اللاحق.
+1. **المرحلة 2: تتبع الأحداث الحي والتنميط الطولي (Live ETW, Crash RCA & Profiling — `v1.1.0`):**
+   - تم تسليم [`etw_capture_engine.py`](../src/windows_intelligence/runtime_telemetry/etw_capture_engine.py) بالربط مع `EvidenceGraph` و `MiniDumpParser`، وإضافة التحقق القوي من هوية صورة العطل (CodeView `RSDS` GUID/Age أو PE `CheckSum` غير الصفري لتصنيف `VERIFIED` مقابل `HEADER_MATCH_ONLY`) في [`crash_rca_engine.py`](../src/windows_intelligence/runtime_telemetry/crash_rca_engine.py)، ومحلل الموارد الطولي [`process_profiler.py`](../src/windows_intelligence/process_intelligence/process_profiler.py) (`proc-profile`)، ويبقى توسيع فك شيفرات TDH المتخصصة لأحداث GPU/DXGI ضمن التطوير القادم.
 
-2. **المرحلة 3: تعميق استخبارات النظام ورموز PDB (Native NTAPI Integration):**
-   - استخدام هياكل `phnt` لفحص `PEB` و `TEB` ومصفوفات `ProcessMitigation`، وإضافة محلل PDB محلي يربط إزاحات الانهيار بأسماء الرموز دون أي استرجاع شبكي غير منضبط.
+2. **المرحلة 3: تعميق استخبارات البنية الثابتة وحشو الملفات (PE Deep Forensics & Triage — `v1.1.0`):**
+   - تم إنجاز استخلاص دوال `.pdata` ورموز `RTTI`/`vftables` والتحقق المحلي من `PDB`/`RSDS` في [`pe_deep_forensics.py`](../src/pe_deep_forensics.py)، ومحرك الفرز الموحد [`analysis_orchestrator.py`](../src/analysis_orchestrator.py)، ومدقق الحشو والتذييل الثنائي [`binary_slack_inspector.py`](../src/windows_intelligence/evidence_engine/binary_slack_inspector.py) (`slack-audit`)، مع استمرار توسيع هياكل `phnt` الداخلية.
 
-3. **المرحلة 4: الربط المتقدم مع Ghidra 12.x:**
-   - بناءً على جسر الطابور والاستطلاع الحالي (`ghidra_live_bridge.py` & `BintraLiveBridgeService.py`)، توسيع عمليات `BintraLiveBridgeService.py` لإعادة بناء رسوم تدفق التحكم بعد فك التعمية مباشرة داخل Ghidra.
+3. **المرحلة 4: الربط المتقدم مع Ghidra 12.x (`GhidraExportStore`, `GhidraHeadlessRunner` & Live Bridge):**
+   - بناءً على جسر الطابور والاستطلاع الحالي (`ghidra_live_bridge.py` & `BintraLiveBridgeService.py`) ومحرك التخزين المفهرس (`ghidra_export_store.py`) والبحث التشابهي 64-D (`ghidra-similar`), يتركز التوسع القادم في إعادة بناء رسوم تدفق التحكم بعد فك التعمية مباشرة داخل Ghidra.
 
 ---
 

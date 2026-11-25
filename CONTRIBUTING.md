@@ -148,7 +148,7 @@ We follow the [Conventional Commits](https://www.conventionalcommits.org/) speci
 ### Pull Request Checklist
 1. Open PR against the `main` branch.
 2. Complete the [Pull Request Template](.github/PULL_REQUEST_TEMPLATE.md).
-3. Ensure all automated GitHub Actions CI checks (`Windows Native CI`) pass.
+3. Ensure all automated GitHub Actions CI checks (`Bintra Cross-Platform CI`) pass on Windows and Linux.
 4. Keep PRs focused; split large refactors into smaller, reviewable increments.
 
 ---

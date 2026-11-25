@@ -5,7 +5,7 @@
 
 ## 1. الهوية الهندسية ونظرة عامة (Executive Overview)
 
-يقدم هذا التوثيق البنية المعمارية الشاملة لمنظومة **القياس الحي عن بُعد (Runtime Telemetry)** والتحليل الجنائي للانهيارات البرمجية والربط التفاعلي المباشر مع بيئات فك التجميع الساكنة (Ghidra Decompiler) في مشروع `Bintra` (الإصدار `v1.0.0+`).
+يقدم هذا التوثيق البنية المعمارية الشاملة لمنظومة **القياس الحي عن بُعد (Runtime Telemetry)** والتحليل الجنائي للانهيارات البرمجية والتنميط الطولي للموارد والربط التفاعلي المباشر مع بيئات فك التجميع الساكنة (Ghidra Decompiler) في مشروع `Bintra` (الإصدار `v1.1.0`).
 
 تتكامل المنظومة عبر 4 مراحل هندسية متعاقبة ومترابطة رياضياً وتطبيقياً:
 1. **المرحلة الأولى (Phase 1):** فحص وتصنيف بنية الذاكرة الافتراضية للعمليات الحية، وقراءة القيم سلبياً (`PROCESS_VM_READ`)، والبحث الأولي/اللاحق، ومسح سلاسل المؤشرات، واستنتاج بنى البيانات (`VirtualMemoryInspector`, `ProcessMemoryScanner`).
@@ -80,6 +80,8 @@ flowchart TD
     - `0xCCCCCCCCCCCCCCCC`: متغير مكدس غير مهيأ (`MSVC_UNINITIALIZED_STACK_VARIABLE`).
     - `0xFEEEFEEEFEEEFEEE`: كتلة محررة في NT Heap.
     - `0xBAADF00DBAADF00D`: كتلة غير مهيأة في NT Heap.
+- **التحقق من هوية صورة الوحدة عند التفكيك (`image_identity`):**
+  - يعتمد المحرك أولاً على بايتات الذاكرة المحفوظة داخل ملف التفريغ (`image_identity: "RUNTIME_BYTES"`)، وإلا يفحص الملف التنفيذي للوحدة المسببة للعطل فقط على القرص. ويتطلب تصنيف `"VERIFIED"` (`CONFIDENT_DETERMINISTIC`) تطابق هوية بناء قوية (`CodeView RSDS` GUID/Age أو `CheckSum` غير صفري في ترويسة PE مع `TimeDateStamp` و`SizeOfImage`)؛ أما تطابق `TimeDateStamp + SizeOfImage` وحده فيُرجع `"HEADER_MATCH_ONLY"` (تحليل استدلالي غير حتمي `HIGH_HEURISTIC` / `MEDIUM_HEURISTIC`).
 - **توليد التوجيهات البرمجية للمطور (Remediation Advice):**
   - اقتراح فحص دفاعي محدد باسم السجل وموضع الدالة المتأثرة.
 
@@ -119,33 +121,37 @@ flowchart TD
 | `bintra mem-scan` | `bintra_memory_scan` | **29** | Phase 1.5 | قراءة الذاكرة الحية عبر `PROCESS_VM_READ`، والبحث الأولي واللاحق (`first`/`next`) داخل جلسات معزولة. |
 | `bintra pointer-scan` | `bintra_pointer_scan` | **30** | Phase 1.5 | استكشاف سلاسل المؤشرات متعددة المستويات حتى العناوين الثابتة للوحدات (`Base+Offsets`). |
 | `bintra dissect-struct` | `bintra_struct_dissect` | **31** | Phase 1.5 | تشريح كتل الذاكرة الحية تلقائياً وتوليد تعريفات هياكل C قابلة للحقن في غيدرا. |
-| `bintra crash-rca` | `bintra_crash_rca` | **32** | Phase 2 | تحليل ملفات MiniDump، ربط فحص VAD، تفكيك نافذة الانهيار، وإرجاع فرضيات السبب الجذري. |
+| `bintra crash-rca` | `bintra_crash_rca` | **32** | Phase 2 | تحليل ملفات MiniDump، ربط فحص VAD، تفكيك نافذة الانهيار، التحقق من هوية الصورة (`VERIFIED` / `HEADER_MATCH_ONLY`)، وإرجاع فرضيات السبب الجذري. |
 | `bintra etw-capture` | `bintra_etw_capture` | **33** | Phase 3 | تشغيل التقاط ETW الهجين (`OpenTraceW` + بديل `WEVTAPI`/Toolhelp32) والارتباط الزمني السببي. |
 | `bintra ghidra-bridge` | `bintra_ghidra_live_bridge` | **34** | Phase 4 | تشغيل خادم JSON-RPC الموثق على الحلقة المحلية مع دعم `--daemon` و `--no-temp-marker`. |
+| `bintra py-mem-inspect` | `bintra_cpython_memory_forensics` | **41** | Tier 4 | فحص هياكل ذاكرة CPython الحية (`PyObject`, `PyDict`, `PyASCIIObject`, `PyLong`) عبر `PROCESS_VM_READ`. |
+| `bintra proc-profile` | `bintra_profile_process` | **50** | Tier 2+ | التنميط الطولي للموارد (Private Bytes، المقابض، GDI/USER) وتمييز `STABLE_EQUILIBRIUM` و`SATURATION_PLATEAU` عن التسريب. |
 
 > [!NOTE]
-> يبلغ إجمالي عدد أدوات خادم MCP الآن **51 أداة متخصصة**، جميعها تخضع لوساطة مرجع الأمان `ExecutionGuard` والتحقق الصارم من المخطط (`_validate_tool_arguments`) بنموذج الفشل المغلق (Fail-Closed).
+> يبلغ إجمالي عدد أدوات خادم MCP الآن **51 أداة متخصصة** (بإضافة أداة فحص الحشو/Overlays `bintra_inspect_slack_space` رقم **51**)، جميعها تخضع لوساطة مرجع الأمان `ExecutionGuard` والتحقق الصارم من المخطط (`_validate_tool_arguments`) بنموذج الفشل المغلق (Fail-Closed).
 
 ---
 
 ## 4. نتائج التدقيق والاختبارات الشاملة (Verification Matrix)
 
-تم التحقق من كافة المكونات عبر حزمة الاختبارات المؤتمتة الكاملة على ويندوز (Python 3.12) بنجاح تام (`0 FAIL`, `0 SKIP`):
+تم التحقق من كافة المكونات عبر حزمة الاختبارات المؤتمتة الكاملة (36 ملف اختبار، إجمالي `466` اختباراً تغطي `440+` مسار تحقق على ويندوز ولينكس):
 
 ```text
 ======================================================================
-Bintra Test Suites Verification Summary:
-- test_suite.py (Core Binary & Neural Engines):         123 Tests  [PASS]
-- test_security_remediation.py (MCP Guard & Schema):      16 Tests  [PASS]
-- test_audit_remediations.py (Audit, CLI, Bridge & Docs): 10 Tests  [PASS]
-- test_virtual_memory_inspector.py (Phase 1 VAD & Scan):  14 Tests  [PASS]
-- test_etw_capture_engine.py (Phase 3 Hybrid ETW):        14 Tests  [PASS]
-- test_ghidra_live_bridge.py (Phase 4 Ghidra Bridge):     14 Tests  [PASS]
-- test_crash_rca_engine.py (Phase 2 Crash RCA):            4 Tests  [PASS]
-- test_runtime_telemetry_pipeline.py (Phase 5 E2E):        1 Test   [PASS]
-- (plus 25 additional cross-platform suites incl. NEON SOTA evolution v2)
+Bintra Test Suites Verification Summary (36 Files / 466 Tests):
+- test_suite.py (Core Binary & Neural Engines):              123 Tests  [PASS]
+- test_neon_sota_evolution_v2.py (v2 Triage/Sim/MCP):         41 Tests  [PASS]
+- test_security_remediation.py (MCP Guard & Schema):          16 Tests  [PASS]
+- test_real_world_campaign_regressions.py (WSP/Audit/RCA):    15 Tests  [PASS]
+- test_virtual_memory_inspector.py (Phase 1 VAD & Scan):      14 Tests  [PASS]
+- test_etw_capture_engine.py (Phase 3 Hybrid ETW):            14 Tests  [PASS]
+- test_ghidra_live_bridge.py (Phase 4 Ghidra Bridge):         14 Tests  [PASS]
+- test_audit_remediations.py (Audit, CLI, Bridge & Docs):     10 Tests  [PASS]
+- test_crash_rca_engine.py (Phase 2 Crash RCA):                4 Tests  [PASS]
+- test_runtime_telemetry_pipeline.py (Phase 5 E2E):            1 Test   [PASS]
+- (plus 26 additional unit, hardware, registry & forensics suites: 215 Tests)
 ----------------------------------------------------------------------
-TOTAL VERIFIED TESTS:                                    440+ Tests [PASS]
+TOTAL VERIFIED TESTS:                   466 Tests (440+ suite)  [PASS]
 ======================================================================
 ```
 

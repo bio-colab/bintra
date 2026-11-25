@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/bio-colab/bintra/actions/workflows/windows-ci.yml"><img src="https://github.com/bio-colab/bintra/actions/workflows/windows-ci.yml/badge.svg" alt="Windows Native CI"></a>
+  <a href="https://github.com/bio-colab/bintra/actions/workflows/windows-ci.yml"><img src="https://github.com/bio-colab/bintra/actions/workflows/windows-ci.yml/badge.svg" alt="Bintra Cross-Platform CI"></a>
   <a href="https://github.com/bio-colab/bintra/releases/tag/v1.1.0"><img src="https://img.shields.io/badge/Release-v1.1.0-purple.svg" alt="Latest Release"></a>
   <a href="https://www.microsoft.com/windows"><img src="https://img.shields.io/badge/Platform-Windows_10_%2F_11_%2F_Server-blue.svg?logo=windows" alt="Platform"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg?logo=python" alt="Python"></a>
@@ -77,7 +77,7 @@ To unify diverse binary and neural analysis modalities into a cohesive cognitive
 | **4** | **الشم الاستكشافي**<br>`Exploratory Smell` | Detecting distant chemical scents, pheromones, and invisible traces. | Sniffing algebraic opaque predicates, scanning embedded neural inference containers (ONNX, DirectML), and computing Shannon byte entropy. | Opaque predicates detected, embedded AI assets, Shannon entropy (bits/byte). |
 | **5** | **الذوق التمييزي**<br>`Discriminative Taste` | Chemical taste discrimination of nutrients vs. toxic non-food noise. | Discriminating genuine executable machine code from random byte noise, validating x64 REX cross-register zeroing, and P-code semantics. | Signal-to-noise ratio, valid code classification, cross-register false-positive rejection. |
 | **6** | **الحس العميق**<br>`Deep Proprioception` | Internal awareness of body posture, joint angles, and balance. | Instruction-boundary stack frame tracking ($\Delta RSP / RBP$), frame-altering opcode accounting, and pre-surgery amenability awareness. | Cumulative stack delta bytes, frame-altering op count, boundary alignment. |
-| **7** | **حس المكان**<br>`Spatial Sense` | Spatial orientation, mental coordinate projection, and mapping. | Bidirectional virtual coordinate projection ($RVA \leftrightarrow        ext{File Offset}$), section boundary alignment, and multidimensional tensor slicing. | Coordinate slicing active, RVA-to-Offset spatial mapping accuracy. |
+| **7** | **حس المكان**<br>`Spatial Sense` | Spatial orientation, mental coordinate projection, and mapping. | Bidirectional virtual coordinate projection ($RVA \leftrightarrow \text{File Offset}$), section boundary alignment, and multidimensional tensor slicing. | Coordinate slicing active, RVA-to-Offset spatial mapping accuracy. |
 | **8** | **التوازن الدهليزي**<br>`Vestibular Balance` | Inner-ear equilibrium, posture maintenance, and upright stability. | PE integrity Checksum recalculation, Frobenius norm equilibrium bounds, and the Keep-on-Improvement rollback gate. | PE Checksum sync engine, Frobenius safety threshold, rollback barrier. |
 | **9** | **الألم المجازي**<br>`Metaphorical Pain (Nociception)` | Protective reflex to noxious stimuli preventing tissue damage. | Pre-mutation hazard reflex that halts execution on stack-destroying patches, DEP section violations, in-place file truncation, or unamenable edits. | Overwrite safety boolean, nociceptive diagnosis, safety reflex triggers. |
 | **10** | **الإحساس بالإيقاع**<br>`Sense of Rhythm (Chronoception)` | Perceiving harmonic cadence, beat intervals, and periodicity. | Measuring dispatcher switch cadence regularity in flattened control flow (CFF), and lag-4 autocorrelation in byte streams. | Dispatcher regularity metric, CFF rhythm detection, byte autocorrelation. |
@@ -137,36 +137,51 @@ The preservation of these capabilities serves three vital engineering purposes:
 bintra/
 ├── .github/
 │   ├── workflows/
-│   │   └── windows-ci.yml         # Automated Windows-only CI/CD pipeline
-│   └── ISSUE_TEMPLATE/            # Bug report and feature request templates
+│   │   └── windows-ci.yml         # Bintra Cross-Platform CI pipeline (Windows + Linux)
+│   ├── ISSUE_TEMPLATE/            # Bug report and feature request templates
+│   └── PULL_REQUEST_TEMPLATE.md   # Pull request checklist
+├── AGENTS.md                      # AI coding agent operating guide & MCP/CLI matrix
+├── CODE_OF_CONDUCT.md             # Contributor covenant & standards
+├── CONTRIBUTING.md                # Development and contribution guide
 ├── install.bat                    # 1-Click Windows batch installer (Double-clickable)
 ├── install.ps1                    # Automated PowerShell installer & PATH configurator
 ├── LICENSE                        # Apache 2.0 License
-├── CONTRIBUTING.md                # Development and contribution guide
-├── SECURITY.md                    # Vulnerability reporting protocol
 ├── pyproject.toml                 # Standard PEP 517/621 packaging metadata
-├── requirements.txt               # Lightweight runtime dependencies (numpy, capstone)
 ├── README.md                      # Comprehensive guide
+├── requirements.txt               # Lightweight runtime dependencies (numpy, capstone)
+├── SAFETY_POLICY.md               # Non-destructive execution & Safety Kernel policy
+├── SCOPE.md                       # Active RE scope & archived lineage policy
+├── SECURITY.md                    # Vulnerability reporting & audit chain contract
+├── assets/                        # Official brand marks, banners, icons & visual identity
+├── benchmarks/
+│   └── real_world_windows/        # Host-driven 8-level Windows benchmark campaign & RESULTS.md
+├── ghidra_scripts/                # BintraGhidraBridge.java, BintraLiveBridgeService.py, bintra_extract_pcode.py
+├── schemas/                       # MCP tool schema definitions
+├── skills/                        # 8 agent-native skills (bintra router + 7 specialist skills)
 ├── src/
 │   ├── cli.py                     # Unified CLI entry point (`bintra`) with self-update
 │   ├── analysis_orchestrator.py   # Unified read-only binary triage & cross-domain evidence orchestrator
 │   ├── mcp_server.py              # JSON-RPC 2.0 stdio MCP server (`bintra-mcp`, 51 tools, resources, prompts)
 │   ├── binary_neural_engine.py    # PE binary analysis, deobfuscator & patcher
-│   ├── bintra_engine.py       # Weight-space SVD & circuit decompiler
+│   ├── bintra_engine.py           # Weight-space SVD & circuit decompiler
 │   ├── sensory_cortex.py          # 10 Metaphorical Senses evaluation cortex
 │   ├── ghidra_pcode_vectorizer.py # Ghidra P-Code IR continuous vectorizer & similarity index
 │   ├── ghidra_export_store.py     # Zero-dependency SQLite & JSONL export store & index
 │   ├── ghidra_headless_runner.py  # Shared Ghidra analyzeHeadless execution engine (CLI + MCP)
+│   ├── ghidra_live_bridge.py      # Authenticated localhost JSON-RPC 2.0 Ghidra bridge
+│   ├── pe_deep_forensics.py       # Offline x64 .pdata, MSVC RTTI vftables & local PDB verifier
 │   ├── python_intelligence.py     # Python bytecode & frozen binary forensics
+│   ├── python_package_intelligence.py # CPython runtime & package intelligence
+│   ├── token_telemetry.py         # Session telemetry tracker
 │   ├── security/                  # ExecutionGuard, AuditLogger & Reference Monitor
-│   └── windows_intelligence/      # Process, Device, Registry & Crash Diagnostics
-├── skills/                        # 8 agent-native skills (master router + 7 specialists)
-├── schemas/                       # Agent MCP tool definitions
-├── tests/                         # 440+ automated unit, sensory, telemetry & security tests
-└── docs/                          # Architecture, Roadmap & mathematical foundations
+│   └── windows_intelligence/      # Process, Device, Registry, Network, Slack & Crash Diagnostics
+├── tests/                         # 466 automated unit, sensory, runtime telemetry & security tests
+└── docs/                          # Architecture, Roadmap & runtime telemetry documentation
     ├── architecture.md            # Master architecture & formal model
     ├── ROADMAP.md                 # Strategic direction, tech evaluation & roadmap
-    └── RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md  # Live memory/ETW/crash pipeline reference
+    ├── RUNTIME_TELEMETRY_AND_CRASH_ANALYSIS.md  # Live memory/ETW/crash pipeline reference
+    └── releases/
+        └── v1.0.0.md              # Frozen v1.0.0 release notes archive
 ```
 
 ---
@@ -308,61 +323,122 @@ bintra scan-hybrid --file application.exe
 
 # Holistic multi-modal binary inspection & 10 Metaphorical Senses evaluation
 bintra sense --file application.exe --hex "55 48 89 e5 5d c3"
+
+# End-to-end unified triage, deep .pdata/RTTI/PDB forensics, semantic binary diff, slack/overlay & Python bytecode
+bintra triage --file "C:\Windows\System32\notepad.exe" --format md --output .\workspace\triage.md
+bintra pe-forensics --file application.exe
+bintra diff-binaries --baseline v1.exe --target v2.exe --mode pe
+bintra slack-audit --file installer.exe
+bintra py-bytecode --file app_frozen.pyc
+bintra capabilities --platform all
 ```
 
-### Windows System & Diagnostic Intelligence Commands
+### Ghidra P-Code, Headless, Topology & Causal Fusion Commands
+```powershell
+# High P-Code cross-architecture matching, opaque predicate pruning & plan generation
+bintra match-pcode --func1 fn_x64.json --func2 fn_arm64.json
+bintra deobfuscate-pcode --file pcode_ops.json
+bintra ghidra-plan --address 0x140001000 --name RecoveredHandler
+
+# Batch analyze/query (.json, .jsonl, .db), headless automation & localhost live bridge
+bintra ghidra-analyze --input export.json --output plan.json --to-sqlite .\workspace\prog.db
+bintra ghidra-headless --binary target.exe --timeout 300 --apply
+bintra ghidra-bridge --start --port 41718 --no-temp-marker
+
+# Call graphs, SSA def-use slicing, behavioral similarity & provenance-verified fusion
+bintra ghidra-callgraph --input .\workspace\prog.db --function target_fn --max-depth 4
+bintra ghidra-dataflow --input .\workspace\prog.db --function target_fn
+bintra ghidra-similar --input .\workspace\prog.db --function target_fn --threshold 0.75
+bintra fuse-evidence --binary target.exe --dmp crash.dmp --ghidra-json export.json
+```
+
+### Windows System, Hardware, Network, Registry & Signature Commands
+*(Note: `proc-*`, `sys-perf`, `dev-classes`/`list`/`search`/`info`, `reg-read`/`search`/`import` default to `--format md`, and `hw-tree` defaults to `--format tree`; pass `--format json` when parsing stdout.)*
 ```powershell
 # Profile host Windows OS build, WOW64 emulation, and AppCompatFlags layers
 bintra win-audit --file target.exe
 
-# Audit DLL search order, API-Sets, and verify required exported symbols
-bintra resolve-deps --file target.exe
+# Audit DLL search order, API-Sets, Side-by-Side (SxS) assemblies & required exports
+bintra resolve-deps --file target.exe [--app-dir "C:\Program Files\App"]
 
-# Detect processes holding active locks on a target file (via Windows Restart Manager)
+# Detect file locks (Restart Manager), DLL holders & inspect crashes / evidence graph
 bintra file-locks --file target.dll
-
-# Find processes currently hosting a loaded DLL
 bintra proc-modules --module kernel32.dll
+bintra wer-inspect --binary target.exe
+bintra dmp-inspect --file .\crash.dmp
+bintra crash-rca --dmp .\crash.dmp --binary target.exe
+bintra diagnose --binary target.exe --crash-json .\workspace\crash_record.json
+bintra evidence-graph --target target.exe --format mermaid
 
-# Windows Task Manager Intelligence: system performance, process tables, query search & deep telemetry
-bintra sys-perf
-bintra proc-list --limit 20 --sort memory
-bintra proc-search --query "shamela"
-bintra proc-info --pid 10324
+# Authenticode & Security Catalog (.cat) verification and directory trust audit
+bintra sig-verify C:\Windows\System32\notepad.exe
+bintra sig-audit C:\Windows\System32\drivers --pattern *.sys --limit 100
 
-# Windows Device Manager Intelligence: class hierarchies, active PnP devices, driver versions & property dossiers
-bintra dev-classes
-bintra dev-list --class-filter Display
-bintra dev-search --query "Realtek"
-bintra dev-info --device "Intel(R) UHD Graphics 620"
+# Task Manager telemetry & longitudinal resource profiling (Private Bytes, Handles, GDI/USER)
+bintra sys-perf --format json
+bintra proc-list --limit 20 --sort memory --format json
+bintra proc-search --query "notepad" --format json
+bintra proc-info --pid 10324 --format json
+bintra proc-profile --pid 10324 --samples 10 --interval 0.2
+bintra process-mitigations --pid 10324
 
-# Windows Registry Editor (regedit.exe) Intelligence: dual-view reading, deep search, export & drift audit
-bintra reg-read --key "SOFTWARE\Microsoft\Windows NT\CurrentVersion" --hive HKLM
-bintra reg-search --query "Windows 10" --hive HKLM --root-key "SOFTWARE\Microsoft\Windows NT"
-bintra reg-export --key "SOFTWARE\Microsoft\Windows NT\CurrentVersion" --output version.reg
-bintra reg-import version.reg --diff
+# Live VAD, read-only memory scanning, pointer chains, struct dissection, CPython heap & ETW
+bintra vad-inspect --pid 10324
+bintra mem-scan --pid 10324 --type int32 --mode exact --value 42 --session-file .\workspace\scan.json
+bintra pointer-scan --pid 10324 --target 0x7FF700102000 --max-depth 2
+bintra dissect-struct --pid 10324 --address 0x7FF700102000 --size 64 --format c
+bintra py-mem-inspect --pid 10324 --address 0x7FF700102000 --type pyobject
+bintra etw-audit --providers --limit 50
+bintra etw-capture --session-name Bintra_Diagnostic_Trace --pid 10324 --duration 2.0
 
-# Match PnP devices against Driver Store packages and evaluate driver ranks
+# Device Manager, COM/LPT ports, PnP topology, network & driver store correlation
+bintra hw-audit --problems-only
+bintra port-audit
+bintra hw-tree --format tree
+bintra hw-net
+bintra hw-dissect wifi
+bintra net-conns --pid 10324
+bintra driver-audit
+bintra service-audit
+bintra dev-classes --format json
+bintra dev-list --class-filter Display --format json
+bintra dev-search --query "Realtek" --format json
+bintra dev-info --device "Intel(R) UHD Graphics 620" --format json
 bintra dev-match --query "PCI" --problems-only
+
+# Dual-view Windows Registry Editor intelligence
+bintra reg-audit --domain SECURITY_POLICIES
+bintra reg-read --key "SOFTWARE\Microsoft\Windows NT\CurrentVersion" --hive HKLM --format json
+bintra reg-search --query "Windows 10" --hive HKLM --root-key "SOFTWARE\Microsoft\Windows NT" --format json
+bintra reg-export --key "SOFTWARE\Microsoft\Windows NT\CurrentVersion" --output .\workspace\version.reg
+bintra reg-import .\workspace\version.reg --diff --format json
 ```
 
 ### Weight-Space & Safetensors Neural Commands
 ```powershell
-# Audit embedded Safetensors neural model (Effective Rank, Induction Heads, Backdoors, Amenability)
+# Audit embedded Safetensors neural model (Effective Rank, Induction Heads, Amenability, Dual-Axis Backdoors)
 bintra wsp-audit --model model.safetensors
 
-# Perform surgical low-rank column direction subtraction on embedded linear layers
+# Surgical low-rank column direction subtraction on embedded linear layers
 bintra patch-weights `
   --source model.safetensors `
   --output workspace/patched.safetensors `
   --tensor mlp.down_proj `
   --operation column_direction_subtract `
   --num-columns 64
+
+# Subspace extraction, pseudocode decompilation, weight diffing & equilibrium verification
+bintra subspace --model model.safetensors --tensor mlp.down_proj --mode svd_modes
+bintra decompile --model model.safetensors --tensor mlp.down_proj --circuit-type mlp_projection
+bintra diff-weights --baseline model.safetensors --patched workspace/patched.safetensors --tensor mlp.down_proj
+bintra probe-trace --model model.safetensors --prompt "status check"
+bintra verify-behavior --baseline model.safetensors --patched workspace/patched.safetensors
+# (Archived experimental command decoupled per SCOPE.md: bintra synthesize-weights --archived-lineage ...)
 ```
 
 ### Self-Update & Continuous Deployment
 ```powershell
-# Check whether an upstream update is available from GitHub
+# Check whether an upstream update is available from GitHub (returns exit code 2 if behind)
 bintra update --check
 
 # Pull verified commits with explicit confirmation (--yes), sync dependencies, or pin --ref <tag-or-sha>
@@ -371,7 +447,7 @@ bintra update --yes
 
 ### Running the Test Suite
 ```powershell
-# Run the complete test suite (440+ unit, sensory, runtime telemetry, and security remediation tests)
+# Run the complete test suite (466 tests across 36 suites, sustaining 440+ unit, sensory, runtime telemetry & security tests)
 python -m unittest discover -s tests -p "test_*.py"
 ```
 

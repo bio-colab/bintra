@@ -3,7 +3,9 @@ import os
 from typing import Any, Dict
 
 
+from bintra_mcp.config import GHIDRA_REQUIRED_TOOLS, WINDOWS_NATIVE_TOOLS, WORKFLOW_PLAYBOOKS
 from bintra_mcp.tool_schemas import TOOLS_REGISTRY
+from bintra_mcp.tools._common import parse_int_arg
 
 
 class ForensicsToolsMixin:
@@ -26,7 +28,7 @@ class ForensicsToolsMixin:
     def _tool_cpython_memory_forensics(self, name: str, args: Dict[str, Any]) -> Any:
         """bintra_cpython_memory_forensics"""
         from windows_intelligence.runtime_telemetry.cpython_memory_forensics import CPythonMemoryForensics
-        addr = int(str(args["address"]), 16) if str(args["address"]).startswith("0x") else int(args["address"])
+        addr = parse_int_arg(args["address"], "address")
         return CPythonMemoryForensics.inspect_live_process(
             pid=int(args["pid"]),
             address=addr,
@@ -89,15 +91,12 @@ class ForensicsToolsMixin:
                 # an export whose hash/name does not match the target binary is
                 # NEVER fused into the evidence graph.
                 if args.get("binary_path"):
-                    import hashlib
-                    h = hashlib.sha256()
-                    with open(args["binary_path"], "rb") as bf:
-                        while chunk := bf.read(65536):
-                            h.update(chunk)
+                    from binary_neural_engine import BinaryFormatInspector
+                    target_sha = BinaryFormatInspector.compute_sha256(args["binary_path"]).lower()
                     ghidra_provenance, is_crypto, is_heuristic = (
                         BinaryTriageOrchestrator.verify_ghidra_export_provenance(
                             store,
-                            target_sha256=h.hexdigest().lower(),
+                            target_sha256=target_sha,
                             target_filename=os.path.basename(args["binary_path"]),
                         )
                     )
@@ -153,25 +152,15 @@ class ForensicsToolsMixin:
         """bintra_list_capabilities"""
         import platform as _plat
         p_filter = args.get("platform_filter", "all")
-        win_tools = {
-            "bintra_windows_env_audit", "bintra_resolve_dependencies", "bintra_inspect_crash_reports",
-            "bintra_win_catalog_cmd", "bintra_registry_audit", "bintra_hardware_audit",
-            "bintra_port_audit", "bintra_hardware_topology", "bintra_network_audit", "bintra_network_hardware_dissect", "bintra_network_connections",
-            "bintra_driver_audit", "bintra_service_audit", "bintra_etw_audit",
-            "bintra_vad_inspect", "bintra_memory_scan", "bintra_pointer_scan",
-            "bintra_struct_dissect", "bintra_etw_capture", "bintra_device_driver_intelligence",
-            "bintra_process_resource_audit"
-        }
-        ghidra_tools = {
-            "bintra_ghidra_headless", "bintra_ghidra_live_bridge", "bintra_match_pcode",
-            "bintra_deobfuscate_pcode", "bintra_ghidra_analyze", "bintra_ghidra_call_graph",
-            "bintra_ghidra_data_flow", "bintra_ghidra_similar_functions"
-        }
         entries = []
         for t in TOOLS_REGISTRY:
             t_name = t["name"]
             sec = self.TOOL_SECURITY_METADATA.get(t_name, ("unknown", "READ", None))
-            env = "windows_native" if t_name in win_tools else ("ghidra_required" if t_name in ghidra_tools else "cross_platform")
+            env = (
+                "windows_native"
+                if t_name in WINDOWS_NATIVE_TOOLS
+                else ("ghidra_required" if t_name in GHIDRA_REQUIRED_TOOLS else "cross_platform")
+            )
             if p_filter != "all" and env != p_filter:
                 continue
             compact_caps = bool(args.get("compact")) or (os.environ.get("BINTRA_COMPACT_OUTPUT") == "1")
@@ -190,9 +179,9 @@ class ForensicsToolsMixin:
             "total_tools": len(entries),
             "tools": entries,
             "recommended_workflows": {
-                "static_pe_deep_audit": ["bintra_inspect_binary", "bintra_pe_deep_forensics", "bintra_deobfuscate_binary", "bintra_scan_hybrid", "bintra_sensory_audit"],
-                "ghidra_deep_re": ["bintra_ghidra_analyze", "bintra_ghidra_call_graph", "bintra_ghidra_data_flow", "bintra_ghidra_similar_functions"],
-                "crash_root_cause_fusion": ["bintra_dmp_inspect", "bintra_crash_rca", "bintra_pe_deep_forensics", "bintra_fuse_evidence"],
+                "static_pe_deep_audit": WORKFLOW_PLAYBOOKS["static_pe_deep_audit"],
+                "ghidra_deep_re": WORKFLOW_PLAYBOOKS["ghidra_deep_re"],
+                "crash_root_cause_fusion": WORKFLOW_PLAYBOOKS["crash_root_cause_fusion"],
                 "version_diff": ["bintra_binary_diff"]
             }
         }

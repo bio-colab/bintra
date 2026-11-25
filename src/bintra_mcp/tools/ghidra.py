@@ -2,6 +2,7 @@
 from typing import Any, Dict
 
 from ghidra_pcode_vectorizer import GhidraAnnotationPlanner, PcodeDeobfuscator, PcodeFunctionMatcher
+from bintra_mcp.tools._common import parse_int_arg
 
 
 
@@ -127,6 +128,24 @@ class GhidraToolsMixin:
             "epistemic_classification": "GHIDRA_HEADLESS_BATCH_EXECUTION"
         }
 
+    @staticmethod
+    def _dispatch_bridge_action(
+        port: int,
+        token: Any,
+        active_method: str,
+        rpc_method: str,
+        payload_arg: Any,
+        rpc_params: Dict[str, Any],
+    ) -> Any:
+        """Executes a bridge action against an active in-process bridge or remote localhost RPC."""
+        from ghidra_live_bridge import GhidraLiveBridgeClient, get_active_bridge
+
+        server = get_active_bridge()
+        if server and server.is_running:
+            return getattr(server, active_method)(payload_arg)
+        client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
+        return client.call_rpc(rpc_method, rpc_params)
+
     def _tool_ghidra_live_bridge(self, name: str, args: Dict[str, Any]) -> Any:
         """bintra_ghidra_live_bridge"""
         from ghidra_live_bridge import (
@@ -163,22 +182,14 @@ class GhidraToolsMixin:
                 raise ValueError("'crash_dmp_path' is required for action 'inject_crash_rca'")
             from windows_intelligence import CrashRootCauseAnalyzer
             rca = CrashRootCauseAnalyzer.analyze_crash(dmp)
-            server = get_active_bridge()
-            if server and server.is_running:
-                return server.inject_crash_rca(rca)
-            client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
-            return client.call_rpc("bintra.inject_crash_rca", {"rca_report": rca})
+            return self._dispatch_bridge_action(port, token, "inject_crash_rca", "bintra.inject_crash_rca", rca, {"rca_report": rca})
         elif act == "inject_vad":
             pid = int(args.get("pid", 0))
             if pid <= 0:
                 raise ValueError("Valid 'pid' (> 0) is required for action 'inject_vad'")
             from windows_intelligence import VirtualMemoryInspector
-            snap = VirtualMemoryInspector.inspect_process(pid)
-            server = get_active_bridge()
-            if server and server.is_running:
-                return server.inject_vad_snapshot(snap.to_dict())
-            client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
-            return client.call_rpc("bintra.inject_vad_snapshot", {"vad_snapshot": snap.to_dict()})
+            snap = VirtualMemoryInspector.inspect_process(pid).to_dict()
+            return self._dispatch_bridge_action(port, token, "inject_vad_snapshot", "bintra.inject_vad_snapshot", snap, {"vad_snapshot": snap})
         elif act == "inject_etw":
             tl = args.get("timeline_report")
             if not tl:
@@ -189,11 +200,7 @@ class GhidraToolsMixin:
                 time.sleep(0.5)
                 sess.stop_session()
                 tl = EtwTimelineCorrelator.correlate_crash_timeline(sess.get_timeline())
-            server = get_active_bridge()
-            if server and server.is_running:
-                return server.inject_etw_timeline(tl)
-            client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
-            return client.call_rpc("bintra.inject_etw_timeline", {"timeline_report": tl})
+            return self._dispatch_bridge_action(port, token, "inject_etw_timeline", "bintra.inject_etw_timeline", tl, {"timeline_report": tl})
         elif act == "inject_struct":
             s_rep = args.get("struct_report")
             if not s_rep:
@@ -201,14 +208,10 @@ class GhidraToolsMixin:
                 addr_str = args.get("address")
                 if pid <= 0 or not addr_str:
                     raise ValueError("'struct_report' or both 'pid' and 'address' are required for 'inject_struct'")
-                base_addr = int(addr_str, 16) if addr_str.lower().startswith("0x") else int(addr_str)
+                base_addr = parse_int_arg(addr_str, "address")
                 from windows_intelligence import StructureDissector
                 s_rep = StructureDissector.dissect(pid, base_addr)
-            server = get_active_bridge()
-            if server and server.is_running:
-                return server.inject_structure_dissection(s_rep)
-            client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
-            return client.call_rpc("bintra.inject_structure_dissection", {"struct_report": s_rep})
+            return self._dispatch_bridge_action(port, token, "inject_structure_dissection", "bintra.inject_structure_dissection", s_rep, {"struct_report": s_rep})
         elif act == "inject_pointers":
             p_rep = args.get("pointer_report")
             if not p_rep:
@@ -216,14 +219,10 @@ class GhidraToolsMixin:
                 addr_str = args.get("address")
                 if pid <= 0 or not addr_str:
                     raise ValueError("'pointer_report' or both 'pid' and 'address' are required for 'inject_pointers'")
-                target_addr = int(addr_str, 16) if addr_str.lower().startswith("0x") else int(addr_str)
+                target_addr = parse_int_arg(addr_str, "address")
                 from windows_intelligence import PointerScanner
                 p_rep = PointerScanner.find_pointer_paths(pid, target_addr)
-            server = get_active_bridge()
-            if server and server.is_running:
-                return server.inject_pointer_chains(p_rep)
-            client = GhidraLiveBridgeClient(bridge_url=f"http://127.0.0.1:{port}", auth_token=token)
-            return client.call_rpc("bintra.inject_pointer_chains", {"pointer_report": p_rep})
+            return self._dispatch_bridge_action(port, token, "inject_pointer_chains", "bintra.inject_pointer_chains", p_rep, {"pointer_report": p_rep})
         else:
             raise ValueError(f"Unknown ghidra_live_bridge action: '{act}'")
 

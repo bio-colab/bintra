@@ -145,6 +145,21 @@ class TestProductionBaselineSmoke(unittest.TestCase):
         self.assertFalse(out_insp["isError"])
         self.assertEqual(out_insp["structuredContent"]["format"], "PE")
 
+        bad_args = srv.handle_tools_call({"name": "bintra_inspect_binary", "arguments": "not-a-dict"})
+        self.assertTrue(bad_args["isError"])
+
+        from bintra_mcp.tools._common import parse_int_arg
+        self.assertEqual(parse_int_arg("0x401000", "address"), 0x401000)
+        with self.assertRaises(ValueError):
+            parse_int_arg(True, "address")
+        with self.assertRaises(ValueError):
+            parse_int_arg("", "address")
+
+        export_file = self.tmp_dir / "sample_export.json"
+        export_file.write_text(json.dumps({"functions": []}), encoding="utf-8")
+        cg_res = srv.handle_tools_call({"name": "bintra_ghidra_call_graph", "arguments": {"export_path": str(export_file)}})
+        self.assertFalse(cg_res["isError"])
+
     def test_core_engines_and_security_invariants_smoke(self):
         from binary_neural_engine import BinaryFormatInspector, ContinuousDeobfuscator
         from ghidra_export_store import GhidraExportStore

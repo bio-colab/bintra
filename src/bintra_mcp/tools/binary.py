@@ -1,5 +1,6 @@
 """MCP tool handlers: binary. Methods are bound into BintraMcpServer via mixin inheritance."""
 import os
+import sys
 from typing import Any, Dict
 
 from binary_neural_engine import (
@@ -21,8 +22,9 @@ class BinaryToolsMixin:
             from windows_intelligence import WindowsSignatureIntelligence
             sig_info = WindowsSignatureIntelligence.verify_file(path, check_catalog=True)
             res["security_authenticode"] = sig_info
-        except Exception:
-            pass
+        except Exception as sig_err:
+            res["security_authenticode_error"] = str(sig_err)
+            sys.stderr.write(f"[Bintra] Signature verification skipped for '{path}': {sig_err}\n")
         max_exports = args.get("max_exports")
         if "exports" in res and "functions" in res["exports"]:
             all_funcs = res["exports"]["functions"]

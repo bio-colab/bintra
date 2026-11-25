@@ -46,3 +46,6 @@ test_model*.safetensors
 *.tmp
 *.bak
 acl-report/
+
+# Local analysis outputs (AGENTS.md: write outputs to ./workspace/)
+workspace/

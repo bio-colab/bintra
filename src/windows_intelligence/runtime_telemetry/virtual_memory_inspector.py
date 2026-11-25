@@ -1276,6 +1276,53 @@ class ProcessMemoryScanner:
             "candidates_sample": candidates[:50],
         }
 
+    SESSION_STATE_FORMAT = "bintra.mem_scan_session.v1"
+
+    @classmethod
+    def export_session(cls, session_id: str) -> Optional[Dict[str, Any]]:
+        """Serializable full session state, so First/Next scans can span separate processes (CLI)."""
+        with cls._SESSION_LOCK:
+            sess = cls._ACTIVE_SESSIONS.get(session_id)
+            if not sess:
+                return None
+            return {
+                "format": cls.SESSION_STATE_FORMAT,
+                "session_id": sess["session_id"],
+                "pid": sess["pid"],
+                "process_start_time": sess.get("process_start_time"),
+                "data_type": sess["data_type"],
+                "alignment": sess.get("alignment", 1),
+                "created_at": sess.get("created_at"),
+                "candidates": list(sess["candidates"]),
+            }
+
+    @classmethod
+    def import_session(cls, state: Dict[str, Any]) -> str:
+        """Restores a session exported by export_session(); PID identity is re-verified by next_scan."""
+        if not isinstance(state, dict) or state.get("format") != cls.SESSION_STATE_FORMAT:
+            raise ValueError("Not a Bintra memory-scan session state document.")
+        sid = str(state["session_id"])
+        dtype = str(state["data_type"]).lower()
+        if dtype not in cls._TYPE_MAP:
+            raise ValueError(f"Unsupported scan data type in session state: {dtype}")
+        cands = state.get("candidates")
+        if not isinstance(cands, list):
+            raise ValueError("Session state has no candidate list.")
+        now_ts = time.time()
+        with cls._SESSION_LOCK:
+            cls._evict_sessions_locked(now_ts)
+            cls._ACTIVE_SESSIONS[sid] = {
+                "session_id": sid,
+                "pid": int(state["pid"]),
+                "process_start_time": state.get("process_start_time"),
+                "data_type": dtype,
+                "alignment": int(state.get("alignment") or 1),
+                "candidates": [c for c in cands if isinstance(c, dict) and "address_int" in c],
+                "created_at": state.get("created_at") or now_ts,
+                "last_accessed": now_ts,
+            }
+        return sid
+
     @classmethod
     def next_scan(
         cls,

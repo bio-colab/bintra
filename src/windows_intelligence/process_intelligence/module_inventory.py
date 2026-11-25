@@ -102,7 +102,7 @@ class ModuleInventory:
         }
 
     @classmethod
-    def find_processes_hosting_module(cls, module_name_or_path: str, max_processes_scanned: int = 128) -> Dict[str, Any]:
+    def find_processes_hosting_module(cls, module_name_or_path: str, max_processes_scanned: int = 4096) -> Dict[str, Any]:
         """
         Scans running processes to identify which ones have loaded a specific DLL into memory.
         Solves the question: 'Is this DLL loaded inside another program?'
@@ -130,7 +130,8 @@ class ModuleInventory:
             if pid <= 4:
                 continue
 
-            res = cls.get_modules_for_process(pid, max_modules=128)
+            # Large hosts (browsers, IDEs) load hundreds of DLLs; a low cap silently hides matches.
+            res = cls.get_modules_for_process(pid, max_modules=8192)
             if res.get("status") == "error":
                 access_denied_count += 1
                 continue
@@ -160,6 +161,7 @@ class ModuleInventory:
             "status": status,
             "query": module_name_or_path,
             "processes_scanned": len(procs),
+            "process_scan_truncated": len(procs) >= max_processes_scanned,
             "access_denied_processes": access_denied_count,
             "hosting_processes_count": len(hosting_processes),
             "hosting_processes": hosting_processes

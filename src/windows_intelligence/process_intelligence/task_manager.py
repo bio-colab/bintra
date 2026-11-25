@@ -536,10 +536,19 @@ class TaskManagerInspector:
         from ..system_introspection.network_inspector import NetworkHardwareInspector
 
         # 1. Base inventory from snapshot
-        base_info = next((p for p in ProcessInventory.enumerate_processes(resolve_paths=True) if p["process_id"] == target_pid), None)
-        exe_name = base_info.get("executable_name") if base_info else "Unknown"
-        ppid = base_info.get("parent_process_id") if base_info else 0
-        img_path = base_info.get("image_path") if base_info else ProcessInventory.get_process_image_path(target_pid)
+        # Snapshot without per-process path resolution (resolving every process's image path
+        # just to find one PID is slow), uncapped so high-PID processes are never missed.
+        base_info = next((p for p in ProcessInventory.enumerate_processes(resolve_paths=False, max_processes=65536)
+                          if p["process_id"] == target_pid), None)
+        if base_info is None:
+            return {
+                "status": "error",
+                "process_id": target_pid,
+                "error": f"Process PID {target_pid} is not running (not present in the Toolhelp32 process snapshot).",
+            }
+        exe_name = base_info.get("executable_name") or "Unknown"
+        ppid = base_info.get("parent_process_id") or 0
+        img_path = base_info.get("image_path") or ProcessInventory.get_process_image_path(target_pid)
         thread_cnt = base_info.get("thread_count", 0) if base_info else 0
 
         # Open process handle

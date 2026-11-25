@@ -583,12 +583,7 @@ class BinaryFormatInspector:
             name_off = BinaryFormatInspector.rva_to_offset(pe_info, name_rva)
             if name_off is not None and 0 <= name_off < file_size:
                 f.seek(name_off)
-                raw_name = bytearray()
-                while len(raw_name) < 256 and f.tell() < file_size:
-                    ch = f.read(1)
-                    if not ch or ch == b"\x00":
-                        break
-                    raw_name.extend(ch)
+                raw_name = BinaryFormatInspector._read_cstring_at_cursor(f, file_size)
                 mod_name = raw_name.decode("latin-1", errors="ignore")
 
                 thunk_rva = ilt_rva if ilt_rva != 0 else iat_rva
@@ -610,12 +605,7 @@ class BinaryFormatInspector:
                             ibn_off = BinaryFormatInspector.rva_to_offset(pe_info, val)
                             if ibn_off is not None and 0 <= ibn_off + 2 < file_size:
                                 f.seek(ibn_off + 2)
-                                raw_fn = bytearray()
-                                while len(raw_fn) < 256 and f.tell() < file_size:
-                                    ch = f.read(1)
-                                    if not ch or ch == b"\x00":
-                                        break
-                                    raw_fn.extend(ch)
+                                raw_fn = BinaryFormatInspector._read_cstring_at_cursor(f, file_size)
                                 funcs.append(raw_fn.decode("latin-1", errors="ignore"))
                         t_curr += step
                 modules[mod_name] = funcs
@@ -681,12 +671,7 @@ class BinaryFormatInspector:
                 fn_name = ""
                 if fn_name_off and 0 <= fn_name_off < file_size:
                     f.seek(fn_name_off)
-                    raw_fn = bytearray()
-                    while len(raw_fn) < 256 and f.tell() < file_size:
-                        ch = f.read(1)
-                        if not ch or ch == b"\x00":
-                            break
-                        raw_fn.extend(ch)
+                    raw_fn = BinaryFormatInspector._read_cstring_at_cursor(f, file_size)
                     fn_name = raw_fn.decode("latin-1", errors="ignore")
 
                 exp_entry = {
@@ -699,12 +684,7 @@ class BinaryFormatInspector:
                     fwd_off = BinaryFormatInspector.rva_to_offset(pe_info, fn_rva)
                     if fwd_off and 0 <= fwd_off < file_size:
                         f.seek(fwd_off)
-                        raw_fwd = bytearray()
-                        while len(raw_fwd) < 256 and f.tell() < file_size:
-                            ch = f.read(1)
-                            if not ch or ch == b"\x00":
-                                break
-                            raw_fwd.extend(ch)
+                        raw_fwd = BinaryFormatInspector._read_cstring_at_cursor(f, file_size)
                         exp_entry["forwarded_to"] = raw_fwd.decode("latin-1", errors="ignore")
 
                 exported.append(exp_entry)
@@ -734,12 +714,7 @@ class BinaryFormatInspector:
                     fwd_off = BinaryFormatInspector.rva_to_offset(pe_info, fn_rva)
                     if fwd_off and 0 <= fwd_off < file_size:
                         f.seek(fwd_off)
-                        raw_fwd = bytearray()
-                        while len(raw_fwd) < 256 and f.tell() < file_size:
-                            ch = f.read(1)
-                            if not ch or ch == b"\x00":
-                                break
-                            raw_fwd.extend(ch)
+                        raw_fwd = BinaryFormatInspector._read_cstring_at_cursor(f, file_size)
                         exp_entry["forwarded_to"] = raw_fwd.decode("latin-1", errors="ignore")
                 exported.append(exp_entry)
 
@@ -796,12 +771,7 @@ class BinaryFormatInspector:
             name_off = BinaryFormatInspector.rva_to_offset(pe_info, name_rva)
             if name_off is not None and 0 <= name_off < file_size:
                 f.seek(name_off)
-                raw_name = bytearray()
-                while len(raw_name) < 256 and f.tell() < file_size:
-                    ch = f.read(1)
-                    if not ch or ch == b"\x00":
-                        break
-                    raw_name.extend(ch)
+                raw_name = BinaryFormatInspector._read_cstring_at_cursor(f, file_size)
                 mod_name = raw_name.decode("latin-1", errors="ignore")
 
                 thunk_addr = int_addr if int_addr != 0 else iat_addr
@@ -825,12 +795,7 @@ class BinaryFormatInspector:
                             ibn_off = BinaryFormatInspector.rva_to_offset(pe_info, ibn_rva)
                             if ibn_off is not None and 0 <= ibn_off + 2 < file_size:
                                 f.seek(ibn_off + 2)
-                                raw_fn = bytearray()
-                                while len(raw_fn) < 256 and f.tell() < file_size:
-                                    ch = f.read(1)
-                                    if not ch or ch == b"\x00":
-                                        break
-                                    raw_fn.extend(ch)
+                                raw_fn = BinaryFormatInspector._read_cstring_at_cursor(f, file_size)
                                 funcs.append(raw_fn.decode("latin-1", errors="ignore"))
                         t_curr += step
                 modules[mod_name] = funcs
@@ -901,6 +866,16 @@ class BinaryFormatInspector:
         }
 
     @staticmethod
+    def _read_cstring_at_cursor(f, file_size: int, max_len: int = 256) -> bytearray:
+        """Reads a NUL-terminated string (max `max_len` bytes) at the current file position."""
+        pos = f.tell()
+        if pos >= file_size:
+            return bytearray()
+        data = f.read(min(max_len, file_size - pos))
+        nul = data.find(b"\x00")
+        return bytearray(data if nul < 0 else data[:nul])
+
+    @staticmethod
     def _parse_pe_relocations(f, file_size: int, pe_info: Dict[str, Any]) -> Dict[str, Any]:
         """Parses Microsoft PE Base Relocation Table (IMAGE_BASE_RELOCATION)."""
         dd = pe_info.get("data_directories", {})
@@ -929,13 +904,16 @@ class BinaryFormatInspector:
                 break
             num_entries = (block_size - 8) // 2
             entries_bytes = f.read(num_entries * 2)
-            for k in range(min(num_entries, len(entries_bytes) // 2)):
-                entry = struct.unpack_from("<H", entries_bytes, k * 2)[0]
-                rel_type = entry >> 12
-                tname = TYPE_NAMES.get(rel_type, f"TYPE_{rel_type}")
-                type_counts[tname] = type_counts.get(tname, 0) + 1
-                if rel_type != 0:
-                    total_relocs += 1
+            usable = min(num_entries, len(entries_bytes) // 2)
+            if usable:
+                import numpy as _np
+                rel_types = _np.frombuffer(entries_bytes, dtype="<u2", count=usable) >> 12
+                for rel_type, cnt in zip(*_np.unique(rel_types, return_counts=True)):
+                    rel_type, cnt = int(rel_type), int(cnt)
+                    tname = TYPE_NAMES.get(rel_type, f"TYPE_{rel_type}")
+                    type_counts[tname] = type_counts.get(tname, 0) + cnt
+                    if rel_type != 0:
+                        total_relocs += cnt
             blocks += 1
             curr_off += block_size
 
@@ -2394,7 +2372,7 @@ class SurgicalBinaryPatcher:
             scope = ExecutionGuard.get_current_scope()
             if scope and scope.is_target_directory(out_abs):
                 raise TargetMutationError(
-                    f"TARGET_DIRECTORY_WRITE_FORBIDDEN: Output patch cannot be placed in the target's original directory '{os.path.dirname(out_abs)}'."
+                    scope.target_directory_violation_message(out_abs)
                 )
 
             # Mandatory Reference Monitor Mediation: Enforce workspace confinement & target immutability
@@ -2852,6 +2830,9 @@ class SensoryCortex:
             ActivationTraceProber, NeuralBehaviorVerifier, CrossLayerCircuitAnalyzer,
             AmenabilityDiagnostic, WeightSecurityAuditor
         )
+        if file_path and not os.path.isfile(file_path):
+            # Never fabricate a full sensory report for a target that does not exist.
+            raise FileNotFoundError(f"Target file does not exist: {file_path}")
         is_safetensors = bool(file_path and file_path.endswith(".safetensors") and os.path.exists(file_path))
         pe_info = BinaryFormatInspector.inspect(file_path) if (file_path and os.path.exists(file_path) and not is_safetensors) else None
         is_python = bool(pe_info and pe_info.get("format") == "PYTHON_SOURCE")

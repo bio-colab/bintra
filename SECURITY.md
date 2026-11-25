@@ -26,6 +26,7 @@ Bintra is engineered with a fail-closed **Reference Monitor (`ExecutionGuard`)**
    - `ghidra-bridge --daemon` spawns a detached background instance of `cli.py ghidra-bridge --start` using `sys.executable`; its optional system temp discovery marker (`.bintra_bridge.json`) is mediated under `Capability.TEMPDIR_MARKER_WRITE` and can be suppressed with `--no-temp-marker` / `publish_temp_marker: false`.
    - `ghidra-headless` launches the user's local Ghidra `analyzeHeadless` batch runner on explicit CLI/MCP invocation.
    - `AuditLogger` stores tamper-evident JSONL journals in `~/.bintra/logs/audit.jsonl` outside individual workspaces by design.
+   - Once the active journal exceeds `BINTRA_AUDIT_SEGMENT_MB` (default 8 MB; `0` disables) after a full successful verification, it is sealed to `audit.jsonl.sealed.<first>-<last>.jsonl` and the next segment continues the same chain (its first `prev_hash` is the sealed tail's `record_hash`). Startup verifies the active segment plus its link to the sealed anchor, keeping per-command cost bounded; sealed segments remain fully verifiable with `AuditLogger.recover_chain_from_disk(<segment>)`.
    - `FileUsageInspector` queries Windows Restart Manager (`RstrtMgr.dll`) and may open target paths with non-writing shared probe flags when checking exclusive locks.
 
 ---

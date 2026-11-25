@@ -22,6 +22,7 @@ Use this skill whenever an agent or engineer needs to inspect the virtual memory
 - **Non-Windows Hosts (Linux / macOS CI):** Engine entry points return structured `status: "simulated"`, `is_simulated: true` (or `status: "not_applicable"`) envelopes cleanly without raising platform attribute errors.
 - **No Zero-Fill Fabrication:** `VirtualMemoryInspector.read_process_memory_checked` stops at the first unreadable chunk and reports `partial_read`, `valid_bytes_read`, and `first_failed_address` instead of padding failed chunks with fabricated zeros.
 - **Bounded Session State:** `ProcessMemoryScanner` tracks up to 64 active sessions (`1800s` TTL, 16-hex `session_id`) with Win32 `GetProcessTimes` PID-reuse verification.
+- **Cross-Process CLI Sessions:** `--session-file` persists the full session state (`session_state`, format `bintra.mem_scan_session.v1`: candidates, PID, process start time), so First Scan and each Next Scan can run as separate `bintra` invocations; PID reuse is still detected on restore.
 
 ---
 
@@ -93,6 +94,7 @@ bintra mem-scan --pid 1234 --type int32 --mode changed --session-file .\workspac
    - Evaluates objects at 4-byte granularity with 64-bit pointer / `.rdata` vftable lookahead and emits per-field `size_bytes`, `confidence`, and `alternatives`.
    - Always inspect `"heuristic": true`, `"is_partial"`, `"bytes_read"` vs `"bytes_requested"`, and `"alternatives"` before treating inferred scalar types (`int32_t`, `float`, `uint64_t`) as final C types without PDB/DWARF symbols.
 3. **Crash Root Cause Analysis (`bintra_crash_rca` / `crash-rca`):**
+   - Code bytes come from the dump's own memory first (`code_source: DUMP_MEMORY`), else from the on-disk image of the *faulting module* only, verified against the dump's TimeDateStamp/SizeOfImage (`image_identity`); a mismatched image is refused. A register is blamed only if `base + index*scale + disp` reproduces the fault address exactly (`computed_address`), otherwise `OPERAND_CONTEXT_MISMATCH`. Execute faults on NULL/invalid IPs report `NULL_FUNCTION_POINTER_CALL` / `INVALID_CONTROL_TRANSFER` with the top-of-stack `probable_caller`; non-AV codes (stowed WinRT, abort, fast-fail with sub-code, heap corruption, ...) are classified from the exception code.
    - Cross-checks parsed MiniDump exception `operation` / `access_type`, Capstone instruction decoding, and register blame heuristics against memory spatial boundaries. Inspect `confidence` and `memory_spatial_classification` to separate high-confidence NULL dereferences (`< 0x10000`) from dynamic heap/stack faults.
 
 ## Offline MiniDump Memory & VAD Streams

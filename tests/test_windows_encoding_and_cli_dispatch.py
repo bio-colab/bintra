@@ -104,7 +104,8 @@ class TestCliGlueSignatures(unittest.TestCase):
         fake = {"devices": [{"device_instance_id": "PCI\\X", "friendly_name": "Fake Disk",
                              "class": "DiskDrive", "service": "disk", "problem_name": "CM_PROB_OK"}]}
         with mock.patch.object(DeviceManagerInspector, "list_devices", return_value=fake) as m:
-            res = owner._correlate_driver_with_device(r"C:\Windows\System32\drivers\disk.sys")
+            # os.sep-joined so basename() splits correctly on every host OS
+            res = owner._correlate_driver_with_device(os.path.join("drivers", "disk.sys"))
         m.assert_called_once()
         self.assertEqual(res["associated_devices_count"], 1)
         self.assertEqual(res["associated_devices"][0]["device_id"], "PCI\\X")

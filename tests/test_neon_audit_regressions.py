@@ -373,11 +373,16 @@ class TestNeonAuditRegressions(unittest.TestCase):
     # F-008 (P1): pyproject.toml py-modules completeness
     # ------------------------------------------------------------------
     def test_f008_pyproject_py_modules_complete(self):
-        import tomllib
-
         pyproject_path = Path(REPO_ROOT) / "pyproject.toml"
-        data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
-        declared = set(data["tool"]["setuptools"]["py-modules"])
+        text = pyproject_path.read_text(encoding="utf-8")
+        try:
+            import tomllib  # Python 3.11+
+            declared = set(tomllib.loads(text)["tool"]["setuptools"]["py-modules"])
+        except ModuleNotFoundError:  # Python 3.10 (supported per requires-python)
+            import re
+            m = re.search(r"^py-modules\s*=\s*\[(.*?)\]", text, re.M | re.S)
+            self.assertIsNotNone(m, "py-modules not found in pyproject.toml")
+            declared = set(re.findall(r"[\"']([^\"']+)[\"']", m.group(1)))
         actual = {p.stem for p in (Path(REPO_ROOT) / "src").glob("*.py") if p.name != "__init__.py"}
         self.assertEqual(actual - declared, set(), f"Modules omitted from pyproject.toml: {actual - declared}")
 

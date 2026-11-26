@@ -474,6 +474,8 @@ class BinaryTriageOrchestrator:
             )
 
         independent_verified = False
+        hmac_verified = False
+        hmac_status = "UNSIGNED_MANIFEST"
         if expected_content_sha:
             actual_content_sha = cls.compute_ghidra_export_content_sha256(store)
             if actual_content_sha != expected_content_sha:
@@ -481,6 +483,8 @@ class BinaryTriageOrchestrator:
                     {
                         "status": "PROVENANCE_CONTENT_TAMPERED",
                         "verified": False,
+                        "hmac_verified": False,
+                        "hmac_status": "NOT_CHECKED_HASH_MISMATCH",
                         "content_integrity": "CONTENT_SHA256_MISMATCH",
                         "expected_content_sha256": expected_content_sha,
                         "actual_content_sha256": actual_content_sha,
@@ -492,7 +496,21 @@ class BinaryTriageOrchestrator:
                 )
             hmac_sig = str((manifest or {}).get("hmac_sha256") or "").lower()
             hmac_key = os.environ.get("BINTRA_PROVENANCE_HMAC_KEY")
-            if hmac_sig and hmac_key:
+            if hmac_key:
+                if not hmac_sig:
+                    return (
+                        {
+                            "status": "PROVENANCE_CONTENT_TAMPERED",
+                            "verified": False,
+                            "hmac_verified": False,
+                            "hmac_status": "HMAC_SIGNATURE_MISSING",
+                            "content_integrity": "HMAC_SIGNATURE_MISSING",
+                            "manifest_source": manifest_source,
+                            "warning": "BINTRA_PROVENANCE_HMAC_KEY is configured, but provenance manifest lacks 'hmac_sha256'. Quarantined.",
+                        },
+                        False,
+                        False,
+                    )
                 msg = f"{manifest_target_sha or gh_sha256}:{actual_content_sha}".encode("utf-8")
                 expected_hmac = hmac.new(hmac_key.encode("utf-8"), msg, hashlib.sha256).hexdigest().lower()
                 if not hmac.compare_digest(hmac_sig, expected_hmac):
@@ -500,12 +518,18 @@ class BinaryTriageOrchestrator:
                         {
                             "status": "PROVENANCE_CONTENT_TAMPERED",
                             "verified": False,
+                            "hmac_verified": False,
+                            "hmac_status": "HMAC_SIGNATURE_MISMATCH",
                             "content_integrity": "HMAC_SIGNATURE_MISMATCH",
                             "warning": "Ghidra provenance HMAC signature verification failed. Quarantined.",
                         },
                         False,
                         False,
                     )
+                hmac_verified = True
+                hmac_status = "VERIFIED"
+            else:
+                hmac_status = "HMAC_PRESENT_UNVERIFIED_NO_KEY" if hmac_sig else "UNSIGNED_NO_TRUST_KEY"
             independent_verified = True
 
         if gh_sha256:
@@ -516,8 +540,12 @@ class BinaryTriageOrchestrator:
                     "matched_sha256": gh_sha256,
                     "program_name": gh_prog_name,
                     "independent_integrity_verified": independent_verified,
+                    "hmac_verified": hmac_verified,
+                    "hmac_status": hmac_status,
                     "content_integrity": (
-                        "VERIFIED_INDEPENDENT_MANIFEST" if independent_verified else "SELF_ASSERTED_TARGET_HASH_ONLY"
+                        "VERIFIED_INDEPENDENT_MANIFEST_HMAC"
+                        if hmac_verified
+                        else ("VERIFIED_INDEPENDENT_MANIFEST" if independent_verified else "SELF_ASSERTED_TARGET_HASH_ONLY")
                     ),
                 }
                 if manifest_source:
@@ -526,6 +554,11 @@ class BinaryTriageOrchestrator:
                     provenance["caveat"] = (
                         "Target SHA-256 matches, but export lacks an independent .provenance.json content digest; "
                         "post-export edits to function records cannot be independently ruled out."
+                    )
+                elif not hmac_verified:
+                    provenance["caveat"] = (
+                        "Content SHA-256 matches sidecar/embedded manifest, but external trust key "
+                        "(BINTRA_PROVENANCE_HMAC_KEY) is not configured/verified; export authenticity is unanchored."
                     )
                 is_cryptographically_proven = True
             else:

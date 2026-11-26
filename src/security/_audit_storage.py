@@ -6,6 +6,7 @@ verification primitives for the Bintra Audit Logger.
 
 import glob
 import hashlib
+import hmac
 import json
 import os
 import tempfile
@@ -13,6 +14,36 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ._audit_lock import AuditIntegrityError
 from ._win32 import streaming_file_sha256
+
+NON_PAYLOAD_FIELDS = frozenset({"prev_hash", "record_hash", "record_hmac"})
+
+
+def get_audit_hmac_key() -> Optional[str]:
+    """Returns optional external HMAC trust key configured via BINTRA_AUDIT_HMAC_KEY."""
+    return os.environ.get("BINTRA_AUDIT_HMAC_KEY") or None
+
+
+def compute_record_hmac(record_hash: str, hmac_key: str) -> str:
+    """Computes keyed HMAC-SHA256 authentication tag over a record hash."""
+    return hmac.new(hmac_key.encode("utf-8"), str(record_hash).encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def verify_record_hmac_if_configured(
+    rec: Dict[str, Any],
+    file_path: str,
+    seq: Any,
+    hmac_key: Optional[str] = None,
+) -> None:
+    """Verifies record external HMAC signature when BINTRA_AUDIT_HMAC_KEY is active."""
+    key = hmac_key if hmac_key is not None else get_audit_hmac_key()
+    if not key:
+        return
+    rec_hmac = str(rec.get("record_hmac") or "").lower()
+    expected = compute_record_hmac(str(rec.get("record_hash") or ""), key).lower()
+    if not rec_hmac or not hmac.compare_digest(rec_hmac, expected):
+        raise AuditIntegrityError(
+            f"Audit log tamper detected in '{file_path}' at sequence {seq}: external HMAC mismatch or missing"
+        )
 
 
 def compute_record_hash(record_payload: Dict[str, Any], prev_hash: str) -> str:
@@ -147,11 +178,12 @@ def verify_segment_file(
                 raise AuditIntegrityError(
                     f"Audit log hash break on disk in '{file_path}' at sequence {expected_seq}: expected {expected_prev}, got {rec.get('prev_hash')}"
                 )
-            payload = {k: v for k, v in rec.items() if k not in ("prev_hash", "record_hash")}
+            payload = {k: v for k, v in rec.items() if k not in NON_PAYLOAD_FIELDS}
             if hash_fn(payload, expected_prev) != rec.get("record_hash"):
                 raise AuditIntegrityError(
                     f"Audit log tamper detected on disk in '{file_path}' at sequence {expected_seq}: hash mismatch"
                 )
+            verify_record_hmac_if_configured(rec, file_path, expected_seq)
             expected_prev = rec.get("record_hash")
             expected_seq += 1
             last_rec = rec
@@ -194,9 +226,10 @@ def read_disk_tail(
         ) from exc
     if not isinstance(rec, dict) or "sequence" not in rec or "prev_hash" not in rec or "record_hash" not in rec:
         raise AuditIntegrityError(f"Audit log tail record in '{target_file}' lacks required hash-chain fields.")
-    payload = {k: v for k, v in rec.items() if k not in ("prev_hash", "record_hash")}
+    payload = {k: v for k, v in rec.items() if k not in NON_PAYLOAD_FIELDS}
     if hash_fn(payload, str(rec["prev_hash"])) != rec.get("record_hash"):
         raise AuditIntegrityError(f"Audit log tail tamper detected in '{target_file}': hash mismatch.")
+    verify_record_hmac_if_configured(rec, target_file, rec.get("sequence"))
     return rec
 
 

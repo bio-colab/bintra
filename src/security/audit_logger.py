@@ -17,16 +17,20 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ._audit_lock import AuditIntegrityError, AuditPersistenceError, _ProcessFileLock
 from ._audit_storage import (
+    NON_PAYLOAD_FIELDS,
     append_record_atomic,
     cache_entry_commitment,
     compute_record_hash,
+    compute_record_hmac,
     file_sha256,
+    get_audit_hmac_key,
     load_sealed_cache,
     parse_sealed_filename_bounds,
     read_disk_tail,
     scan_sealed_segments,
     sealed_cache_path,
     store_sealed_cache,
+    verify_record_hmac_if_configured,
     verify_segment_file,
 )
 from .config import (
@@ -259,8 +263,16 @@ class AuditLogger:
                     str(tail.get("record_hash", "")),
                 )
                 bounds_ok = bounds is None or bounds == (prev_seq, entry["next_seq"] - 1)
+                hmac_key = get_audit_hmac_key()
+                hmac_ok = True
+                if hmac_key:
+                    try:
+                        verify_record_hmac_if_configured(tail, seg_path, tail.get("sequence"), hmac_key=hmac_key)
+                    except AuditIntegrityError:
+                        hmac_ok = False
                 if (
                     bounds_ok
+                    and hmac_ok
                     and tail.get("sequence") == entry["next_seq"] - 1
                     and tail.get("record_hash") == entry.get("head_hash")
                     and entry.get("chain_commitment") == expected_commit
@@ -658,6 +670,9 @@ class AuditLogger:
                 full_record = dict(payload)
                 full_record["prev_hash"] = cls._last_hash
                 full_record["record_hash"] = rec_hash
+                hmac_key = get_audit_hmac_key()
+                if hmac_key:
+                    full_record["record_hmac"] = compute_record_hmac(rec_hash, hmac_key)
 
                 if cls._log_file and not cls._explicitly_cleared and not cls._persist_record(full_record):
                     return cls._build_unpersisted_record(
@@ -737,6 +752,7 @@ class AuditLogger:
                 failed_seq = int(m.group(1))
             return {"is_valid": False, "error": msg, "failed_sequence": failed_seq}
 
+        hmac_key = get_audit_hmac_key()
         return {
             "is_valid": True,
             "records_verified": next_seq,
@@ -745,12 +761,14 @@ class AuditLogger:
             "verification_mode": "full_record_chain" if full_verify else "sealed_digest_cache",
             "bounded_cost": False,
             "archived_bytes_scanned": archived_bytes,
+            "external_trust_anchor": "hmac_sha256_verified" if hmac_key else "absent_hash_chain_only",
         }
 
     @classmethod
     def _verify_memory_journal(cls) -> Dict[str, Any]:
         records = [dict(r) for r in cls._journal]
         expected_prev = "0" * 64
+        hmac_key = get_audit_hmac_key()
         for idx, rec in enumerate(records):
             if rec.get("sequence") != idx:
                 return {
@@ -764,16 +782,30 @@ class AuditLogger:
                     "error": f"Hash chain broken at sequence {idx}: expected prev_hash {expected_prev}, got {rec.get('prev_hash')}",
                     "failed_sequence": idx,
                 }
-            payload = {k: v for k, v in rec.items() if k not in ("prev_hash", "record_hash")}
+            payload = {k: v for k, v in rec.items() if k not in NON_PAYLOAD_FIELDS}
             if cls._compute_hash(payload, expected_prev) != rec.get("record_hash"):
                 return {
                     "is_valid": False,
                     "error": f"Tamper detected at sequence {idx}: payload hash mismatch",
                     "failed_sequence": idx,
                 }
+            if hmac_key:
+                try:
+                    verify_record_hmac_if_configured(rec, "<in-memory>", idx, hmac_key=hmac_key)
+                except AuditIntegrityError as exc:
+                    return {
+                        "is_valid": False,
+                        "error": str(exc),
+                        "failed_sequence": idx,
+                    }
             expected_prev = rec.get("record_hash")
 
-        return {"is_valid": True, "records_verified": len(records), "head_hash": expected_prev}
+        return {
+            "is_valid": True,
+            "records_verified": len(records),
+            "head_hash": expected_prev,
+            "external_trust_anchor": "hmac_sha256_verified" if hmac_key else "absent_hash_chain_only",
+        }
 
     @classmethod
     def verify_audit_chain(cls, log_path: Optional[str] = None, full_verify: bool = True) -> Dict[str, Any]:

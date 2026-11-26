@@ -18,6 +18,13 @@ DEFAULT_PROTOCOL_VERSION = "2024-11-05"
 
 TOOLS_LIST_PAGE_SIZE = 25
 
+# Multi-mode / session-spawning tools whose behavior is not strictly read-only.
+SIDE_EFFECT_CAPABLE_TOOLS = frozenset({
+    "bintra_registry_audit",
+    "bintra_ghidra_live_bridge",
+    "bintra_etw_capture",
+})
+
 TARGET_PATH_ARG_KEYS: Tuple[str, ...] = (
     "file_path",
     "binary_path",
@@ -207,13 +214,13 @@ TOOL_SECURITY_METADATA: Dict[str, Tuple[str, str, Any]] = {
     "bintra_service_audit": ("cap.service.query", "QUERY", None),
     "bintra_dmp_inspect": ("cap.minidump.read", "READ", "dmp_path"),
     "bintra_etw_audit": ("cap.event_log.read", "READ", "session_name"),
-    "bintra_etw_capture": ("cap.event_log.read", "READ", "session_name"),
+    "bintra_etw_capture": ("cap.event_log.read", "EXECUTE", "session_name"),
     "bintra_vad_inspect": ("cap.process.query", "QUERY", "pid"),
     "bintra_memory_scan": ("cap.process.query", "READ", "pid"),
     "bintra_pointer_scan": ("cap.process.query", "READ", "pid"),
     "bintra_struct_dissect": ("cap.process.query", "READ", "pid"),
     "bintra_crash_rca": ("cap.minidump.read", "READ", "dmp_path"),
-    "bintra_ghidra_live_bridge": ("cap.file.read", "READ", None),
+    "bintra_ghidra_live_bridge": ("cap.ghidra.project_mutate", "EXECUTE", None),
     "bintra_evidence_graph": ("cap.file.read", "READ", "binary_path"),
     "bintra_wsp_audit": ("cap.file.read", "READ", "model_path"),
     "bintra_patch_weights": ("cap.workspace.write", "WRITE", "output_path"),

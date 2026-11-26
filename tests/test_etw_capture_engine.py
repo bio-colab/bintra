@@ -116,7 +116,7 @@ class TestEtwCaptureEngine(unittest.TestCase):
         # Check security metadata
         cap, mode, target = server.TOOL_SECURITY_METADATA["bintra_etw_capture"]
         self.assertEqual(cap, "cap.event_log.read")
-        self.assertEqual(mode, "READ")
+        self.assertEqual(mode, "EXECUTE")
 
         # Execute short capture
         res = server.dispatch_tool("bintra_etw_capture", {"duration_seconds": 0.1})

@@ -151,9 +151,21 @@ def main():
         sys.exit(0)
 
     cmd_lower = sys.argv[1].lower()
-    mutation_cmds = {"patch", "patch-binary", "patch-weights"}
+    mutation_cmds = {"patch", "patch-binary", "patch-weights", "ghidra-headless", "etw-capture", "synthesize-weights"}
+    has_write_flag = any(
+        f in sys.argv for f in ("--output", "-o", "--to-sqlite")
+    ) or any(a.startswith(("--output=", "-o=", "--to-sqlite=")) for a in sys.argv)
+    is_bridge_control = cmd_lower == "ghidra-bridge" and any(
+        f in sys.argv
+        for f in ("--start", "--stop", "--daemon", "--annotate-crash", "--annotate-vad", "--annotate-struct", "--annotate-pointers")
+    )
     is_update_write = cmd_lower in ("update", "self-update") and any(f in sys.argv for f in ("--yes", "--confirm"))
-    strict_audit = cmd_lower in mutation_cmds or is_update_write
+    strict_audit = (
+        cmd_lower in mutation_cmds
+        or is_update_write
+        or is_bridge_control
+        or (cmd_lower in ("triage", "triage-binary", "ghidra-analyze", "reg-export") and has_write_flag)
+    )
 
     from security import AuditLogger, AuditPersistenceError
     prev_strict = AuditLogger.get_strict_persistence()

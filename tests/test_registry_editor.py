@@ -185,24 +185,26 @@ class TestRegistryEditor(unittest.TestCase):
 
     def test_export_reg_workspace_write_confinement(self):
         """Verifies that export_key strictly enforces workspace containment when output_path is provided."""
-        from security import ExecutionGuard, TargetScope, SecurityViolationError
+        from security import ExecutionGuard, SecurityViolationError
         from mcp_server import BintraMcpServer
+        import shutil
+        import tempfile
 
         server = BintraMcpServer()
-        import tempfile
         real_ws = tempfile.mkdtemp(prefix="bintra_ws_test_")
-        scope = TargetScope(target_binary_path=None, workspace_dir=real_ws)
-        ExecutionGuard.set_current_scope(scope)
-
-        # 1. Writing outside workspace must be blocked by ExecutionGuard
-        forbidden_path = r"C:\Windows\System32\malicious_overwrite.reg" if os.name == "nt" else "/etc/malicious.reg"
-        with self.assertRaises(SecurityViolationError):
-            server.dispatch_tool("bintra_registry_audit", {
-                "action": "export_reg",
-                "hive": "HKLM",
-                "key": "SOFTWARE\\Test",
-                "output_path": forbidden_path
-            })
+        try:
+            with ExecutionGuard.scoped_session(workspace_dir=real_ws):
+                # 1. Writing outside workspace must be blocked by ExecutionGuard
+                forbidden_path = r"C:\Windows\System32\malicious_overwrite.reg" if os.name == "nt" else "/etc/malicious.reg"
+                with self.assertRaises(SecurityViolationError):
+                    server.dispatch_tool("bintra_registry_audit", {
+                        "action": "export_reg",
+                        "hive": "HKLM",
+                        "key": "SOFTWARE\\Test",
+                        "output_path": forbidden_path
+                    })
+        finally:
+            shutil.rmtree(real_ws, ignore_errors=True)
 
     def test_ghidra_headless_permission_classification(self):
         """Verifies that bintra_ghidra_headless is classified under EXECUTE and cap.ghidra.headless_exec."""

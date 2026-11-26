@@ -586,13 +586,9 @@ class WindowsRegistryEditor:
         full_text = "\n".join(exported_lines)
 
         if output_path:
-            if SafeFileAccess:
-                out_file = SafeFileAccess.write_workspace_file(output_path, full_text)
-            else:
-                out_file = os.path.abspath(output_path)
-                os.makedirs(os.path.dirname(out_file), exist_ok=True)
-                with open(out_file, "w", encoding="utf-8-sig") as f:
-                    f.write(full_text)
+            if not SafeFileAccess:
+                raise RuntimeError("Fail-closed: SafeFileAccess unavailable for registry export file write.")
+            SafeFileAccess.write_workspace_file(output_path, full_text)
 
         return {
             "status": "success",

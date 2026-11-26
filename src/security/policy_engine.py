@@ -32,10 +32,32 @@ _FILESYSTEM_READ_CAPABILITIES: FrozenSet[Capability] = frozenset({
     Capability.MINIDUMP_READ,
 })
 
+_MUTATING_OR_EXEC_CAPABILITIES: FrozenSet[Capability] = frozenset({
+    Capability.WORKSPACE_WRITE,
+    Capability.WORKSPACE_TEMP_CLEAN,
+    Capability.TEMPDIR_MARKER_WRITE,
+    Capability.SUBPROCESS_CATALOG_EXEC,
+    Capability.GHIDRA_HEADLESS_EXEC,
+    Capability.GHIDRA_PROJECT_MUTATE,
+})
+
+_ETW_CAPTURE_OPERATIONS: FrozenSet[str] = frozenset({
+    "bintra_etw_capture",
+    "start_session",
+    "stop_session",
+})
+
+_ETW_CAPTURE_COMPONENTS: FrozenSet[str] = frozenset({
+    "etw_capture_engine",
+    "mcp_server",
+    "cli",
+})
+
 _SUBPROCESS_OPERATIONS: FrozenSet[str] = frozenset({
     "run_subprocess",
     "execute_command",
     "execute_catalog_command",
+    "run_bounded_process",
 })
 
 
@@ -80,12 +102,25 @@ class PolicyEngine:
     """
 
     @classmethod
-    def _evaluate_prerequisites(cls, request: AccessRequest, cap: Capability) -> Optional[AccessDecision]:
+    def _evaluate_prerequisites(cls, request: AccessRequest, mode: str, cap: Capability) -> Optional[AccessDecision]:
         if cap in PROHIBITED_HAZARDS:
             return _deny(
                 f"Hazardous capability '{_cap_label(cap)}' is unconditionally forbidden by Bintra Safety Policy.",
                 cap,
             )
+
+        # Central fail-closed tamper gate: any mutating or execution request is refused
+        # regardless of whether it arrived via MCP, CLI, or direct Python API.
+        if mode in ("WRITE", "MODIFY", "DELETE", "EXECUTE") or cap in _MUTATING_OR_EXEC_CAPABILITIES:
+            from .audit_logger import AuditLogger
+
+            if AuditLogger.is_tamper_detected():
+                tamper_reason = AuditLogger.get_tamper_reason() or "audit hash/sequence integrity compromised"
+                return _deny(
+                    f"AUDIT_TAMPER_DETECTED: Refusing mutating or execution operation '{request.operation}' "
+                    f"while audit integrity is compromised ({tamper_reason}).",
+                    cap,
+                )
 
         if request.operation in _SUBPROCESS_OPERATIONS:
             if request.metadata.get("shell") is True:
@@ -252,7 +287,7 @@ class PolicyEngine:
         cap = request.requested_capability
         mode = request.access_mode.upper()
 
-        prereq_denial = cls._evaluate_prerequisites(request, cap)
+        prereq_denial = cls._evaluate_prerequisites(request, mode, cap)
         if prereq_denial is not None:
             return prereq_denial
 
@@ -268,13 +303,25 @@ class PolicyEngine:
             if read_decision is not None:
                 return read_decision
 
-        if mode == "EXECUTE" and cap == Capability.SUBPROCESS_CATALOG_EXEC and request.metadata.get("is_catalog_command"):
-            return AccessDecision(
-                verdict="ALLOW",
-                reason="Authorized catalog command execution.",
-                capability=cap,
-                side_effects=[],
-            )
+        if mode == "EXECUTE":
+            if cap == Capability.SUBPROCESS_CATALOG_EXEC and request.metadata.get("is_catalog_command"):
+                return AccessDecision(
+                    verdict="ALLOW",
+                    reason="Authorized catalog command execution.",
+                    capability=cap,
+                    side_effects=[],
+                )
+            if (
+                cap == Capability.EVENT_LOG_READ
+                and request.operation in _ETW_CAPTURE_OPERATIONS
+                and request.component in _ETW_CAPTURE_COMPONENTS
+            ):
+                return AccessDecision(
+                    verdict="ALLOW_SCOPED",
+                    reason=f"Authorized live ETW capture session '{request.target}'.",
+                    capability=cap,
+                    side_effects=["etw_trace_session"],
+                )
 
         return _deny(
             f"DEFAULT_DENY: Operation '{request.operation}' with capability '{cap}' and mode '{mode}' is not permitted.",

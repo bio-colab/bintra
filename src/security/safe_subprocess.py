@@ -11,6 +11,7 @@ import os
 import subprocess
 import threading
 import time
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 from .audit_logger import AuditLogger
@@ -37,6 +38,18 @@ class SafeSubprocessBroker:
     STREAM_CHUNK_BYTES = SUBPROCESS_STREAM_CHUNK_BYTES
     DEFAULT_TIMEOUT_SEC = SUBPROCESS_DEFAULT_TIMEOUT_SEC
     CATALOG = SUBPROCESS_CATALOG
+    _auth_local = threading.local()
+
+    @classmethod
+    @contextmanager
+    def _authorized_execution(cls):
+        """Internal scope marking an already ExecutionGuard-verified catalog command."""
+        depth = int(getattr(cls._auth_local, "depth", 0))
+        cls._auth_local.depth = depth + 1
+        try:
+            yield
+        finally:
+            cls._auth_local.depth = max(0, int(getattr(cls._auth_local, "depth", 1)) - 1)
 
     @classmethod
     def _audit_and_reject(cls, target: str, reason: str) -> None:
@@ -136,13 +149,14 @@ class SafeSubprocessBroker:
         if isinstance(effective_timeout, bool) or not isinstance(effective_timeout, (int, float)) or not math.isfinite(effective_timeout) or effective_timeout <= 0:
             raise ValueError(f"Timeout must be a positive number of seconds, got {effective_timeout!r}")
 
-        run_res = cls.run_bounded_process(
-            argv=argv,
-            timeout=effective_timeout,
-            max_stdout_bytes=cls.MAX_OUTPUT_BYTES,
-            max_stderr_bytes=cls.MAX_STDERR_BYTES,
-            terminate_on_limit=True,
-        )
+        with cls._authorized_execution():
+            run_res = cls.run_bounded_process(
+                argv=argv,
+                timeout=effective_timeout,
+                max_stdout_bytes=cls.MAX_OUTPUT_BYTES,
+                max_stderr_bytes=cls.MAX_STDERR_BYTES,
+                terminate_on_limit=True,
+            )
         run_res["command_id"] = command_id
         return run_res
 
@@ -285,7 +299,49 @@ class SafeSubprocessBroker:
         terminate_on_limit: bool = True,
     ) -> Dict[str, Any]:
         """
-        Executes a command vector with shell=False using streaming dual-pipe collection.
+        Gated entry point for bounded subprocess execution.
+        Refuses unmediated arbitrary argv execution unless invoked within an
+        ExecutionGuard-authorized catalog/executor context; unmediated calls are
+        evaluated by PolicyEngine, audited, and rejected fail-closed.
+        """
+        if AuditLogger.is_tamper_detected():
+            reason = AuditLogger.get_tamper_reason() or "audit integrity compromised"
+            raise SecurityViolationError(
+                f"AUDIT_TAMPER_DETECTED: Refusing subprocess execution while audit integrity is compromised ({reason})."
+            )
+
+        if int(getattr(cls._auth_local, "depth", 0)) <= 0:
+            raw_target = str(argv[0]) if isinstance(argv, (list, tuple)) and argv else ""
+            argv_list = list(argv) if isinstance(argv, (list, tuple)) else [str(argv)]
+            ExecutionGuard.request_access(
+                component="safe_subprocess",
+                operation="run_bounded_process",
+                target=raw_target,
+                capability=Capability.SUBPROCESS_CATALOG_EXEC,
+                access_mode="EXECUTE",
+                metadata={"argv": argv_list, "shell": False, "is_catalog_command": False},
+            )
+            raise SecurityViolationError("Unmediated subprocess execution is prohibited by Safety Policy.")
+
+        return cls._spawn_bounded_process(
+            argv=argv,
+            timeout=timeout,
+            max_stdout_bytes=max_stdout_bytes,
+            max_stderr_bytes=max_stderr_bytes,
+            terminate_on_limit=terminate_on_limit,
+        )
+
+    @classmethod
+    def _spawn_bounded_process(
+        cls,
+        argv: List[str],
+        timeout: Optional[float] = None,
+        max_stdout_bytes: Optional[int] = None,
+        max_stderr_bytes: Optional[int] = None,
+        terminate_on_limit: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Executes a verified command vector with shell=False using streaming dual-pipe collection.
         Enforces hard in-flight byte caps on both stdout and stderr, deterministic timeout
         cleanup, and accurate exit-status classification.
         """

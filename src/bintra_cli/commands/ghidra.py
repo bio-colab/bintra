@@ -270,6 +270,16 @@ def cmd_ghidra_bridge(cmd: str) -> None:
 
     if args.daemon:
         import subprocess
+        from security import Capability, ExecutionGuard
+
+        ExecutionGuard.request_access(
+            component="cli",
+            operation="ghidra-bridge-daemon",
+            target=f"127.0.0.1:{args.port}",
+            capability=Capability.GHIDRA_PROJECT_MUTATE,
+            access_mode="EXECUTE",
+            metadata={"port": args.port, "shell": False},
+        )
         daemon_cmd = [
             sys.executable,
             os.path.abspath(sys.argv[0]),

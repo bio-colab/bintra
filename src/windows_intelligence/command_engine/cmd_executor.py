@@ -129,13 +129,14 @@ class CommandExecutor:
         MAX_STDERR_BYTES = 1 * 1024 * 1024  # 1 MB streaming ceiling
         start_time = time.time()
         try:
-            run_res = SafeSubprocessBroker.run_bounded_process(
-                argv=cmd_vector,
-                timeout=spec.timeout_seconds,
-                max_stdout_bytes=MAX_OUTPUT_BYTES,
-                max_stderr_bytes=MAX_STDERR_BYTES,
-                terminate_on_limit=True,
-            )
+            with SafeSubprocessBroker._authorized_execution():
+                run_res = SafeSubprocessBroker.run_bounded_process(
+                    argv=cmd_vector,
+                    timeout=spec.timeout_seconds,
+                    max_stdout_bytes=MAX_OUTPUT_BYTES,
+                    max_stderr_bytes=MAX_STDERR_BYTES,
+                    terminate_on_limit=True,
+                )
             elapsed_ms = round((time.time() - start_time) * 1000, 2)
             sub_status = run_res.get("status", "error")
 

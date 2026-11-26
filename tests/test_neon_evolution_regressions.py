@@ -379,7 +379,7 @@ class TestNeonEvolutionA6AndWorkstreamBSubprocess(unittest.TestCase):
         from security.safe_subprocess import SafeSubprocessBroker
 
         # Emit 500 KB of stdout with a 4096-byte cap
-        res = SafeSubprocessBroker.run_bounded_process(
+        res = SafeSubprocessBroker._spawn_bounded_process(
             [sys.executable, "-c", "import sys; sys.stdout.write('A' * 512000); sys.stdout.flush()"],
             timeout=5.0,
             max_stdout_bytes=4096,
@@ -393,7 +393,7 @@ class TestNeonEvolutionA6AndWorkstreamBSubprocess(unittest.TestCase):
     def test_a6_streaming_stderr_limit_enforced_during_collection(self):
         from security.safe_subprocess import SafeSubprocessBroker
 
-        res = SafeSubprocessBroker.run_bounded_process(
+        res = SafeSubprocessBroker._spawn_bounded_process(
             [sys.executable, "-c", "import sys; sys.stderr.write('E' * 256000); sys.stderr.flush()"],
             timeout=5.0,
             max_stdout_bytes=4096,
@@ -406,7 +406,7 @@ class TestNeonEvolutionA6AndWorkstreamBSubprocess(unittest.TestCase):
     def test_a6_nonzero_exit_never_reports_success_and_preserves_stderr(self):
         from security.safe_subprocess import SafeSubprocessBroker
 
-        res = SafeSubprocessBroker.run_bounded_process(
+        res = SafeSubprocessBroker._spawn_bounded_process(
             [sys.executable, "-c", "import sys; print('partial_out'); print('err_detail', file=sys.stderr); sys.exit(7)"],
             timeout=5.0,
         )
@@ -418,7 +418,7 @@ class TestNeonEvolutionA6AndWorkstreamBSubprocess(unittest.TestCase):
     def test_a6_timeout_kills_child_process_deterministically(self):
         from security.safe_subprocess import SafeSubprocessBroker
 
-        res = SafeSubprocessBroker.run_bounded_process(
+        res = SafeSubprocessBroker._spawn_bounded_process(
             [sys.executable, "-c", "import time; time.sleep(30)"],
             timeout=0.3,
         )

@@ -125,7 +125,25 @@ class GhidraHeadlessRunner:
 
         Raises ``FileNotFoundError`` when no Ghidra installation can be discovered.
         """
-        from security import GhidraProjectGuard
+        from security import Capability, ExecutionGuard, GhidraProjectGuard
+
+        ExecutionGuard.request_access(
+            component=guard_component,
+            operation="ghidra_headless_exec",
+            target=binary_path,
+            capability=Capability.GHIDRA_HEADLESS_EXEC,
+            access_mode="EXECUTE",
+            metadata={"shell": False, "apply": apply, "timeout": timeout_sec},
+        )
+        if apply:
+            ExecutionGuard.request_access(
+                component=guard_component,
+                operation="ghidra_headless_mutate",
+                target=binary_path,
+                capability=Capability.GHIDRA_PROJECT_MUTATE,
+                access_mode="WRITE",
+                metadata={"target": "ghidra_project_database"},
+            )
 
         headless_bin = cls.discover_headless_binary(ghidra_path)
         if not headless_bin or not headless_bin.exists():

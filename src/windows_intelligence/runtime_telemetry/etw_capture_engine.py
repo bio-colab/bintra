@@ -199,7 +199,7 @@ class EtwLiveCaptureSession:
             operation="start_session",
             target=self.session_name,
             capability=Capability.EVENT_LOG_READ,
-            access_mode="READ"
+            access_mode="EXECUTE"
         )
 
         self.start_time = time.time()

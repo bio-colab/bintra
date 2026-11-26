@@ -190,13 +190,12 @@ def _synthesize(args) -> dict:
         offset += len(b)
     hdr_bytes = json.dumps(header, separators=(",", ":")).encode("utf-8")
     hdr_bytes += b" " * ((8 - (len(hdr_bytes) % 8)) % 8)
-    with open(args.output, "wb") as f:
-        f.write(struct.pack("<Q", len(hdr_bytes)))
-        f.write(hdr_bytes)
-        for b in raw_blobs:
-            f.write(b)
+    payload_bytes = b"".join([struct.pack("<Q", len(hdr_bytes)), hdr_bytes, *raw_blobs])
+    from security import SafeFileAccess
+
+    written_path = SafeFileAccess.write_workspace_file(args.output, payload_bytes)
     return {
-        "output_path": args.output,
+        "output_path": written_path,
         "preset": args.preset,
         "synthesized_tensors": list(tensors.keys()),
         "total_parameters": int(sum(a.size for a in tensors.values()))

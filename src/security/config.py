@@ -154,7 +154,7 @@ DEFAULT_COMPONENT_CAPABILITY_NAMES: Dict[str, Tuple[str, ...]] = {
     "registry_reader": ("REGISTRY_READ",),
     "event_collector": ("EVENT_LOG_READ",),
     "etw_capture_engine": ("EVENT_LOG_READ",),
-    "ghidra_live_bridge": ("FILE_READ", "WORKSPACE_WRITE", "TEMPDIR_MARKER_WRITE"),
+    "ghidra_live_bridge": ("FILE_READ", "WORKSPACE_WRITE", "TEMPDIR_MARKER_WRITE", "GHIDRA_PROJECT_MUTATE"),
     "minidump_parser": ("MINIDUMP_READ", "FILE_READ"),
     "crash_rca_engine": ("MINIDUMP_READ", "FILE_READ"),
     "command_executor": ("SUBPROCESS_CATALOG_EXEC",),

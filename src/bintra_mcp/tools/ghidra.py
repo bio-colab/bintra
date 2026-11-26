@@ -148,6 +148,7 @@ class GhidraToolsMixin:
 
     def _tool_ghidra_live_bridge(self, name: str, args: Dict[str, Any]) -> Any:
         """bintra_ghidra_live_bridge"""
+        from security import ExecutionGuard, Capability
         from ghidra_live_bridge import (
             GhidraLiveBridgeClient,
             get_or_create_bridge, get_active_bridge, stop_active_bridge
@@ -166,6 +167,13 @@ class GhidraToolsMixin:
             st["marker_file"] = getattr(server, "_marker_path", None)
             return st
         elif act == "stop":
+            ExecutionGuard.request_access(
+                component="ghidra_live_bridge",
+                operation="stop",
+                target="ghidra_live_bridge",
+                capability=Capability.GHIDRA_PROJECT_MUTATE,
+                access_mode="WRITE",
+            )
             return stop_active_bridge()
         elif act == "status":
             server = get_active_bridge()
@@ -176,43 +184,50 @@ class GhidraToolsMixin:
                 return client.call_rpc("get_status")
             except Exception as e:
                 return {"is_running": False, "error": str(e)}
-        elif act == "inject_crash_rca":
-            dmp = args.get("crash_dmp_path")
-            if not dmp:
-                raise ValueError("'crash_dmp_path' is required for action 'inject_crash_rca'")
-            from windows_intelligence import CrashRootCauseAnalyzer
-            rca = CrashRootCauseAnalyzer.analyze_crash(dmp)
-            return self._dispatch_bridge_action(port, token, "inject_crash_rca", "bintra.inject_crash_rca", rca, {"rca_report": rca})
-        elif act == "inject_vad":
-            pid = int(args.get("pid", 0))
-            if pid <= 0:
-                raise ValueError("Valid 'pid' (> 0) is required for action 'inject_vad'")
-            from windows_intelligence import VirtualMemoryInspector
-            snap = VirtualMemoryInspector.inspect_process(pid).to_dict()
-            return self._dispatch_bridge_action(port, token, "inject_vad_snapshot", "bintra.inject_vad_snapshot", snap, {"vad_snapshot": snap})
-        elif act == "inject_etw":
-            tl = args.get("timeline_report")
-            if not tl:
-                import time
-                from windows_intelligence import EtwLiveCaptureSession, EtwTimelineCorrelator
-                sess = EtwLiveCaptureSession(session_name="QuickProbe")
-                sess.start_session()
-                time.sleep(0.5)
-                sess.stop_session()
-                tl = EtwTimelineCorrelator.correlate_crash_timeline(sess.get_timeline())
-            return self._dispatch_bridge_action(port, token, "inject_etw_timeline", "bintra.inject_etw_timeline", tl, {"timeline_report": tl})
-        elif act == "inject_struct":
-            s_rep = args.get("struct_report")
-            if not s_rep:
+        elif act in ("inject_crash_rca", "inject_vad", "inject_etw", "inject_struct", "inject_pointers"):
+            ExecutionGuard.request_access(
+                component="ghidra_live_bridge",
+                operation=act,
+                target=f"ghidra_live_bridge:{act}",
+                capability=Capability.GHIDRA_PROJECT_MUTATE,
+                access_mode="EXECUTE",
+            )
+            if act == "inject_crash_rca":
+                dmp = args.get("crash_dmp_path")
+                if not dmp:
+                    raise ValueError("'crash_dmp_path' is required for action 'inject_crash_rca'")
+                from windows_intelligence import CrashRootCauseAnalyzer
+                rca = CrashRootCauseAnalyzer.analyze_crash(dmp)
+                return self._dispatch_bridge_action(port, token, "inject_crash_rca", "bintra.inject_crash_rca", rca, {"rca_report": rca})
+            if act == "inject_vad":
                 pid = int(args.get("pid", 0))
-                addr_str = args.get("address")
-                if pid <= 0 or not addr_str:
-                    raise ValueError("'struct_report' or both 'pid' and 'address' are required for 'inject_struct'")
-                base_addr = parse_int_arg(addr_str, "address")
-                from windows_intelligence import StructureDissector
-                s_rep = StructureDissector.dissect(pid, base_addr)
-            return self._dispatch_bridge_action(port, token, "inject_structure_dissection", "bintra.inject_structure_dissection", s_rep, {"struct_report": s_rep})
-        elif act == "inject_pointers":
+                if pid <= 0:
+                    raise ValueError("Valid 'pid' (> 0) is required for action 'inject_vad'")
+                from windows_intelligence import VirtualMemoryInspector
+                snap = VirtualMemoryInspector.inspect_process(pid).to_dict()
+                return self._dispatch_bridge_action(port, token, "inject_vad_snapshot", "bintra.inject_vad_snapshot", snap, {"vad_snapshot": snap})
+            if act == "inject_etw":
+                tl = args.get("timeline_report")
+                if not tl:
+                    import time
+                    from windows_intelligence import EtwLiveCaptureSession, EtwTimelineCorrelator
+                    sess = EtwLiveCaptureSession(session_name="QuickProbe")
+                    sess.start_session()
+                    time.sleep(0.5)
+                    sess.stop_session()
+                    tl = EtwTimelineCorrelator.correlate_crash_timeline(sess.get_timeline())
+                return self._dispatch_bridge_action(port, token, "inject_etw_timeline", "bintra.inject_etw_timeline", tl, {"timeline_report": tl})
+            if act == "inject_struct":
+                s_rep = args.get("struct_report")
+                if not s_rep:
+                    pid = int(args.get("pid", 0))
+                    addr_str = args.get("address")
+                    if pid <= 0 or not addr_str:
+                        raise ValueError("'struct_report' or both 'pid' and 'address' are required for 'inject_struct'")
+                    base_addr = parse_int_arg(addr_str, "address")
+                    from windows_intelligence import StructureDissector
+                    s_rep = StructureDissector.dissect(pid, base_addr)
+                return self._dispatch_bridge_action(port, token, "inject_structure_dissection", "bintra.inject_structure_dissection", s_rep, {"struct_report": s_rep})
             p_rep = args.get("pointer_report")
             if not p_rep:
                 pid = int(args.get("pid", 0))

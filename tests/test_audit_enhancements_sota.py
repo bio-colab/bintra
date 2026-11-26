@@ -370,7 +370,7 @@ class TestSotaAuditEnhancements(unittest.TestCase):
         """Verify that SafeSubprocessBroker records pipe errors instead of swallowing silently."""
         from security.safe_subprocess import SafeSubprocessBroker
 
-        res = SafeSubprocessBroker.run_bounded_process(
+        res = SafeSubprocessBroker._spawn_bounded_process(
             [sys.executable, "-c", "import sys; sys.stdout.write('hello'); sys.exit(0)"],
             timeout=5.0,
         )

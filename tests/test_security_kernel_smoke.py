@@ -399,17 +399,23 @@ class TestSecurityKernelSmoke(_IsolatedSecurityTestBase):
 
         self.assertGreaterEqual(len(AuditLogger.get_denials()), denials_before + 2)
 
-        with self.assertRaises(ValueError):
-            SafeSubprocessBroker.run_bounded_process([sys.executable, "-c", "pass"], timeout=0)
+        # Direct unmediated run_bounded_process call must be refused fail-closed and audited
+        denials_mid = len(AuditLogger.get_denials())
+        with self.assertRaises(SecurityViolationError):
+            SafeSubprocessBroker.run_bounded_process([sys.executable, "-c", "print('bypass')"], timeout=5.0)
+        self.assertGreater(len(AuditLogger.get_denials()), denials_mid)
 
-        proc_ok = SafeSubprocessBroker.run_bounded_process(
+        with self.assertRaises(ValueError):
+            SafeSubprocessBroker._spawn_bounded_process([sys.executable, "-c", "pass"], timeout=0)
+
+        proc_ok = SafeSubprocessBroker._spawn_bounded_process(
             [sys.executable, "-c", "print('smoke_ok')"],
             timeout=5.0,
         )
         self.assertEqual(proc_ok["status"], "success")
         self.assertIn("smoke_ok", proc_ok["stdout"])
 
-        proc_trunc = SafeSubprocessBroker.run_bounded_process(
+        proc_trunc = SafeSubprocessBroker._spawn_bounded_process(
             [sys.executable, "-c", "print('A' * 200)"],
             timeout=5.0,
             max_stdout_bytes=32,

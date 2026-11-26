@@ -258,6 +258,19 @@ def cmd_triage(cmd: str) -> None:
     if not target_file:
         ap.error("Target binary file is required (positional or via -f / --file)")
 
+    if ns.output:
+        from bintra_cli.commands._common import guard_output_path
+
+        guard_output_path(
+            target_file,
+            ns.output,
+            "triage",
+            (
+                "TARGET_WRITE_FORBIDDEN: Triage report --output cannot overwrite the target binary "
+                "or reside inside the target directory. Specify a distinct path in the workspace."
+            ),
+        )
+
     from analysis_orchestrator import BinaryTriageOrchestrator
     res = BinaryTriageOrchestrator.triage_binary(
         file_path=target_file,
@@ -274,9 +287,10 @@ def cmd_triage(cmd: str) -> None:
         out_content = json.dumps(res, indent=2, ensure_ascii=False)
 
     if ns.output:
-        with open(ns.output, "w", encoding="utf-8") as out_f:
-            out_f.write(out_content)
-        print(f"[+] Written report to: {ns.output}")
+        from security import SafeFileAccess
+
+        written_path = SafeFileAccess.write_workspace_file(ns.output, out_content)
+        print(f"[+] Written report to: {written_path}")
     else:
         print(out_content)
 

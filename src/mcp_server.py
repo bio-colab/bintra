@@ -32,7 +32,7 @@ SERVER_VERSION = "1.1.0"
 
 from bintra_mcp.config import (  # noqa: E402,F401  (public re-exports)
     DEFAULT_PROTOCOL_VERSION, LATEST_PROTOCOL_VERSION, MCP_PROMPTS, MCP_RESOURCES,
-    MCP_TOOL_PROFILES, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS,
+    MCP_TOOL_PROFILES, PROTOCOL_VERSION, SIDE_EFFECT_CAPABLE_TOOLS, SUPPORTED_PROTOCOL_VERSIONS,
     TARGET_PATH_ARG_KEYS, TOOL_SECURITY_METADATA, TOOLS_LIST_PAGE_SIZE, WORKFLOW_PLAYBOOKS,
 )
 from bintra_mcp.tool_schemas import TOOLS_REGISTRY  # noqa: E402,F401  (public re-export)
@@ -365,6 +365,7 @@ class BintraMcpServer(
     MCP_RESOURCES = MCP_RESOURCES
     MCP_PROMPTS = MCP_PROMPTS
     TOOL_SECURITY_METADATA = TOOL_SECURITY_METADATA
+    SIDE_EFFECT_CAPABLE_TOOLS = SIDE_EFFECT_CAPABLE_TOOLS
 
     def handle_tools_list(self, params: Dict[str, Any]) -> Dict[str, Any]:
         params = params or {}
@@ -419,11 +420,18 @@ class BintraMcpServer(
         """Derives authoritative MCP Tool Annotations from TOOL_SECURITY_METADATA."""
         sec = cls.TOOL_SECURITY_METADATA.get(tool_name, ("cap.file.read", "READ", None))
         cap_val, mode, _ = sec
-        is_read_only = mode in ("READ", "QUERY") and cap_val not in (
-            "cap.workspace.write", "cap.ghidra.headless_exec", "cap.ghidra.project_mutate", "cap.binary.patch"
+        is_read_only = (
+            mode in ("READ", "QUERY")
+            and tool_name not in cls.SIDE_EFFECT_CAPABLE_TOOLS
+            and cap_val not in (
+                "cap.workspace.write",
+                "cap.ghidra.headless_exec",
+                "cap.ghidra.project_mutate",
+                "cap.binary.patch",
+            )
         )
         is_destructive = not is_read_only and (
-            cap_val in ("cap.workspace.write", "cap.ghidra.project_mutate", "cap.binary.patch")
+            cap_val in ("cap.workspace.write", "cap.binary.patch")
             or any(kw in tool_name for kw in ("patch", "modify", "mutate"))
         )
         return {
@@ -623,8 +631,13 @@ class BintraMcpServer(
             cap_val, mode, target_param = sec_meta
             cap = Capability(cap_val)
 
+            dynamic_action = str(args.get("action", "")).strip().lower() if isinstance(args, dict) else ""
+            is_reg_export = tool_name == "bintra_registry_audit" and dynamic_action == "export_reg"
+            is_bridge_control = tool_name == "bintra_ghidra_live_bridge" and (dynamic_action or "status") != "status"
             is_mutating_or_exec = (
                 mode not in ("READ", "QUERY")
+                or is_reg_export
+                or is_bridge_control
                 or cap_val in (
                     "cap.workspace.write",
                     "cap.binary.patch",
@@ -661,6 +674,16 @@ class BintraMcpServer(
                     access_mode=mode,
                     metadata=req_metadata
                 )
+                if is_reg_export:
+                    reg_out = args.get("output_path") or args.get("reg_path")
+                    if reg_out:
+                        ExecutionGuard.request_access(
+                            component="mcp_server",
+                            operation="export_reg",
+                            target=str(reg_out),
+                            capability=Capability.WORKSPACE_WRITE,
+                            access_mode="WRITE",
+                        )
                 raw_result_data = self.dispatch_tool(tool_name, args)
                 pretty_print = (os.environ.get("BINTRA_PRETTY_PRINT") == "1")
                 baseline_pretty_str = json.dumps(raw_result_data, indent=2, ensure_ascii=False)

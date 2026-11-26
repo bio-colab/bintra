@@ -216,6 +216,14 @@ def cmd_reg_export(cmd: str) -> None:
         capability=Capability.REGISTRY_READ,
         access_mode="READ",
     )
+    if args.output:
+        ExecutionGuard.request_access(
+            component="cli",
+            operation="reg-export-write",
+            target=args.output,
+            capability=Capability.WORKSPACE_WRITE,
+            access_mode="WRITE",
+        )
     from windows_intelligence.registry_intelligence import WindowsRegistryEditor
     res = WindowsRegistryEditor.export_key(
         hive=args.hive,
